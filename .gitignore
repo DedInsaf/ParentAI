@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+.DS_Store
+.idea/
+data/
+*.wav
+parentai.env
+web/vendor/
+*.env
+*.log

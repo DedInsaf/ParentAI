@@ -1,0 +1,42 @@
+[
+  {
+    "text": "Немедленно вернись на свое место!",
+    "file": "phrases/phrase_00.wav"
+  },
+  {
+    "text": "Хватит бездельничать, за уроки!",
+    "file": "phrases/phrase_01.wav"
+  },
+  {
+    "text": "Я жду тебя за столом. Живо!",
+    "file": "phrases/phrase_02.wav"
+  },
+  {
+    "text": "Возвращайся, время не ждёт!",
+    "file": "phrases/phrase_03.wav"
+  },
+  {
+    "text": "Так, кто разрешил вставать?",
+    "file": "phrases/phrase_04.wav"
+  },
+  {
+    "text": "Быстро назад, домашка сама не сделается!",
+    "file": "phrases/phrase_05.wav"
+  },
+  {
+    "text": "Считаю до трёх. Возвращайся!",
+    "file": "phrases/phrase_06.wav"
+  },
+  {
+    "text": "Я всё вижу — быстро за парту!",
+    "file": "phrases/phrase_07.wav"
+  },
+  {
+    "text": "А ну быстро назад за стол!",
+    "file": "phrases/phrase_08.wav"
+  },
+  {
+    "text": "Хватит гулять, садись заниматься!",
+    "file": "phrases/phrase_09.wav"
+  }
+]
