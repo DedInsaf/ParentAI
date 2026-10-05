@@ -42,6 +42,18 @@ class AudioTests(unittest.TestCase):
 
 
 class RuntimeTests(unittest.TestCase):
+    def test_portrait_is_preserved_and_required_for_body_profile(self):
+        import base64
+        photo='data:image/jpeg;base64,'+base64.b64encode(b'\xff\xd8\xfffixture').decode()
+        points=[{'x':.5,'y':.5,'z':0} for _ in range(478)]
+        views=[{'landmarks':points,'photo':photo,'yaw':yaw,'role':role} for yaw,role in [(0,'front'),(.3,'side'),(-.3,'side')]]
+        portrait={'landmarks':points,'photo':photo,'yaw':0,'role':'portrait'}
+        value={'version':4,'views':views,'portrait':portrait}
+        self.r.avatar(value);self.assertEqual(self.r.avatar(),value)
+        with self.assertRaises(ValueError):self.r.avatar({'version':4,'views':views})
+        portrait['role']='side'
+        with self.assertRaises(ValueError):self.r.avatar(value)
+
     def test_front_role_is_preserved_and_ambiguous_roles_rejected(self):
         import base64
         points=[{'x':.5,'y':.5,'z':0} for _ in range(478)]
@@ -57,6 +69,7 @@ class RuntimeTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.r = Runtime(self.temp.name)
+        self.addCleanup(self.r.close)
 
     def test_invalid_reference_does_not_replace_existing(self):
         self.r.reference(wav(speech()))

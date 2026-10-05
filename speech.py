@@ -4,6 +4,7 @@ import json
 import math
 import urllib.error
 import urllib.request
+import urllib.parse
 import wave
 
 import numpy as np
@@ -61,3 +62,29 @@ class SpeechRecognizer:
             raise ValueError('Не удалось связаться со SpeechKit. Повторите позже.') from None
         except (json.JSONDecodeError, AttributeError):
             raise ValueError('SpeechKit вернул некорректный ответ.') from None
+
+
+class SpeechSynthesizer:
+    """Optional low latency standard voice. No parent recording leaves the machine."""
+    def __init__(self,key='',opener=None):
+        self.key=key
+        self.opener=opener or urllib.request.urlopen
+
+    def public_status(self):
+        return {'enabled':bool(self.key),'provider':'Yandex SpeechKit','voice':'alena'}
+
+    def synthesize(self,text,path):
+        if not self.key:raise ValueError('Добавьте YANDEX_TTS_API_KEY для быстрого голоса Яндекса.')
+        body=urllib.parse.urlencode({'text':text,'lang':'ru-RU','voice':'alena','format':'lpcm','sampleRateHertz':'16000'}).encode()
+        if len(body)>15000:raise ValueError('Ответ слишком длинный для SpeechKit.')
+        request=urllib.request.Request('https://tts.api.cloud.yandex.net/speech/v1/tts:synthesize',data=body,
+            headers={'Authorization':f'Api-Key {self.key}','Content-Type':'application/x-www-form-urlencoded'})
+        try:
+            with self.opener(request,timeout=25) as response:pcm=response.read(8_000_001)
+        except urllib.error.HTTPError as exc:
+            if exc.code in (401,403):raise ValueError('Быстрый голос недоступен: нужны yc.ai.speechkitTts.execute и роль ai.speechkit-tts.user.') from None
+            raise ValueError(f'SpeechKit временно недоступен (код {exc.code}).') from None
+        except (urllib.error.URLError,TimeoutError):raise ValueError('Не удалось получить голос SpeechKit.') from None
+        if not pcm or len(pcm)>8_000_000 or len(pcm)%2:raise ValueError('SpeechKit вернул некорректное аудио.')
+        with wave.open(str(path),'wb') as audio:
+            audio.setnchannels(1);audio.setsampwidth(2);audio.setframerate(16000);audio.writeframes(pcm)

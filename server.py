@@ -1,4 +1,4 @@
-"""Loopback-only HTTP bridge. Personal recordings never go to a remote service."""
+"""Loopback-only HTTP bridge. Parent photos and reference recordings stay local; child STT is explicit."""
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import mimetypes
@@ -7,7 +7,7 @@ import secrets
 from urllib.parse import urlsplit, parse_qs
 from runtime import ROOT
 from tutor import Tutor
-from speech import SpeechRecognizer
+from speech import SpeechRecognizer, SpeechSynthesizer
 from dialogue import Dialogues
 import os
 
@@ -19,7 +19,8 @@ class AppServer(ThreadingHTTPServer):
         self.runtime = runtime
         self.tutor = Tutor.from_environment(ROOT)
         self.speech = SpeechRecognizer(os.getenv('YANDEX_SPEECHKIT_API_KEY') or os.getenv('YANDEX_API_KEY'))
-        self.dialogues = Dialogues(runtime, self.tutor)
+        self.fast_voice=SpeechSynthesizer(os.getenv('YANDEX_TTS_API_KEY') or os.getenv('YANDEX_SPEECHKIT_API_KEY') or os.getenv('YANDEX_API_KEY'))
+        self.dialogues = Dialogues(runtime,self.tutor,self.fast_voice)
         self.token = secrets.token_urlsafe(32)
         super().__init__(('127.0.0.1', port), Handler)
         self.origin = f'http://127.0.0.1:{self.server_port}'
@@ -59,9 +60,10 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 key = path.rsplit('/', 1)[1]
                 if path.startswith('/api/dialog-audio/'):
-                    return self.send(200, self.server.dialogues.audio(key).read_bytes(), 'audio/wav')
+                    part=parse_qs(urlsplit(self.path).query).get('chunk',[None])[0]
+                    return self.send(200, self.server.dialogues.audio(key,None if part is None else int(part)).read_bytes(), 'audio/wav')
                 return self.send(200, self.server.dialogues.snapshot(key))
-            except ValueError as exc:
+            except (ValueError,OSError) as exc:
                 return self.send(404, {'error': str(exc)})
         if path in ('/api/status', '/api/avatar'):
             if self.headers.get('X-App-Token') != self.server.token:
@@ -70,7 +72,8 @@ class Handler(BaseHTTPRequestHandler):
                 value = self.server.runtime.avatar()
             else:
                 value = {**self.server.runtime.snapshot(), 'tutor': self.server.tutor.public_status(),
-                         'speech': self.server.speech.public_status()}
+                         'speech': self.server.speech.public_status(),'fast_voice':self.server.fast_voice.public_status()}
+                value['voice_engine']=self.server.runtime.voice_engine.status()
             return self.send(200, value)
         if path == '/api/session':
             if self.headers.get('Sec-Fetch-Site', 'same-origin') not in ('same-origin', 'none'):
@@ -94,7 +97,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(403, {'error': 'Invalid origin or token'})
         try:
             size = int(self.headers.get('Content-Length', '0'))
-            if not 0 <= size <= 7_000_000:
+            if not 0 <= size <= 10_000_000:
                 return self.send(413, {'error': 'Запись слишком большая'})
             self.connection.settimeout(70)
             payload = self.rfile.read(size)
@@ -103,11 +106,20 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(200, self.server.runtime.avatar(json.loads(payload)))
             if path == '/api/speech':
                 return self.send(200, {'text': self.server.speech.recognize(payload)})
+            if path == '/api/voice-warm':
+                runtime=self.server.runtime
+                with runtime.lock:
+                    if runtime.reference_mode=='clone' and runtime.status['reference'] and runtime.status['voice'] not in ('generating','cancelling'):
+                        runtime.voice_engine.warm(runtime.data/'reference.wav')
+                return self.send(202,{'ok':True})
+            if path == '/api/voice-release':
+                self.server.runtime.voice_engine.release()
+                return self.send(200,{'ok':True})
             if path == '/api/dialog':
                 value = json.loads(payload)
                 if not isinstance(value, dict):
                     raise ValueError('Некорректный запрос.')
-                return self.send(202, self.server.dialogues.start(value.get('question'), value.get('level'), value.get('session')))
+                return self.send(202, self.server.dialogues.start(value.get('question'), value.get('level'), value.get('session'),value.get('voice','parent')))
             if path == '/api/dialog-cancel':
                 value = json.loads(payload)
                 if not isinstance(value, dict) or not isinstance(value.get('id'), str):

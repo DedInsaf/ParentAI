@@ -60,20 +60,20 @@ export function neckGeometry(head) {
   return {positions,indices};
 }
 
-export function hairGeometry(head, style='short') {
-  if(style==='none') return {positions:[],indices:[]};
-  const {cx,cy,width,height,edgeZ,depth}=head, positions=[],indices=[];
-  const rows=16,columns=48;
-  // Scalp shape plus tapered directional locks. Hairline is higher at the front.
-  for(let r=0;r<=rows;r++) for(let j=0;j<=columns;j++) {
-    const a=j/columns*Math.PI*2, front=(1+Math.sin(a))/2;
-    const phi=(r/rows)*(.78+(.70*(1-front)));
-    const lock=Math.sin(j*2.7+r*.42)*.009*width*(r/rows);
-    const length=style==='medium' ? .055*height*(1-front)*r/rows : 0;
-    positions.push(cx+Math.cos(a)*Math.sin(phi)*(width*.56+lock),
-      cy+height*.60*Math.cos(phi)-length,
-      edgeZ-depth*.48+Math.sin(a)*Math.sin(phi)*(depth*.74+lock));
-    if(r && j) {const b=(r-1)*(columns+1)+j-1,c=b+1,d=r*(columns+1)+j-1,e=d+1;indices.push(b,d,c,c,d,e);}
+export function hairGeometry(head,style='short') {
+  if(style==='none')return {positions:[],indices:[]};
+  const {cx,cy,width,height,edgeZ,depth}=head,positions=[],indices=[];
+  // Fit the scalp to the same skull rings. An independent ellipsoid intersected
+  // the temples and left large exposed triangular patches during head turns.
+  const contour=[28,29,30,31,32,33,34,35,0,1,2,3,4,5,6,7,8],columns=contour.length;
+  for(let ring=0;ring<=8;ring++)for(let j=0;j<columns;j++){
+    const offset=(ring*OVAL.length+contour[j])*3,t=ring/8;
+    const x=head.positions[offset],y=head.positions[offset+1],z=head.positions[offset+2];
+    const lock=Math.sin(j*2.7+ring*.7)*width*.002*t;
+    const length=style==='medium'?height*.15*t*(1-Math.max(0,(y-cy)/height)*1.5):0;
+    positions.push(cx+(x-cx)*1.025,y+height*.018*(1-.7*t)-length,
+      z+width*.012*(1-t)-width*.012*t+lock);
+    if(ring&&j){const a=(ring-1)*columns+j-1,b=a+1,c=ring*columns+j-1,d=c+1;indices.push(a,c,b,b,c,d);}
   }
   return {positions,indices};
 }
@@ -81,4 +81,23 @@ export function hairGeometry(head, style='short') {
 export function blinkAmount(seconds) {
   const phase=seconds%4.7;
   return phase<.18 ? Math.sin(Math.PI*phase/.18) : 0;
+}
+
+export function torsoGeometry(head){
+  const {cx,cy,width,height,edgeZ}=head,positions=[],indices=[];
+  const profiles=[[.21,.74,.15],[.64,.85,.20],[1.07,1,.25],[1.12,1.2,.27],[1.06,1.56,.27]];
+  const rows=32,segments=48;
+  for(let row=0;row<=rows;row++){
+    const v=row/rows*(profiles.length-1),i=Math.min(profiles.length-2,Math.floor(v));
+    const t=v-i,e=t*t*(3-2*t);
+    const [rx,drop,rz]=profiles[i].map((x,k)=>x*(1-e)+profiles[i+1][k]*e);
+    for(let j=0;j<segments;j++){
+      const a=j/segments*Math.PI*2;
+      positions.push(cx+width*rx*Math.cos(a),cy-height*drop,edgeZ-width*.33+width*rz*Math.sin(a));
+      if(row){const b=(row-1)*segments+j,c=(row-1)*segments+(j+1)%segments,d=row*segments+j,f=row*segments+(j+1)%segments;indices.push(b,d,c,c,d,f);}
+    }
+  }
+  const center=positions.length/3;positions.push(cx,cy-height*1.56,edgeZ-width*.33);
+  for(let j=0;j<segments;j++)indices.push(rows*segments+j,center,rows*segments+(j+1)%segments);
+  return {positions,indices};
 }

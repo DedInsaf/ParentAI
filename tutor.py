@@ -22,7 +22,7 @@ def load_local_env(path):
             continue
         key, value = line.split('=', 1)
         key, value = key.strip(), value.strip().strip('"').strip("'")
-        if key in {'YANDEX_API_KEY', 'YANDEX_FOLDER_ID', 'PARENTAI_TUTOR_MODEL', 'YANDEX_SPEECHKIT_API_KEY'}:
+        if key in {'YANDEX_API_KEY', 'YANDEX_FOLDER_ID', 'PARENTAI_TUTOR_MODEL', 'YANDEX_SPEECHKIT_API_KEY', 'YANDEX_TTS_API_KEY', 'PARENTAI_VOICE_DEVICE'}:
             os.environ.setdefault(key, value)
 
 
@@ -66,7 +66,7 @@ class Tutor:
             'Не выдавай себя за настоящего родителя. Не проси личные данные. '
             'Если не уверен в факте, прямо скажи об этом. Ответ — не более 1200 знаков.'
             f' Сейчас этап {min(attempt + 1, 4)}. '
-            + ('Дай только одну маленькую подсказку и один наводящий вопрос. Не сообщай итоговый ответ, '
+            + ('Дай только одну маленькую подсказку и один наводящий вопрос, всего до 300 знаков. Не сообщай итоговый ответ, '
                'даже если ребёнок просит его. При повторной просьбе предложи другую подсказку. '
                if attempt < 3 else 'После трёх подсказок можно объяснить полное решение по шагам. ')
             + 'Если ребёнок предлагает решение, проверь его: при правильном ответе похвали за конкретный шаг; '
@@ -87,7 +87,7 @@ class Tutor:
 
         body = json.dumps({
             'modelUri': f'gpt://{self.folder_id}/{self.model}',
-            'completionOptions': {'stream': False, 'temperature': 0.35, 'maxTokens': '450'},
+            'completionOptions': {'stream': False, 'temperature': 0.35, 'maxTokens': '180' if attempt<3 else '450'},
             'messages': messages,
         }, ensure_ascii=False).encode('utf-8')
         request = urllib.request.Request(ENDPOINT, data=body, method='POST', headers={

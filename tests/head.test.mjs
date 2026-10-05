@@ -18,3 +18,15 @@ test('skull matches every face seam vertex and extends behind the face',()=>{
   assert.ok(blinkAmount(.09)>.99);
   assert.equal(blinkAmount(1),0);
 });
+
+test('shirt shoulders extend beyond the head and connect at the neck',async()=>{
+  const {torsoGeometry,neckGeometry}=await import('../web/head-geometry.mjs');
+  const head={cx:0,cy:0,width:1,height:1.4,edgeZ:0};
+  const torso=torsoGeometry(head),neck=neckGeometry(head);
+  assert.ok(torso.positions.every(Number.isFinite));
+  assert.ok(Math.max(...torso.positions.filter((_,i)=>i%3===0))>1);
+  const torsoTop=Math.max(...torso.positions.filter((_,i)=>i%3===1));
+  const neckBottom=Math.min(...neck.positions.filter((_,i)=>i%3===1));
+  assert.ok(torsoTop>neckBottom); // overlap prevents a visible gap
+  assert.ok(torso.indices.every(i=>i>=0&&i<torso.positions.length/3));
+});

@@ -33,7 +33,7 @@ class TutorTests(unittest.TestCase):
         self.assertEqual(seen['url'], ENDPOINT)
         self.assertEqual(seen['auth'], 'Api-Key secret-value')
         self.assertEqual(seen['body']['modelUri'], 'gpt://folder-id/yandexgpt-5-lite')
-        self.assertEqual(seen['body']['completionOptions']['maxTokens'], '450')
+        self.assertEqual(seen['body']['completionOptions']['maxTokens'], '180')
         self.assertEqual(seen['timeout'], 55)
 
     def test_rejects_injected_role_and_long_context(self):

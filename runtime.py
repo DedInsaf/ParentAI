@@ -36,6 +36,8 @@ class Runtime:
         self.process = None
         self.worker = None
         self.reply_busy = False
+        from voice_engine import VoiceEngine
+        self.voice_engine=VoiceEngine()
         self.reference_mode = 'clone'
         self.status = {'tts': 'Не загружена', 'assets': 'Ожидание загрузки', 'voice': 'idle',
                        'progress': '', 'error': '', 'reference': False}
@@ -71,6 +73,8 @@ class Runtime:
             self.status.update(values)
 
     def start(self):
+        if self.reference_mode=="clone" and self.status["reference"]:
+            self.voice_engine.warm(self.data/"reference.wav")
         threading.Thread(target=self.start_assets, daemon=True).start()
 
     def start_assets(self):
@@ -98,6 +102,11 @@ class Runtime:
                 views = [{'landmarks': value.get('landmarks'), 'photo': value.get('photo'), 'yaw': 0}]
             if not isinstance(views, list) or len(views) not in (1, 3):
                 raise ValueError('Нужно сохранить один или три ракурса головы')
+            portrait=value.get('portrait')
+            if value.get('version')==4:
+                if not isinstance(portrait,dict) or len(views)!=3:
+                    raise ValueError('Для модели с плечами нужен дополнительный снимок по грудь.')
+                views=views+[portrait]
             saved_views, total = [], 0
             for view in views:
                 if not isinstance(view, dict):
@@ -120,17 +129,21 @@ class Runtime:
                 if not isinstance(yaw, (float, int)) or not math.isfinite(yaw) or abs(yaw) > 2:
                     raise ValueError('Некорректный угол головы')
                 saved_view={'landmarks': points, 'photo': photo, 'yaw': yaw}
-                if value.get('version') == 3:
-                    if view.get('role') not in ('front','side'):
+                if value.get('version') in (3,4):
+                    if view.get('role') not in (('front','side','portrait') if value.get('version')==4 else ('front','side')):
                         raise ValueError('Не указан тип ракурса.')
                     saved_view['role']=view['role']
                 saved_views.append(saved_view)
-            if total > 6_000_000:
+            if total > (8_000_000 if value.get('version')==4 else 6_000_000):
                 raise ValueError('Фотографии головы слишком большие')
-            if value.get('version') == 3 and sum(v['role']=='front' for v in saved_views)!=1:
+            if value.get('version') in (3,4) and sum(v['role']=='front' for v in saved_views)!=1:
                 raise ValueError('Нужен ровно один фронтальный снимок.')
             saved = ({'landmarks': saved_views[0]['landmarks'], 'photo': saved_views[0]['photo']}
-                     if legacy else {'version': 3 if value.get('version')==3 else 2, 'views': saved_views})
+                     if legacy else {'version': 3 if value.get('version') in (3,4) else 2, 'views': saved_views[:3]})
+            if value.get('version')==4:
+                if [v['role'] for v in saved_views]!=['front','side','side','portrait']:
+                    raise ValueError('Некорректная последовательность снимков.')
+                saved.update(version=4,portrait=saved_views[3])
             atomic_json(path, saved)
             return {'ok': True}
 
@@ -171,36 +184,14 @@ class Runtime:
     def _synthesize(self, bank):
         if self.cancel.is_set() or self.stop.is_set():
             raise InterruptedError('Создание голоса отменено')
-        self.set(tts='Создание голоса · модель работает временно', progress='Загружаю модель голоса…')
-        with (bank / 'worker.log').open('wb') as log:
-            process = subprocess.Popen([sys.executable, str(ROOT / 'voice_worker.py'),
-                                        str(self.data / 'reference.wav'), str(bank)],
-                                       cwd=ROOT, stdout=log, stderr=log)
-            self.process = process
-            deadline = time.monotonic() + 600
-            try:
-                while process.poll() is None:
-                    if self.cancel.wait(.2) or self.stop.is_set():
-                        raise InterruptedError('Создание голоса отменено')
-                    if time.monotonic() >= deadline:
-                        raise RuntimeError('Создание голоса заняло больше 10 минут. Попробуйте режим «Моя запись».')
-                    try:
-                        self.set(progress=json.loads((bank / 'progress.json').read_text())['progress'])
-                    except (OSError, ValueError, KeyError):
-                        pass
-                if process.returncode:
-                    error = bank / 'error.txt'
-                    raise RuntimeError(error.read_text()[:600] if error.exists() else 'Модель не смогла создать голос. Попробуйте режим «Моя запись».')
-            finally:
-                if process.poll() is None:
-                    process.terminate()
-                    try:
-                        process.wait(timeout=3)
-                    except subprocess.TimeoutExpired:
-                        process.kill()
-                        process.wait(timeout=3)
-                self.process = None
-                self.set(tts='Не загружена · память модели освобождена')
+        self.set(tts='Модель прогревается для быстрых ответов',progress='Загружаю модель голоса…')
+        for i,text in enumerate(PHRASES):
+            self.set(progress=f'Создаю фразу {i+1} из {len(PHRASES)}')
+            folder=bank/f'part-{i}';folder.mkdir()
+            self.voice_engine.synthesize(self.data/'reference.wav',folder,text,self.cancel)
+            shutil.copyfile(folder/'phrase-0.wav',bank/f'phrase-{i}.wav')
+            shutil.rmtree(folder)
+        self.set(tts='Голос прогрет · память освобождается после занятия или 5 минут простоя')
 
     def _generate(self):
         bank = self.data / ('bank-' + uuid.uuid4().hex)
@@ -236,3 +227,4 @@ class Runtime:
         self.cancel_generation()
         if self.worker:
             self.worker.join(timeout=8)
+        self.voice_engine.close()

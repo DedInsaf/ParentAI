@@ -57,6 +57,17 @@ export function neutralFacePositions(lm, width, height, scale=4.2) {
   return positions;
 }
 
+export function portraitQuality(lm,width,height){
+  if(!lm || lm.length<468)return 'В кадре должен быть один человек';
+  const eyeWidth=Math.abs(lm[263].x-lm[33].x);
+  if(eyeWidth<.06)return 'Подойдите немного ближе';
+  if(Math.abs(faceYaw(lm))>.075 || Math.abs(lm[263].z-lm[33].z)/eyeWidth>.12)return 'Посмотрите прямо в объектив';
+  const faceHeight=Math.abs(lm[152].y-lm[10].y);
+  if(lm[152].y+faceHeight*1.1>.95)return 'Отодвиньте камеру: должны быть видны плечи и верх футболки';
+  if(lm[10].y<.03 || Math.abs(lm[263].y-lm[33].y)*height/width/eyeWidth>.08)return 'Держите голову ровно и полностью в кадре';
+  return '';
+}
+
 export class Presence {
   constructor() { this.reset(); }
   reset() { this.state = 'present'; this.since = 0; this.lastReminder = -Infinity; }

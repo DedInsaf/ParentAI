@@ -96,3 +96,11 @@ test('mouth can be left open for a separate dark cavity',()=>{
   const filled=closeFaceOpenings(points,[0,1,2],false);
   assert.equal(filled.indices.length,3+(FACE_OPENINGS[0].length+FACE_OPENINGS[1].length)*3);
 });
+import {portraitQuality} from '../web/core.mjs';
+test('body portrait requires space below the chin and keeps a strict front pose',()=>{
+  const lm=Array.from({length:478},()=>({x:.5,y:.4,z:0}));
+  lm[33]={x:.44,y:.3,z:0};lm[263]={x:.56,y:.3,z:0};lm[10].y=.2;lm[152].y=.5;
+  assert.equal(portraitQuality(lm,960,720),'');
+  lm[152].y=.7;assert.match(portraitQuality(lm,960,720),/плечи/);
+  lm[152].y=.5;lm[1].x=.54;assert.match(portraitQuality(lm,960,720),/прямо/);
+});
