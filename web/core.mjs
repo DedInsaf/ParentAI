@@ -30,9 +30,31 @@ export function scanQuality(lm, width, height) {
   const roll = Math.abs(lm[263].y - lm[33].y) * height / width / eyeWidth;
   const yaw = Math.abs(lm[1].x - (lm[33].x + lm[263].x) / 2) / eyeWidth;
   const depthYaw = Math.abs(lm[33].z - lm[263].z) / eyeWidth;
-  if (roll > .14 || yaw > .18 || depthYaw > .28) return 'Смотрите прямо, держите голову ровно';
+  if (roll > .08 || yaw > .075 || depthYaw > .12) return 'Посмотрите прямо в объектив';
+  if(lm[152].y + Math.abs(lm[152].y-lm[10].y)*.33 > .96) return 'Отодвиньте камеру немного дальше, чтобы было видно шею';
   if (Math.abs(lm[14].y - lm[13].y) / Math.abs(lm[152].y - lm[10].y) > .035) return 'Мягко сомкните губы';
   return '';
+}
+
+// Remove the camera pose from geometry while keeping original image UVs.
+// Eye line defines yaw/roll; this is a rigid rotation, not a mirrored face.
+export function neutralFacePositions(lm, width, height, scale=4.2) {
+  const positions=positionsFor(lm,width,height,scale);
+  const left=33*3,right=263*3;
+  const dx=positions[right]-positions[left], dz=positions[right+2]-positions[left+2];
+  const yaw=Math.atan2(dz,dx), c=Math.cos(yaw),s=Math.sin(yaw);
+  const eyeX=(positions[left]+positions[right])/2,eyeZ=(positions[left+2]+positions[right+2])/2;
+  for(let i=0;i<positions.length;i+=3) {
+    const x=positions[i]-eyeX,z=positions[i+2]-eyeZ;
+    positions[i]=c*x+s*z+eyeX; positions[i+2]=-s*x+c*z+eyeZ;
+  }
+  const roll=Math.atan2(positions[right+1]-positions[left+1],positions[right]-positions[left]);
+  const cr=Math.cos(roll),sr=Math.sin(roll),eyeY=(positions[left+1]+positions[right+1])/2;
+  for(let i=0;i<positions.length;i+=3) {
+    const x=positions[i]-eyeX,y=positions[i+1]-eyeY;
+    positions[i]=cr*x+sr*y+eyeX;positions[i+1]=-sr*x+cr*y+eyeY;
+  }
+  return positions;
 }
 
 export class Presence {

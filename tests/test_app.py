@@ -42,6 +42,17 @@ class AudioTests(unittest.TestCase):
 
 
 class RuntimeTests(unittest.TestCase):
+    def test_front_role_is_preserved_and_ambiguous_roles_rejected(self):
+        import base64
+        points=[{'x':.5,'y':.5,'z':0} for _ in range(478)]
+        photo='data:image/png;base64,'+base64.b64encode(b'\x89PNG\r\n\x1a\nfixture').decode()
+        views=[{'landmarks':points,'photo':photo,'yaw':yaw,'role':role} for yaw,role in [(0,'front'),(.3,'side'),(-.3,'side')]]
+        self.r.avatar({'version':3,'views':views})
+        self.assertEqual(self.r.avatar()['version'],3)
+        self.assertEqual(self.r.avatar()['views'][0]['role'],'front')
+        views[1]['role']='front'
+        with self.assertRaises(ValueError): self.r.avatar({'version':3,'views':views})
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)

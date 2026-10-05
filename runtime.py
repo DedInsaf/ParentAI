@@ -119,11 +119,18 @@ class Runtime:
                 yaw = view.get('yaw', 0)
                 if not isinstance(yaw, (float, int)) or not math.isfinite(yaw) or abs(yaw) > 2:
                     raise ValueError('Некорректный угол головы')
-                saved_views.append({'landmarks': points, 'photo': photo, 'yaw': yaw})
+                saved_view={'landmarks': points, 'photo': photo, 'yaw': yaw}
+                if value.get('version') == 3:
+                    if view.get('role') not in ('front','side'):
+                        raise ValueError('Не указан тип ракурса.')
+                    saved_view['role']=view['role']
+                saved_views.append(saved_view)
             if total > 6_000_000:
                 raise ValueError('Фотографии головы слишком большие')
+            if value.get('version') == 3 and sum(v['role']=='front' for v in saved_views)!=1:
+                raise ValueError('Нужен ровно один фронтальный снимок.')
             saved = ({'landmarks': saved_views[0]['landmarks'], 'photo': saved_views[0]['photo']}
-                     if legacy else {'version': 2, 'views': saved_views})
+                     if legacy else {'version': 3 if value.get('version')==3 else 2, 'views': saved_views})
             atomic_json(path, saved)
             return {'ok': True}
 

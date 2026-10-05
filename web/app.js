@@ -1,4 +1,4 @@
-import {positionsFor, scanQuality, scanCoverage, faceYaw, Presence, encodeWav, withTimeout, closeFaceOpenings, FACE_OPENINGS, mouthRig, speechOpening} from './core.mjs';
+import {neutralFacePositions, scanQuality, scanCoverage, faceYaw, Presence, encodeWav, withTimeout, closeFaceOpenings, FACE_OPENINGS, mouthRig, speechOpening} from './core.mjs';
 import {skullGeometry, earGeometry, neckGeometry, hairGeometry, OVAL, blinkAmount} from './head-geometry.mjs';
 const $ = id => document.getElementById(id);
 const video = $('camera');
@@ -18,6 +18,7 @@ let lessonStarted = 0, lessonElapsed = 0, tutorBusy = false, tutorAbort, tutorHi
 let avatarViews=[], avatarTopology, activeCues=[], audioStarted=0, dialogId=null, helpEpoch=0;
 let questionRecording=false, questionStop=false, questionCancel=false, questionAbort, questionStream;
 let currentJob=null, lipShape=0, lipPucker=0;
+let previewYaw=0,showWireframe=false,scanSpeechAt=0,scanSpeechText='',scanEpoch=0;
 const voiceBusy = () => ['generating', 'cancelling'].includes(status.voice);
 const stopTracks = value => value?.getTracks().forEach(t => t.stop());
 function mediaError(e) {
@@ -47,6 +48,10 @@ async function api(path, body, retry = true, timeout = 15000) {
 function controls() {
   const transition = pendingActions.has('startBtn') || pendingActions.has('pauseBtn');
   $('scanBtn').disabled = !online || transition || !stream || scanning || running || recording || connecting;
+  $('nextVoiceBtn').disabled=!mesh || scanning;
+  $('nextReadyBtn').disabled=!(status.phrases?.length) || recording || voiceBusy();
+  for(const id of ['viewFrontBtn','viewSideBtn','viewMeshBtn']) $(id).disabled=!mesh || scanning;
+  for(const button of document.querySelectorAll('[data-setup-step]')) button.disabled=scanning || recording || running;
   $('cameraBtn').disabled = !online || transition || connecting || scanning || running || recording;
   $('recordBtn').disabled = !online || transition || recording || scanning || running || voiceBusy();
   $('voiceMode').disabled = recording || running || voiceBusy();
@@ -113,8 +118,9 @@ function initScene() {
   renderer = new THREE.WebGLRenderer({antialias: true, alpha: true});
   renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
   renderer.outputColorSpace = THREE.SRGBColorSpace;
-  scene.add(new THREE.HemisphereLight(0xffffff, 0x304050, 1.15));
-  const light = new THREE.DirectionalLight(0xffffff, 1.35); light.position.set(2, 3, 4); scene.add(light);
+  scene.add(new THREE.AmbientLight(0xffffff, 1.7));
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x66717b, .45));
+  const light = new THREE.DirectionalLight(0xffffff, .65); light.position.set(2, 3, 4); scene.add(light);
   $('scene').appendChild(renderer.domElement);
   new ResizeObserver(() => fit()).observe($('scene'));
 }
@@ -174,13 +180,21 @@ function detectVideo(now) {
 }
 
 async function scan() {
+  const epoch=++scanEpoch;
   scanning = true; $('scanProgress').value = 0; controls(); clearError();
+  const scanPanel=document.querySelector('.setup');
+  scanPanel.classList.add('scanning-screen');scanPanel.setAttribute('role','dialog');scanPanel.setAttribute('aria-modal','true');scanPanel.setAttribute('aria-label','Сканирование лица и шеи');
+  $('cancelScanBtn').focus({preventScroll:true});
   try {
+    await context().resume();
     await dependencies(); await enableCamera();
     const takePose = async (phase, instruction, validate) => {
+      const phaseStarted=performance.now();
+      scanInstruction(instruction,true);
+      $('scanPhase').textContent=['1 из 3 · лицо прямо','2 из 3 · поворот','3 из 3 · другой поворот'][phase];
       let stableStart = 0, previous, frameTime = -1;
-      const deadline = performance.now() + 25000;
-      while (scanning && performance.now() < deadline) {
+      const deadline = performance.now() + 45000;
+      while (scanning && epoch===scanEpoch && performance.now() < deadline) {
         await sleep(90);
         const now = performance.now();
         if (video.readyState < 2 || frameTime === video.currentTime) continue;
@@ -191,32 +205,41 @@ async function scan() {
         previous = lm?.[1];
         if (issue || movement > .018) {
           stableStart = 0; $('scanProgress').value = phase / 3;
-          $('cameraHint').textContent = issue || 'Замрите на секунду'; continue;
+          scanInstruction(issue || 'Не двигайтесь, сейчас сделаем снимок'); $('scanCountdown').textContent=''; continue;
         }
         if (!stableStart) stableStart = now;
-        $('cameraHint').textContent = `${instruction} · держите положение`;
-        $('scanProgress').value = Math.min((phase + 1) / 3, (phase + (now - stableStart) / 900) / 3);
-        if (now - stableStart >= 900) {
+        $('cameraHint').textContent = 'Отлично. Не двигайтесь';
+        $('scanCountdown').textContent=String(Math.max(1,2-Math.floor((now-stableStart)/1000)));
+        $('scanProgress').value = Math.min((phase + 1) / 3, (phase + (now - stableStart) / 1800) / 3);
+        if (now - stableStart >= 1800) {
+          if(now-phaseStarted<3500 || ($('scanAudio').checked && window.speechSynthesis?.speaking && now-phaseStarted<12000)) continue;
+          // Freeze pixels and run the detector on that exact image. VIDEO inference
+          // can otherwise describe a different frame while the head is turning.
           const canvas = document.createElement('canvas');
           canvas.width = Math.min(720, video.videoWidth);
           canvas.height = Math.round(video.videoHeight * canvas.width / video.videoWidth);
           canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
-          return {landmarks: lm, canvas, photo: canvas.toDataURL('image/jpeg', .88), yaw: faceYaw(lm)};
+          lastMediaTimestamp=Math.max(performance.now(),lastMediaTimestamp+.01);
+          const imageResult=detector.detectForVideo(canvas,lastMediaTimestamp);
+          const frozen=imageResult.faceLandmarks?.[0];
+          if(imageResult.faceLandmarks?.length!==1 || validate(frozen)) {stableStart=0;continue;}
+          scanTone();
+          return {landmarks: frozen, canvas, photo: canvas.toDataURL('image/jpeg', .92), yaw: faceYaw(frozen),role:phase===0?'front':'side'};
         }
       }
       if (!scanning) return null;
       throw new Error('Не удалось снять этот ракурс. Поверните голову медленнее и оставьте уши в кадре.');
     };
-    const front = await takePose(0, 'Снято спереди', lm => scanQuality(lm, video.videoWidth, video.videoHeight));
+    const front = await takePose(0, 'Посмотрите прямо в объектив. Держите голову ровно', lm => scanQuality(lm, video.videoWidth, video.videoHeight));
     if (!front) return;
     $('cameraHint').textContent = 'Теперь медленно поверните голову в любую сторону';
-    const side = await takePose(1, 'Первый боковой ракурс снят', lm => {
+    const side = await takePose(1, 'Первый снимок готов. Медленно поверните голову в любую сторону', lm => {
       const issue = scanCoverage(lm, video.videoWidth, video.videoHeight), yaw = Math.abs(faceYaw(lm));
       return issue || (yaw < .20 ? 'Поверните голову сильнее, чтобы было видно ухо' : yaw > .62 ? 'Немного повернитесь обратно' : '');
     });
     if (!side) return;
     $('cameraHint').textContent = 'Отлично. Теперь поверните голову в другую сторону';
-    const other = await takePose(2, 'Все три ракурса сняты', lm => {
+    const other = await takePose(2, 'Второй снимок готов. Теперь поверните голову в другую сторону', lm => {
       const issue = scanCoverage(lm, video.videoWidth, video.videoHeight), yaw = faceYaw(lm);
       return issue || (Math.abs(yaw) < .20 || yaw * side.yaw > -.04 ? 'Поверните голову в противоположную сторону' : Math.abs(yaw) > .62 ? 'Немного повернитесь обратно' : '');
     });
@@ -224,10 +247,29 @@ async function scan() {
     const views = [front, side, other];
     buildMesh(front.landmarks, front.canvas, (await dependencies()).FaceLandmarker.FACE_LANDMARKS_TESSELATION, views);
     $('faceStatus').textContent = 'Объёмная маска готова';
-    await api('avatar', JSON.stringify({version: 2, views: views.map(({landmarks, photo, yaw}) => ({landmarks, photo, yaw}))}));
+    await api('avatar', JSON.stringify({version: 3, views: views.map(({landmarks, photo, yaw,role}) => ({landmarks, photo, yaw,role}))}));
     $('faceStatus').textContent = '3D-голова сохранена';
-    $('cameraHint').textContent = 'Готово: лицо, боковые ракурсы, уши и объём головы сохранены.';
-  } finally { scanning = false; lastFrame = -1; controls(); }
+    scanInstruction('Сканирование закончено. Посмотрите на модель спереди и сбоку',true);
+    $('scanPhase').textContent='Готово · 3 снимка';previewYaw=0;
+  } finally { scanning = false; lastFrame = -1; $('scanCountdown').textContent='';scanPanel.classList.remove('scanning-screen');scanPanel.removeAttribute('role');scanPanel.removeAttribute('aria-modal');scanPanel.removeAttribute('aria-label');controls();$('scanBtn').focus({preventScroll:true}); }
+}
+function scanInstruction(text,force=false) {
+  $('cameraHint').textContent=text;
+  if(!$('scanAudio').checked || !window.speechSynthesis) return;
+  const now=performance.now();
+  if(!force && (text===scanSpeechText || now-scanSpeechAt<5000)) return;
+  speechSynthesis.cancel();
+  const utterance=new SpeechSynthesisUtterance(text);utterance.lang='ru-RU';utterance.rate=.92;
+  const voice=speechSynthesis.getVoices().find(v=>v.lang.startsWith('ru') && v.localService);
+  if(voice) utterance.voice=voice;
+  speechSynthesis.speak(utterance);scanSpeechText=text;scanSpeechAt=now;
+}
+function scanTone() {
+  if(!$('scanAudio').checked) return;
+  const ctx=context(),osc=ctx.createOscillator(),gain=ctx.createGain();
+  osc.frequency.value=740;gain.gain.setValueAtTime(.08,ctx.currentTime);gain.gain.exponentialRampToValueAtTime(.001,ctx.currentTime+.18);
+  osc.connect(gain);gain.connect(ctx.destination);osc.start();osc.stop(ctx.currentTime+.2);
+  osc.onended=()=>{osc.disconnect();gain.disconnect();};
 }
 function sampledColor(views, pointForView, fallback) {
   const samples = [];
@@ -264,13 +306,13 @@ function buildMesh(lm, canvas, topology, views = [{landmarks:lm, canvas, yaw:0}]
   }
   const filled = closeFaceOpenings(lm, indices, false);
   const geometry = new THREE.BufferGeometry();
-  base = new Float32Array(positionsFor(filled.points, canvas.width, canvas.height));
+  base = new Float32Array(neutralFacePositions(filled.points, canvas.width, canvas.height));
   geometry.setAttribute('position', new THREE.BufferAttribute(base.slice(), 3));
   geometry.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(filled.points.flatMap(p => [p.x, 1 - p.y])), 2));
   geometry.setIndex(filled.indices); geometry.computeVertexNormals(); geometry.computeBoundingSphere();
   const texture = new THREE.CanvasTexture(canvas); texture.colorSpace = THREE.SRGBColorSpace;
   // The photo already contains lighting. Additional directional light made skin waxy/overexposed.
-  const next = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({map: texture, side: THREE.DoubleSide}));
+  const next = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({map: texture,roughness:1,metalness:0,side: THREE.DoubleSide}));
   const rig = mouthRig(filled.points); jawWeights = rig.weights; mouthWidth = rig.width * 4.2;
   cavityIds = FACE_OPENINGS[2];
   const cavityPositions = new Float32Array((cavityIds.length + 1) * 3);
@@ -287,7 +329,7 @@ function buildMesh(lm, canvas, topology, views = [{landmarks:lm, canvas, yaw:0}]
   const hair = sampledColor(views, view => ({x:view.landmarks[10].x,y:Math.max(.02,view.landmarks[10].y-.09)}), 0x3a2a25);
   hair.multiplyScalar(.58);
   if (hair.b > hair.g * 1.05) hair.b = hair.g * .78; // Dark backgrounds often add a blue cast to brown hair.
-  const skinMaterial = new THREE.MeshBasicMaterial({color:skin,side:THREE.DoubleSide});
+  const skinMaterial = new THREE.MeshStandardMaterial({map:texture,roughness:1,side:THREE.DoubleSide});
   const hairMaterial = new THREE.MeshStandardMaterial({color:hair,roughness:1,metalness:0,side:THREE.DoubleSide});
   const group = new THREE.Group();
   const makeGeometry = data => {
@@ -304,20 +346,30 @@ function buildMesh(lm, canvas, topology, views = [{landmarks:lm, canvas, yaw:0}]
     const blend=border.lerp(skin,1-head.rim[i]); colors.push(blend.r,blend.g,blend.b);
   }
   shellGeometry.setAttribute('color',new THREE.Float32BufferAttribute(colors,3));
-  group.add(new THREE.Mesh(shellGeometry,new THREE.MeshBasicMaterial({vertexColors:true,side:THREE.DoubleSide})));
+  group.add(new THREE.Mesh(shellGeometry,new THREE.MeshStandardMaterial({vertexColors:true,roughness:1,side:THREE.DoubleSide})));
   const hairData=hairGeometry(head,$('hairStyle').value);
   if(hairData.positions.length) group.add(new THREE.Mesh(makeGeometry(hairData),hairMaterial));
   else hairMaterial.dispose();
-  group.add(new THREE.Mesh(makeGeometry(neckGeometry(head)),skinMaterial));
+  const neckData=neckGeometry(head),neck=makeGeometry(neckData),neckUV=[];
+  const imageFaceHeight=Math.abs(lm[152].y-lm[10].y);
+  const imageFaceWidth=Math.abs(lm[454].x-lm[234].x);
+  for(let i=0;i<neckData.positions.length;i+=3) {
+    const x=neckData.positions[i],y=neckData.positions[i+1];
+    const u=lm[152].x+(x-cx)/width*imageFaceWidth;
+    const v=lm[152].y+(cy-height*.5-y)/height*imageFaceHeight;
+    neckUV.push(Math.max(.01,Math.min(.99,u)),1-Math.max(.01,Math.min(.99,v)));
+  }
+  neck.setAttribute('uv',new THREE.Float32BufferAttribute(neckUV,2));
+  group.add(new THREE.Mesh(neck,skinMaterial));
   for (const side of [-1,1]) {
     const data=earGeometry(head,side), ear=makeGeometry(data);
     ear.setAttribute('color',new THREE.Float32BufferAttribute(data.shade.flatMap(shade=>[skin.r*shade,skin.g*shade,skin.b*shade]),3));
-    group.add(new THREE.Mesh(ear,new THREE.MeshBasicMaterial({vertexColors:true,side:THREE.DoubleSide})));
+    group.add(new THREE.Mesh(ear,new THREE.MeshStandardMaterial({vertexColors:true,roughness:1,side:THREE.DoubleSide})));
   }
   group.add(nextCavity,next);
   group.position.set(cx,cy,edgeZ-depth*.32);
   for (const child of group.children) child.position.sub(group.position);
-  disposeAvatar(); avatarGroup=group; mesh=next; cavityMesh=nextCavity; scene.add(group);
+  disposeAvatar(); avatarGroup=group; mesh=next; cavityMesh=nextCavity; scene.add(group);applyModelView();
   $('placeholder').hidden = true; $('placeholder').style.display = 'none'; fit();
 }
 function context() { return audioContext ||= new AudioContext(); }
@@ -464,9 +516,10 @@ function tick(now) {
       for (const axis of [0,1,2]) mouth.array[cavityIds.length*3+axis]=cavityIds.reduce((sum,id)=>sum+mouth.array[cavityIds.indexOf(id)*3+axis],0)/cavityIds.length;
       mouth.needsUpdate = true;
     }
+    mesh.geometry.computeVertexNormals();
     if (avatarGroup) {
-      const motion = matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : (running && !paused ? 1 : .65);
-      avatarGroup.rotation.y = Math.sin(now / 3300) * .14 * motion;
+      const motion = matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : (running && !paused ? 1 : 0);
+      avatarGroup.rotation.y = running ? Math.sin(now / 3300) * .10 * motion : previewYaw;
       avatarGroup.rotation.x = (Math.sin(now / 2100) * .035 + (playing ? Math.sin(now / 420) * .016 : 0)) * motion;
       avatarGroup.rotation.z = Math.sin(now / 4700) * .022 * motion;
     }
@@ -495,6 +548,26 @@ function showSetup() {
   document.querySelector('h1').textContent = 'Рядом во время занятий';
   if (location.hash) history.replaceState({}, '', location.pathname + location.search);
   requestAnimationFrame(fit); window.scrollTo(0,0);
+}
+function setupStep(step) {
+  if(scanning || recording) return;
+  const content={face:['Создадим вашу 3D-модель','Поставьте камеру на уровне глаз. Каждый шаг звучит голосом.'],voice:['Теперь запишем ваш голос','Запишите образец в тихой комнате, затем прослушайте результат.'],ready:['Всё готово к занятию','Посадите ребёнка перед камерой и начните. Вопросы можно задавать голосом или текстом.']};
+  if(!content[step]) return;
+  if(step!=='face') stopCamera();
+  document.querySelectorAll('[data-step-panel]').forEach(panel=>panel.hidden=panel.dataset.stepPanel!==step);
+  document.querySelectorAll('[data-setup-step]').forEach(button=>{
+    if(button.dataset.setupStep===step) button.setAttribute('aria-current','step');
+    else button.removeAttribute('aria-current');
+  });
+  [$('stepTitle').textContent,$('stepDescription').textContent]=content[step];
+  requestAnimationFrame(fit);window.scrollTo({top:0,behavior:'auto'});
+}
+function applyModelView() {
+  avatarGroup?.traverse(item=>{
+    if(item.material && item!==cavityMesh) item.material.wireframe=showWireframe;
+  });
+  $('viewMeshBtn').setAttribute('aria-pressed',String(showWireframe));
+  $('viewMeshBtn').textContent=showWireframe?'Скрыть сетку':'Показать сетку';
 }
 function chatMessage(role, text) {
   const box = document.createElement('p'); box.className = `chat-message ${role}`;
@@ -602,16 +675,26 @@ function updateVoiceMode() {
 }
 $('voiceMode').addEventListener('change', () => { voiceModeTouched = true; updateVoiceMode(); controls(); });
 action('cancelRecordBtn', () => { recordCancelled = true; recordingAbort?.abort(); stopTracks(recordingStream); });
-action('cancelScanBtn', () => { scanning = false; $('cameraHint').textContent = 'Сканирование отменено'; });
+action('cancelScanBtn', () => { scanning = false;scanEpoch++;window.speechSynthesis?.cancel(); $('cameraHint').textContent = 'Сканирование отменено'; });
+document.addEventListener('keydown',event=>{
+  if(!scanning) return;
+  if(event.key==='Escape') {event.preventDefault();$('cancelScanBtn').click();}
+  if(event.key==='Tab') {event.preventDefault();$('cancelScanBtn').focus();}
+});
 action('cancelVoiceBtn', async () => { await api('cancel', new Uint8Array()); await poll(); });
 action('cameraBtn', async () => { connecting = true; controls(); try { if (stream) { stopCamera(); $('cameraHint').textContent = 'Камера выключена'; } else { await dependencies(); await enableCamera(); } } finally { connecting = false; controls(); } });
 action('scanBtn', scan); action('recordBtn', record); action('generateBtn', async () => { await api('generate', new Uint8Array()); await poll(); });
 action('testVoiceBtn', () => playVoice('preview')); action('startBtn', start); action('pauseBtn', pause); action('stopBtn', stop);
 action('lessonVoiceBtn', () => playVoice('lesson')); action('stopSpeechBtn', stopAudio);
 $('voiceQuestionBtn').addEventListener('click',()=>voiceQuestion().catch(fail));
+$('scanAudio').addEventListener('change',()=>{if(!$('scanAudio').checked) window.speechSynthesis?.cancel();});
+document.querySelectorAll('[data-setup-step]').forEach(button=>button.addEventListener('click',()=>setupStep(button.dataset.setupStep)));
+action('nextVoiceBtn',()=>setupStep('voice'));action('nextReadyBtn',()=>setupStep('ready'));
+action('viewFrontBtn',()=>{previewYaw=0;});action('viewSideBtn',()=>{previewYaw=Math.PI/3;});
+action('viewMeshBtn',()=>{showWireframe=!showWireframe;applyModelView();});
 $('hairStyle').addEventListener('change',()=>{
   localStorage.setItem('parentai-hair',$('hairStyle').value);
-  if(avatarViews.length) {const front=[...avatarViews].sort((a,b)=>Math.abs(a.yaw)-Math.abs(b.yaw))[0];buildMesh(front.landmarks,front.canvas,avatarTopology,avatarViews);}
+  if(avatarViews.length) {const front=avatarViews.find(v=>v.role==='front') || [...avatarViews].sort((a,b)=>Math.abs(a.yaw)-Math.abs(b.yaw))[0];buildMesh(front.landmarks,front.canvas,avatarTopology,avatarViews);}
 });
 $('hairStyle').value=localStorage.getItem('parentai-hair') || 'short';
 $('tutorForm').addEventListener('submit', askTutor);
@@ -633,10 +716,10 @@ async function restoreAvatar() {
       canvas.getContext('2d').drawImage(photo,0,0);
       return {...view,canvas};
     }));
-    const front = [...views].sort((a,b)=>Math.abs(a.yaw||0)-Math.abs(b.yaw||0))[0];
+    const front = views.find(view=>view.role==='front') || [...views].sort((a,b)=>Math.abs(a.yaw||0)-Math.abs(b.yaw||0))[0];
     buildMesh(front.landmarks, front.canvas, vision.FaceLandmarker.FACE_LANDMARKS_TESSELATION, views);
-    $('faceStatus').textContent = views.length === 3 ? 'Сохранённая 3D-голова' : 'Старая маска · лучше пересканировать';
-    $('cameraHint').textContent = views.length === 3 ? 'Три ракурса загружены. Камера пока выключена.' : 'Для ушей и объёма пересканируйте голову по новой инструкции.';
+    $('faceStatus').textContent = saved.version===3 ? 'Модель загружена' : 'Старый скан · рекомендуем переснять';
+    $('cameraHint').textContent = saved.version===3 ? 'Модель загружена. Можно перейти к голосу.' : 'Переснимите лицо с новыми голосовыми подсказками.';
   } catch(e) { $('faceStatus').textContent = 'Пересканируйте лицо'; fail(e); }
   finally { controls(); }
 }

@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {Presence, positionsFor, encodeWav, scanQuality, scanCoverage, faceYaw, mouthRig, speechOpening} from '../web/core.mjs';
+import {Presence, positionsFor, neutralFacePositions, encodeWav, scanQuality, scanCoverage, faceYaw, mouthRig, speechOpening} from '../web/core.mjs';
 test('coordinates use matching physical units on a wide camera',()=>{
   const p=positionsFor([{x:.6,y:.6,z:.1},{x:.5,y:.5,z:0}],1280,720,1);
   assert.ok(Math.abs(p[1]/p[0]+720/1280)<1e-6);
@@ -34,6 +34,28 @@ test('three-view scan distinguishes front and opposite side turns',()=>{
   assert.equal(scanCoverage(lm,960,720),''); assert.equal(faceYaw(lm),0);
   lm[1].x=.56; assert.ok(faceYaw(lm)>.25);
   lm[1].x=.44; assert.ok(faceYaw(lm)<-.25);
+});
+test('front capture rejects a mild side pose that the old threshold accepted',()=>{
+  const lm=Array.from({length:478},()=>({x:.5,y:.5,z:0}));
+  lm[33]={x:.4,y:.4,z:0};lm[263]={x:.6,y:.4,z:0};
+  lm[10].y=.25;lm[152].y=.75;
+  assert.equal(scanQuality(lm,960,720),'');
+  lm[1].x=.525;
+  assert.equal(scanQuality(lm,960,720),'Посмотрите прямо в объектив');
+  lm[1].x=.5;lm[263].z=.03;
+  assert.equal(scanQuality(lm,960,720),'Посмотрите прямо в объектив');
+  lm[263].z=0;lm[152].y=.95;
+  assert.equal(scanQuality(lm,960,720),'Отодвиньте камеру немного дальше, чтобы было видно шею');
+});
+test('neutral geometry removes eye yaw and roll without changing source landmarks',()=>{
+  const lm=Array.from({length:478},()=>({x:.5,y:.5,z:0}));
+  lm[33]={x:.4,y:.39,z:.025};lm[263]={x:.6,y:.41,z:-.025};
+  lm[1]={x:.5,y:.52,z:-.1};
+  const original=JSON.stringify(lm), positions=neutralFacePositions(lm,960,720);
+  assert.ok(Math.abs(positions[33*3+1]-positions[263*3+1])<1e-9);
+  assert.ok(Math.abs(positions[33*3+2]-positions[263*3+2])<1e-9);
+  assert.ok(positions[1*3+2]>positions[33*3+2]);
+  assert.equal(JSON.stringify(lm),original);
 });
 import {withTimeout} from '../web/core.mjs';
 test('late camera stream is disposed after permission timeout',async()=>{
