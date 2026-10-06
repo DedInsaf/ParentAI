@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mouthInteriorGeometry,mouthInteriorPositions,upperTeethGeometry} from '../web/mouth-geometry.mjs';
+import {mouthInteriorGeometry,mouthInteriorPositions} from '../web/mouth-geometry.mjs';
 
-test('mouth stays sealed at animated lips and recedes behind the dental arch',()=>{
+test('mouth stays sealed at animated lips and closes the interior',()=>{
   const ring=Array.from({length:20},(_,i)=>i),face=new Float32Array(60),width=.6;
   const update=opening=>ring.forEach(i=>{
     const a=i/20*Math.PI*2;
@@ -21,14 +21,5 @@ test('mouth stays sealed at animated lips and recedes behind the dental arch',()
     });
     assert.ok(cavity.positions.every(Number.isFinite));
     assert.ok(cavity.positions.at(-1)<-width*.12);
-  }
-  const teeth=upperTeethGeometry(width);
-  assert.ok(teeth.positions.every(Number.isFinite));
-  assert.ok(teeth.indices.every(i=>i>=0&&i<teeth.positions.length/3));
-  for(let i=0;i<teeth.positions.length;i+=3) {
-    assert.ok(Math.abs(teeth.positions[i])<width*.25);
-    assert.ok(teeth.positions[i+1]<0);
-    assert.ok(teeth.positions[i+2]<-width*.025);
-    assert.ok(teeth.positions[i+2]>cavity.positions.at(-1));
   }
 });

@@ -2,13 +2,13 @@
 // This detects likely speech; it cannot identify a child versus speech from a TV.
 export class SpeechGate {
   constructor(rate){this.rate=rate;this.noise=.003;this.reset();}
-  reset(){this.pre=[];this.preSamples=0;this.active=[];this.samples=0;this.voiced=0;this.run=0;this.silence=0;}
+  reset(){this.level=0;this.pre=[];this.preSamples=0;this.active=[];this.samples=0;this.voiced=0;this.run=0;this.silence=0;}
   push(audio,suppressed=false){
     if(suppressed){this.reset();return null;}
     const duration=audio.length/this.rate;
     let sum=0,crossings=0;
     for(let i=0;i<audio.length;i++){sum+=audio[i]*audio[i];if(i && (audio[i]>=0)!==(audio[i-1]>=0))crossings++;}
-    const rms=Math.sqrt(sum/audio.length),zcr=crossings/audio.length;
+    const rms=Math.sqrt(sum/audio.length),zcr=crossings/audio.length;this.level=rms;
     const speech=rms>Math.max(.008,this.noise*3.2) && zcr>.004 && zcr<.42;
     if(!this.active.length && !speech) this.noise=.98*this.noise+.02*Math.min(rms,.02);
     if(!this.active.length){

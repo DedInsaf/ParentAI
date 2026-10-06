@@ -22,20 +22,3 @@ export function mouthInteriorGeometry(face,ring,width) {
   }
   return {positions:mouthInteriorPositions(face,ring,width),indices};
 }
-
-export function upperTeethGeometry(width) {
-  const positions=[],indices=[];
-  const outline=[[-.5,.15],[-.35,0],[.35,0],[.5,.15],[.5,.85],[.35,1],[-.35,1],[-.5,.85]];
-  // Six small rounded crowns along a recessed dental arch, rather than a box.
-  for(let tooth=0;tooth<6;tooth++) {
-    const start=positions.length/3,cx=(tooth-2.5)*width*.075;
-    const depth=x=>-width*(.03+.35*(x/width)**2);
-    for(const [x,y] of outline) {
-      const px=cx+x*width*.068;
-      positions.push(px,width*(-.052+y*.042),depth(px));
-    }
-    positions.push(cx,-width*.031,depth(cx)+width*.002);
-    for(let i=0;i<outline.length;i++) indices.push(start+i,start+(i+1)%outline.length,start+outline.length);
-  }
-  return {positions,indices};
-}

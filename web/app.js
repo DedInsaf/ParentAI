@@ -2,8 +2,10 @@ import {positionsFor,neutralFacePositions, scanQuality, portraitQuality, faceYaw
 import {skullGeometry, earGeometry, neckGeometry, torsoGeometry, hairGeometry, OVAL, blinkAmount} from './head-geometry.mjs';
 import {bakeFaceAtlas,bakePortraitFaceAtlas} from './face-atlas.mjs';
 import {SpeechGate,isDirectedSpeech} from './listening.mjs';
-import {mouthInteriorGeometry,mouthInteriorPositions,upperTeethGeometry} from './mouth-geometry.mjs';
+import {mouthInteriorGeometry,mouthInteriorPositions} from './mouth-geometry.mjs';
 import {PORTRAIT_HANDLES,defaultPortraitAnchors,portraitAnchorIssue,portraitBodyGeometry,portraitHairContour,portraitHairGeometry,portraitEarGeometry} from './portrait-geometry.mjs';
+import {AvatarMotion} from './avatar-motion.mjs';
+import {fitPortraitAnchors} from './portrait-fit.mjs';
 const $ = id => document.getElementById(id);
 const video = $('camera');
 const fail = e => { $('error').hidden = false; $('error').textContent = e.message || String(e); };
@@ -23,11 +25,12 @@ let avatarViews=[], avatarTopology, activeCues=[], audioStarted=0, dialogId=null
 let questionRecording=false, questionStop=false, questionCancel=false, questionAbort, questionStream;
 let currentJob=null, lipShape=0, lipPucker=0;
 let previewYaw=0,showWireframe=false,scanSpeechAt=0,scanSpeechText='',scanEpoch=0;
-let portraitView=null,headPivot=null,teethMesh=null,tongueMesh=null;
+let portraitView=null,headPivot=null,tongueMesh=null,bodyRig=null,avatarRest=null,faceUV=null;
 let portraitAnchors=null,portraitDraft=false,portraitConfirmed=false,selectedAnchor='neckLeft',portraitRebuildTimer;
 const portraitGroups={body:['neckLeft','neckRight','shoulderLeft','shoulderRight','chestLeft','chestRight'],hair:['crown','templeLeft','templeRight'],ears:['earLeft','earRight']};
 let listener=null,listenEpoch=0,echoUntil=0,followupUntil=0,listenerPending=false,cameraEpoch=0,cameraAbort;
 const audioSources=new Set();let audioNext=0;
+const avatarMotion=new AvatarMotion();let childSpeakingUntil=0;
 const voiceBusy = () => ['generating', 'cancelling'].includes(status.voice);
 const stopTracks = value => value?.getTracks().forEach(t => t.stop());
 function mediaError(e) {
@@ -61,8 +64,9 @@ function controls() {
   $('nextVoiceBtn').disabled=!mesh || scanning || portraitDraft;
   $('editProportionsBtn').hidden=!portraitView;
   $('editProportionsBtn').disabled=scanning || running;
-  $('savePortraitBtn').disabled=scanning || !portraitView || running || pendingActions.has('savePortraitBtn') || Boolean(portraitAnchorIssue(portraitAnchors,portraitView.landmarks));
-  for(const control of $('portraitEditor').querySelectorAll('button:not(#savePortraitBtn),select'))control.disabled=scanning || running || pendingActions.has('savePortraitBtn');
+  $('savePortraitBtn').disabled=scanning || !portraitView || running || pendingActions.has('resetPortraitBtn') || pendingActions.has('savePortraitBtn') || Boolean(portraitAnchorIssue(portraitAnchors,portraitView.landmarks));
+  for(const control of $('portraitEditor').querySelectorAll('button:not(#savePortraitBtn),select'))control.disabled=scanning || running || pendingActions.has('resetPortraitBtn') || pendingActions.has('savePortraitBtn');
+  $('resetPortraitBtn').textContent=pendingActions.has('resetPortraitBtn')?'Находим контур…':'Найти контур заново';
   $('previewMotionBtn').disabled=!mesh || !status.phrases?.length || scanning || recording || running;
   $('nextReadyBtn').disabled=!(status.phrases?.length) || recording || voiceBusy();
   for(const id of ['viewFrontBtn','viewSideBtn','viewMeshBtn']) $(id).disabled=!mesh || scanning;
@@ -81,7 +85,16 @@ function controls() {
   $('stopSpeechBtn').disabled = !playing;
   $('askBtn').disabled = tutorBusy || questionRecording || listenerPending || !online || !status.tutor?.enabled;
   $('voiceQuestionBtn').disabled = !running || paused || !online || tutorBusy || listenerPending || !status.speech?.enabled;
-  $('voiceQuestionBtn').textContent = questionRecording ? 'Закончить вопрос' : 'Помощь · спросить голосом';
+  $('handsFree').disabled=!status.speech?.enabled && !listener;
+  $('voiceQuestionBtn').textContent = questionRecording ? 'Закончить вопрос' : 'Записать вопрос';
+  $('readyHandsFree').disabled=running || !status.speech?.enabled;
+  $('readyMicHint').textContent=status.speech?.enabled?'После начала микрофон будет заметен над аватаром. Его можно выключить в любой момент.':'Голосовые вопросы пока не подключены. Можно написать вопрос; родителю нужно настроить SpeechKit.';
+  $('stopSpeechBtn').hidden=!playing;
+  $('readyHandsFree').checked=$('handsFree').checked;
+  $('faceNextHint').textContent=portraitDraft?'Сначала сохраните контур или отмените изменения.':!mesh?'После снимков эта кнопка станет доступна.':'';
+  $('voiceNextHint').textContent=voiceBusy()?'Готовим голос. Можно отменить и попробовать снова.':!status.phrases?.length?'Запишите, прослушайте и сохраните голос, чтобы продолжить.':'';
+  $('startHint').textContent=!mesh?'Сначала создайте образ родителя на первом шаге.':portraitDraft?'Сначала сохраните контур на первом шаге.':!status.phrases?.length?'Сначала сохраните голос на втором шаге.':voiceBusy()?'Подождите, пока голос будет готов.':'';
+  $('startBtn').textContent=pendingActions.has('startBtn')?'Подключаем камеру…':'Начать занятие →';
   $('cancelHelpBtn').hidden = !tutorBusy && !questionRecording && !listenerPending;
   $('cancelRecordBtn').hidden = !recording;
   $('cancelVoiceBtn').hidden = !voiceBusy();
@@ -97,7 +110,7 @@ async function poll() {
     $('connection').textContent = 'Подключено';
     $('ttsStatus').textContent = `Клонирование: ${status.voice_engine?.message || status.tts}`;
     $('assetsStatus').textContent = `Распознавание: ${status.assets}`;
-    if (!tutorBusy && !questionRecording) $('tutorStatus').textContent = status.tutor?.message || 'Помощник YandexGPT не настроен';
+    if (!tutorBusy && !questionRecording) $('tutorStatus').textContent = status.tutor?.enabled?'Скажи «помоги» или напиши вопрос. Будем пробовать по шагам.':'Помощник ещё не подключён. Попроси родителя настроить Яндекс.';
     if (!recording) $('voiceHint').textContent = status.error || status.progress || (status.phrases.length ? 'Сохранённый голос готов. Можно начать занятие.' : 'Выберите способ записи голоса.');
     if (status.reference && !referenceLoaded && !recording) {
       $('reference').src = '/audio/reference.wav'; $('reference').hidden = false; referenceLoaded = true;
@@ -133,9 +146,9 @@ function initScene() {
   renderer = new THREE.WebGLRenderer({antialias: true, alpha: true});
   renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
   renderer.outputColorSpace = THREE.SRGBColorSpace;
-  scene.add(new THREE.AmbientLight(0xffffff, 1.7));
+  scene.add(new THREE.AmbientLight(0xffffff, 1.05));
   scene.add(new THREE.HemisphereLight(0xffffff, 0x66717b, .45));
-  const light = new THREE.DirectionalLight(0xffffff, .65); light.position.set(2, 3, 4); scene.add(light);
+  const light = new THREE.DirectionalLight(0xffffff, .3); light.position.set(2, 3, 4); scene.add(light);
   $('scene').appendChild(renderer.domElement);
   new ResizeObserver(() => fit()).observe($('scene'));
 }
@@ -253,7 +266,10 @@ async function scan() {
     if (!front) return;
     const portrait=await takePose(1,'Лицо снято. Теперь отодвиньте камеру для портрета по грудь. Макушка, оба уха и плечи целиком в кадре. Смотрите прямо.',lm=>portraitQuality(lm,video.videoWidth,video.videoHeight));
     if(!portrait)return;
-    portraitView=portrait;portraitAnchors=defaultPortraitAnchors(portrait.landmarks);portraitConfirmed=false;portraitDraft=true;
+    const anchors=await fitPortrait(portrait);
+    if(!scanning || epoch!==scanEpoch)return;
+    portraitView=portrait;portraitAnchors=anchors;
+    portraitConfirmed=false;portraitDraft=true;
     avatarViews=[front];
     previewYaw=0;
     buildMesh(front.landmarks,front.canvas,(await dependencies()).FaceLandmarker.FACE_LANDMARKS_TESSELATION,avatarViews);
@@ -261,7 +277,7 @@ async function scan() {
     $('faceStatus').textContent='Проверьте пропорции на снимке';
     scanInstruction('Снимки готовы. Совместите точки контура с собой на фотографии и сохраните аватар.',true);
     $('scanPhase').textContent='Готово · 2 снимка';
-  } finally { scanning = false; lastFrame = -1; $('scanCountdown').textContent='';scanPanel.classList.remove('scanning-screen','portrait-scan');scanPanel.removeAttribute('role');scanPanel.removeAttribute('aria-modal');scanPanel.removeAttribute('aria-label');if(portraitDraft&&portraitView&&$('portraitEditor').hidden)openPortraitEditor();controls();$('scanBtn').focus({preventScroll:true}); }
+  } finally { scanning = false; lastFrame = -1; $('scanCountdown').textContent='';scanPanel.classList.remove('scanning-screen','portrait-scan');scanPanel.removeAttribute('role');scanPanel.removeAttribute('aria-modal');scanPanel.removeAttribute('aria-label');if(portraitDraft&&portraitView&&$('portraitEditor').hidden)openPortraitEditor();controls();(portraitDraft&&!$('portraitEditor').hidden?$('portraitGroup'):$('cameraBtn')).focus({preventScroll:true}); }
 }
 function scanInstruction(text,force=false) {
   $('cameraHint').textContent=text;
@@ -280,6 +296,24 @@ function scanTone() {
   osc.frequency.value=740;gain.gain.setValueAtTime(.08,ctx.currentTime);gain.gain.exponentialRampToValueAtTime(.001,ctx.currentTime+.18);
   osc.connect(gain);gain.connect(ctx.destination);osc.start();osc.stop(ctx.currentTime+.2);
   osc.onended=()=>{osc.disconnect();gain.disconnect();};
+}
+async function fitPortrait(view) {
+  $('faceStatus').textContent='Находим волосы, шею и плечи…';
+  let worker,bitmap;
+  try {
+    bitmap=await createImageBitmap(view.canvas);
+    const mask=await new Promise((resolve,reject)=>{
+      worker=new Worker('/portrait-worker.js');
+      const timer=setTimeout(()=>reject(new Error('Контур не найден')),20000);
+      worker.onmessage=({data})=>{clearTimeout(timer);data.error?reject(new Error(data.error)):resolve(data);};
+      worker.onerror=event=>{clearTimeout(timer);reject(new Error(event.message || 'Контур не найден'));};
+      worker.postMessage(bitmap,[bitmap]);
+    });
+    view.fittedAnchors=fitPortraitAnchors(view.landmarks,mask);view.autoFit=mask.data.some(c=>c===1||c===2||c===4);
+  } catch(error) {view.fitError=error.message;view.fittedAnchors=defaultPortraitAnchors(view.landmarks);view.autoFit=false;}
+  finally {worker?.terminate();bitmap?.close();}
+  $('faceStatus').title=view.fitError||'Контур найден локально по снимку';
+  return structuredClone(view.fittedAnchors);
 }
 function sampledColor(views, pointForView, fallback) {
   const samples = [];
@@ -325,14 +359,15 @@ function renderPortraitEditor() {
   const line=points=>{ctx.beginPath();points.forEach((p,i)=>ctx[i?'lineTo':'moveTo'](p.x*canvas.width,p.y*canvas.height));ctx.stroke();};
   const a=portraitAnchors,lm=portraitView.landmarks;
   line(Array.from({length:33},(_,i)=>portraitHairContour(a,i/32)));
-  line([{x:a.neckLeft.x,y:lm[152].y},a.neckLeft,a.shoulderLeft,a.chestLeft,a.chestRight,a.shoulderRight,a.neckRight,{x:a.neckRight.x,y:lm[152].y}]);
+  const shoulderCurve=side=>Array.from({length:15},(_,i)=>{const t=i/14,tx=1-(1-t)**2,ty=t**3,n=a['neck'+side],s=a['shoulder'+side];return {x:n.x*(1-tx)+s.x*tx,y:n.y*(1-ty)+s.y*ty};});
+  line([{x:a.neckLeft.x,y:lm[152].y},...shoulderCurve('Left'),a.chestLeft,a.chestRight,...shoulderCurve('Right').reverse(),{x:a.neckRight.x,y:lm[152].y}]);
   [...$('portraitHandles').children].forEach(button=>{
     const p=a[button.dataset.anchor];button.style.left=`${p.x*100}%`;button.style.top=`${p.y*100}%`;
     button.hidden=!portraitGroups[$('portraitGroup').value].includes(button.dataset.anchor);
     button.setAttribute('aria-pressed',String(button.dataset.anchor===selectedAnchor));
   });
   $('portraitPoint').value=selectedAnchor;
-  $('portraitHint').textContent=portraitAnchorIssue(a,lm) || `${PORTRAIT_HANDLES[selectedAnchor]}. Перетащите точку или используйте стрелки. Начальный контур нужно проверить по фото.`;
+  $('portraitHint').textContent=portraitAnchorIssue(a,lm) || `${portraitView.autoFit?'Контур найден по снимку.':portraitConfirmed?'Сохранённый контур.':'Контур приблизительный: проверьте все точки.'} ${PORTRAIT_HANDLES[selectedAnchor]}. Перетащите точку или используйте стрелки.`;
   controls();
 }
 function openPortraitEditor() {
@@ -343,7 +378,7 @@ function openPortraitEditor() {
     button.textContent=String(i+1);button.setAttribute('aria-label',label);button.title=label;return button;
   }));
   selectPortraitGroup();
-  renderPortraitEditor();$('portraitEditor').scrollIntoView({block:'start',behavior:'smooth'});
+  renderPortraitEditor();$('portraitGroup').focus({preventScroll:true});$('portraitEditor').scrollIntoView({block:'start',behavior:'smooth'});
 }
 function selectPortraitGroup() {
   const keys=portraitGroups[$('portraitGroup').value];
@@ -407,12 +442,14 @@ function buildMesh(lm, canvas, topology, views = [{landmarks:lm, canvas, yaw:0}]
   const bodyTexture=new THREE.CanvasTexture(portrait.canvas);bodyTexture.colorSpace=THREE.SRGBColorSpace;
   const skinMaterial = new THREE.MeshStandardMaterial({map:bodyTexture,roughness:1,side:THREE.DoubleSide});
   const hairMaterial = new THREE.MeshStandardMaterial({color:hair,roughness:1,metalness:0,side:THREE.DoubleSide});
+  bodyRig=null;
   const group = new THREE.Group();
   const pivot=new THREE.Group(),fixedBody=new THREE.Group();
   const makeGeometry = data => {
     const result = new THREE.BufferGeometry();
     result.setAttribute('position',new THREE.Float32BufferAttribute(data.positions,3));
     if(data.uv)result.setAttribute('uv',new THREE.Float32BufferAttribute(data.uv,2));
+    for(const {start,count,materialIndex} of data.groups||[])result.addGroup(start,count,materialIndex);
     result.setIndex(data.indices); result.computeVertexNormals(); return result;
   };
   const shellGeometry=makeGeometry(head), colors=[];
@@ -430,9 +467,19 @@ function buildMesh(lm, canvas, topology, views = [{landmarks:lm, canvas, yaw:0}]
     skinMaterial.dispose();hairMaterial.dispose();
     const frame={nose:lm[1],aspect:canvas.height/canvas.width,scale:4.2};
     const photoMaterial=new THREE.MeshStandardMaterial({map:bodyTexture,roughness:1,side:THREE.DoubleSide});
-    fixedBody.add(new THREE.Mesh(makeGeometry(portraitBodyGeometry(lm,portraitAnchors,frame,base)),photoMaterial));
-    pivot.add(new THREE.Mesh(makeGeometry(portraitHairGeometry(lm,portraitAnchors,frame,base)),photoMaterial));
-    for(const side of [-1,1])pivot.add(new THREE.Mesh(makeGeometry(portraitEarGeometry(lm,portraitAnchors,frame,base,side)),photoMaterial));
+    const plainSkin=new THREE.MeshStandardMaterial({color:skin,roughness:1,side:THREE.DoubleSide});
+    const cloth=sampledColor([portraitView],()=>({x:(portraitAnchors.chestLeft.x+portraitAnchors.chestRight.x)/2,y:portraitAnchors.chestLeft.y-.03}),0xb7ae9a);
+    const plainCloth=new THREE.MeshStandardMaterial({color:cloth,roughness:1,side:THREE.DoubleSide});
+    const bodyGeometry=makeGeometry(portraitBodyGeometry(lm,portraitAnchors,frame,base));
+    fixedBody.add(new THREE.Mesh(bodyGeometry,[photoMaterial,plainSkin,plainCloth]));
+    bodyRig={geometry:bodyGeometry,rest:bodyGeometry.getAttribute('position').array.slice(),collarY:-(Math.min(portraitAnchors.neckLeft.y,portraitAnchors.neckRight.y)-lm[1].y)*frame.aspect*frame.scale,topY:base[152*3+1]+height*.14};
+    const strands=document.createElement('canvas');strands.width=256;strands.height=256;
+    const hc=strands.getContext('2d');hc.fillStyle='#'+hair.getHexString();hc.fillRect(0,0,256,256);
+    for(let i=0;i<420;i++){hc.strokeStyle=i%3?'rgba(255,255,255,.035)':'rgba(0,0,0,.10)';hc.lineWidth=.5+i%3*.25;hc.beginPath();const x=(i*37.7)%256;hc.moveTo(x,-5);hc.bezierCurveTo(x-18,80,x+12,160,x-8,260);hc.stroke();}
+    const strandTexture=new THREE.CanvasTexture(strands);strandTexture.colorSpace=THREE.SRGBColorSpace;
+    const rearHair=new THREE.MeshStandardMaterial({map:strandTexture,roughness:1,side:THREE.DoubleSide});
+    pivot.add(new THREE.Mesh(makeGeometry(portraitHairGeometry(lm,portraitAnchors,frame,base)),[photoMaterial,rearHair]));
+    for(const side of [-1,1])pivot.add(new THREE.Mesh(makeGeometry(portraitEarGeometry(lm,portraitAnchors,frame,base,side)),[photoMaterial,plainSkin]));
   } else {
     const hairData=hairGeometry(head,$('hairStyle').value);
     if(hairData.positions.length) pivot.add(new THREE.Mesh(makeGeometry(hairData),hairMaterial));
@@ -465,17 +512,19 @@ function buildMesh(lm, canvas, topology, views = [{landmarks:lm, canvas, yaw:0}]
       pivot.add(new THREE.Mesh(ear,new THREE.MeshStandardMaterial({vertexColors:true,roughness:1,side:THREE.DoubleSide})));
     }
   }
-  const nextTeeth=new THREE.Mesh(makeGeometry(upperTeethGeometry(mouthWidth)),new THREE.MeshStandardMaterial({color:0xa99f91,roughness:.8,side:THREE.DoubleSide}));
-  nextTeeth.position.fromArray(base,13*3);nextTeeth.visible=false;
   const tongueGeometry=new THREE.SphereGeometry(mouthWidth*.16,12,8);tongueGeometry.scale(1,.20,.12);
   tongueGeometry.translate(0,mouthWidth*.013,-mouthWidth*.055);
   const nextTongue=new THREE.Mesh(tongueGeometry,new THREE.MeshBasicMaterial({color:0x71343f}));
   nextTongue.position.fromArray(base,14*3);nextTongue.visible=false;
-  pivot.add(nextCavity,next,nextTeeth,nextTongue);
+  pivot.add(nextCavity,next,nextTongue);
   group.add(pivot,fixedBody);
   group.position.set(cx,cy,edgeZ-depth*.32);
-  for (const container of group.children) for(const child of container.children) child.position.sub(group.position);
-  disposeAvatar(); avatarGroup=group;headPivot=pivot;teethMesh=nextTeeth;tongueMesh=nextTongue; mesh=next; cavityMesh=nextCavity; scene.add(group);applyModelView();
+  const joint=new THREE.Vector3(cx,base[152*3+1]+height*.08,edgeZ-width*.23);
+  pivot.position.copy(joint).sub(group.position);
+  for(const child of pivot.children)child.position.sub(joint);
+  for(const child of fixedBody.children)child.position.sub(group.position);
+  avatarRest=group.position.clone();faceUV=geometry.getAttribute('uv').array.slice();
+  disposeAvatar(); avatarGroup=group;headPivot=pivot;tongueMesh=nextTongue; mesh=next; cavityMesh=nextCavity; scene.add(group);applyModelView();
   $('placeholder').hidden = true; $('placeholder').style.display = 'none'; fit();
 }
 function context() { return audioContext ||= new AudioContext(); }
@@ -555,22 +604,24 @@ async function record() {
     const result = await api('reference?mode=' + mode, wav);
     referenceRejected = false;
     $('reference').src = '/audio/reference.wav?t=' + Date.now(); $('reference').hidden = false;
-    $('voiceHint').textContent = `Запись: ${result.seconds} сек. Прослушайте её, затем нажмите «Создать голос».`;
+    $('voiceHint').textContent = `Запись: ${result.seconds} сек. Прослушайте её, затем нажмите «${mode==='direct'?'Сохранить напоминание':'Создать голос'}».`;
     status = await api('status');
   } catch(e) { if (!recordCancelled) throw mediaError(e); } finally { source?.disconnect(); node?.disconnect(); mic?.getTracks().forEach(t => t.stop()); await recordContext?.close(); $('level').value = 0; recordingStream = null; recording = false; controls(); }
 }
 async function start() {
   await context().resume();
-  await dependencies();
-  await enableCamera();
-  let result;
-  for (let attempt = 0; attempt < 10; attempt++) {
-    result = detectVideo(performance.now());
-    if (result.faceLandmarks?.length === 1) break;
-    await sleep(120);
-  }
-  if (result.faceLandmarks?.length !== 1) throw new Error('Перед началом в кадре должен быть один ребёнок.');
-  if(document.hidden || !stream) throw new Error('Подключение занятия отменено.');
+  try {
+    await dependencies();
+    await enableCamera();
+    let result;
+    for (let attempt = 0; attempt < 10; attempt++) {
+      result = detectVideo(performance.now());
+      if (result.faceLandmarks?.length === 1) break;
+      await sleep(120);
+    }
+    if (result.faceLandmarks?.length !== 1) throw new Error('Перед началом в кадре должен быть один ребёнок.');
+    if(document.hidden || !stream) throw new Error('Подключение занятия отменено.');
+  } catch(error){stopCamera();stopHandsFree();throw error;}
   stopAudio(); running = true; paused = false; presence.reset(); lessonElapsed = 0; lessonStarted = performance.now(); showLesson(); controls();
   if($('replyVoice').value==='parent') api('voice-warm',new Uint8Array()).catch(()=>{});
   startHandsFree().catch(fail);
@@ -578,11 +629,11 @@ async function start() {
 }
 async function pause() {
   stopAudio(); cancelTutor();stopHandsFree();
-  if (!paused) { lessonElapsed += performance.now() - lessonStarted; paused = true; stopCamera(); $('pauseBtn').textContent = 'Продолжить'; $('monitorStatus').textContent = 'Перерыв · камера выключена'; }
-  else { await enableCamera(); presence.reset(); paused = false; lessonStarted = performance.now(); $('pauseBtn').textContent = 'Перерыв';startHandsFree().catch(fail); }
+  if (!paused) { lessonElapsed += performance.now() - lessonStarted; paused = true; document.body.classList.add('on-break');stopCamera();setListenerState('off','Перерыв. Камера и микрофон выключены.'); $('pauseBtn').textContent = 'Продолжить занятие'; $('monitorStatus').textContent = 'Перерыв · камера выключена'; }
+  else { await enableCamera(); presence.reset(); paused = false;document.body.classList.remove('on-break'); lessonStarted = performance.now(); $('pauseBtn').textContent = 'Сделать перерыв';startHandsFree().catch(fail); }
   controls();
 }
-function stop() { stopHandsFree();api('voice-release',new Uint8Array()).catch(()=>{});running = false; paused = false; stopAudio(); stopCamera(); cancelTutor(); presence.reset(); $('pauseBtn').textContent = 'Перерыв'; $('monitorStatus').textContent = 'Занятие завершено · камера выключена'; showSetup(); controls(); }
+function stop() { stopHandsFree();api('voice-release',new Uint8Array()).catch(()=>{});running = false; paused = false;document.body.classList.remove('on-break'); stopAudio(); stopCamera(); cancelTutor(); presence.reset(); $('pauseBtn').textContent = 'Сделать перерыв'; $('monitorStatus').textContent = 'Занятие завершено · камера выключена'; showSetup(); controls(); }
 let reminderPending = false;
 async function reminder() {
   if (reminderPending) return;
@@ -601,7 +652,7 @@ function tick(now) {
       const current = presence.update(found, now / 1000);
       $('monitorStatus').textContent = {present:'Лицо в кадре · занятие идёт',missing:'Лицо вне кадра · ждём возвращения',absent:'Пора вернуться к занятию',returning:'С возвращением'}[current.state];
       if (found && audioKind === 'reminder') stopAudio();
-      if (current.remind && !tutorBusy && !questionRecording && !playing) reminder();
+      if (current.remind && !tutorBusy && !questionRecording && !listenerPending && now>childSpeakingUntil && !playing) reminder();
     } catch (e) { if (!detectError) { detectError = true; pause(); fail(e); } }
   }
   if (mesh && !document.hidden && now - renderTime >= 33) {
@@ -642,22 +693,40 @@ function tick(now) {
     }
     mesh.geometry.computeVertexNormals();
     const aperture=Math.max(0,pos.array[13*3+1]-pos.array[14*3+1]);
-    if(teethMesh) {
-      teethMesh.visible=jaw>mouthWidth*.05 && aperture>mouthWidth*.045;
-      teethMesh.position.fromArray(pos.array,13*3).sub(avatarGroup.position);
-      teethMesh.scale.x=1+lipShape;
-    }
     if(tongueMesh) {
       tongueMesh.visible=jaw>mouthWidth*.08 && aperture>mouthWidth*.08;
-      tongueMesh.position.fromArray(pos.array,14*3).sub(avatarGroup.position);
+      tongueMesh.position.fromArray(pos.array,14*3).sub(avatarRest).sub(headPivot.position);
       tongueMesh.scale.x=1+lipShape;
     }
     if (avatarGroup) {
-      const motion = matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : ((running && !paused)||audioKind==='preview' ? 1 : 0);
-      avatarGroup.rotation.y=running?0:previewYaw;
-      headPivot.rotation.y=Math.sin(now / 3300)*.045*motion;
-      headPivot.rotation.x=(Math.sin(now/2100)*.015+(playing?Math.sin(now/420)*.008:0))*motion;
-      headPivot.rotation.z=Math.sin(now/4700)*.012*motion;
+      const active=(running&&!paused)||audioKind==='preview';
+      const pose=avatarMotion.update(now/1000,{active,speaking:playing,listening:now<childSpeakingUntil,engaged:listenerPending||questionRecording||tutorBusy,preview:running?0:previewYaw,reduced:matchMedia('(prefers-reduced-motion: reduce)').matches});
+      avatarGroup.rotation.set(0,pose.preview+pose.bodyYaw,pose.bodyRoll);
+      avatarGroup.position.copy(avatarRest);avatarGroup.position.y+=pose.breath*(Math.abs(base[454*3]-base[234*3]));
+      headPivot.rotation.set(pose.pitch,pose.yaw,pose.roll);
+      // Bend only the upper neck with the head, keeping the collar and shoulders fixed.
+      if(bodyRig){
+        const body=bodyRig.geometry.getAttribute('position'),vertex=bodyRig.vertex ||= new THREE.Vector3();
+        const joint=bodyRig.joint ||= new THREE.Vector3();joint.copy(headPivot.position).add(avatarRest);
+        for(let i=0;i<body.count;i++){
+          vertex.fromArray(bodyRig.rest,i*3);
+          const amount=Math.max(0,Math.min(1,(vertex.y-bodyRig.collarY)/Math.max(.001,bodyRig.topY-bodyRig.collarY)));
+          if(amount){const x=vertex.x,y=vertex.y,z=vertex.z,w=amount*amount;vertex.sub(joint).applyQuaternion(headPivot.quaternion).add(joint);vertex.set(x+(vertex.x-x)*w,y+(vertex.y-y)*w,z+(vertex.z-z)*w);}
+          body.array[i*3]=vertex.x;body.array[i*3+1]=vertex.y;body.array[i*3+2]=vertex.z;
+        }
+        body.needsUpdate=true;
+      }
+      const uv=mesh.geometry.getAttribute('uv');
+      uv.array.set(faceUV);
+      // A small iris-region texture shift moves the photographed gaze. Eyelid and
+      // glasses edges remain anchored; head movement carries the larger glance.
+      for(let i=0;i<base.length/3;i++)for(const {ex,ey,half} of eyes){
+        const x=base[i*3],y=base[i*3+1];
+        const weight=Math.max(0,1-((x-ex)/(half*.85))**2)*Math.max(0,1-((y-ey)/(half*.36))**2)*(1-blink);
+        uv.array[i*2]+=pose.gazeX*half/4.2*.28*weight;
+        uv.array[i*2+1]+=pose.gazeY*half/4.2*.28*weight;
+      }
+      uv.needsUpdate=true;
     }
     renderer.render(scene,camera);
   }
@@ -670,9 +739,11 @@ function showLesson() {
   $('lessonAvatarSlot').appendChild($('scene'));
   $('lessonCameraSlot').appendChild(video.closest('.camera-frame'));
   $('setupPage').hidden = true; $('lessonPage').hidden = false;
-  document.body.classList.add('in-lesson');
-  document.querySelector('h1').textContent = 'Занятие';
-  $('lessonSpeech').textContent = 'Я рядом. Если нужна помощь, скажи «помоги» или задай вопрос.';
+  document.body.classList.add('in-lesson');$('lessonToolbar').hidden=false;
+  document.querySelector('h1').textContent = 'Давай позанимаемся';
+  $('lessonSpeech').textContent = 'Я рядом. Скажи «помоги» и расскажи, что не получается.';
+  $('micIntro').hidden=!$('handsFree').checked || !status.speech?.enabled;
+  setListenerState('off','Микрофон ещё не включён. Можно написать вопрос.');
   history.pushState({lesson:true}, '', '#lesson');
   requestAnimationFrame(fit); window.scrollTo(0,0);
 }
@@ -680,14 +751,14 @@ function showSetup() {
   $('setupAvatarSlot').appendChild($('scene'));
   $('setupCameraSlot').appendChild(video.closest('.camera-frame'));
   $('lessonPage').hidden = true; $('setupPage').hidden = false;
-  document.body.classList.remove('in-lesson');
+  document.body.classList.remove('in-lesson');$('lessonToolbar').hidden=true;
   document.querySelector('h1').textContent = 'Рядом во время занятий';
   if (location.hash) history.replaceState({}, '', location.pathname + location.search);
   requestAnimationFrame(fit); window.scrollTo(0,0);
 }
 function setupStep(step) {
   if(scanning || recording) return;
-  const content={face:['Создадим вашу 3D-модель','Поставьте камеру на уровне глаз. Каждый шаг звучит голосом.'],voice:['Теперь запишем ваш голос','Запишите образец в тихой комнате, затем прослушайте результат.'],ready:['Всё готово к занятию','Посадите ребёнка перед камерой и начните. Вопросы можно задавать голосом или текстом.']};
+  const content={face:['Давайте создадим ваш образ','Поставьте камеру на уровне глаз. Каждый шаг звучит голосом.'],voice:['Знакомый голос — спокойнее учиться','Запишите образец в тихой комнате, затем прослушайте результат.'],ready:['Устроимся поудобнее','Посадите ребёнка перед камерой и начните. Вопросы можно задавать голосом или текстом.']};
   if(!content[step]) return;
   if(step!=='face') stopCamera();
   document.querySelectorAll('[data-step-panel]').forEach(panel=>panel.hidden=panel.dataset.stepPanel!==step);
@@ -700,14 +771,14 @@ function setupStep(step) {
 }
 function applyModelView() {
   avatarGroup?.traverse(item=>{
-    if(item.material && item!==cavityMesh) item.material.wireframe=showWireframe;
+    if(item.material && item!==cavityMesh) for(const material of Array.isArray(item.material)?item.material:[item.material])material.wireframe=showWireframe;
   });
   $('viewMeshBtn').setAttribute('aria-pressed',String(showWireframe));
   $('viewMeshBtn').textContent=showWireframe?'Скрыть сетку':'Показать сетку';
 }
 function chatMessage(role, text) {
   const box = document.createElement('p'); box.className = `chat-message ${role}`;
-  const label = document.createElement('strong'); label.textContent = role === 'user' ? 'Ребёнок' : 'Помощник';
+  const label = document.createElement('strong'); label.textContent = role === 'user' ? 'Ты' : 'Давай попробуем';
   const content = document.createElement('span'); content.textContent = text;
   box.append(label, content); $('tutorMessages').appendChild(box); box.scrollIntoView({block:'nearest'});
 }
@@ -737,7 +808,7 @@ async function answerQuestion(question) {
     completions.push(beginAudio(buffer,text,'answer',cues));
   };
   try {
-    await context().resume();$('tutorStatus').textContent='YandexGPT готовит подсказку…';
+    await context().resume();$('tutorStatus').textContent='Думаю, как помочь…';
     const started=await api('dialog',JSON.stringify({question,level:$('schoolLevel').value,session:dialogId,voice:$('replyVoice').value}));
     if(epoch!==helpEpoch){await api('dialog-cancel',JSON.stringify({id:started.id}));return;}
     dialogId=started.session;currentJob=started.id;
@@ -758,7 +829,7 @@ async function answerQuestion(question) {
       }
       if(result.state==='error')throw new Error(result.warning);
       if(result.state==='cancelled')break;
-      $('tutorStatus').textContent=result.state==='speaking'?'Озвучиваю подсказку…':'YandexGPT готовит подсказку…';
+      $('tutorStatus').textContent=result.state==='speaking'?'Озвучиваю подсказку…':'Думаю, как помочь…';
       if(performance.now()>deadline)throw new Error('Ответ занял слишком много времени.');
       await sleep(180);
     }
@@ -767,15 +838,23 @@ async function answerQuestion(question) {
       fail(e);$('tutorStatus').textContent='Повторите вопрос или начните новое задание.';}
   } finally{if(epoch===helpEpoch){tutorBusy=false;currentJob=null;controls();}}
 }
+function setListenerState(state,message) {
+  const titles={off:'Микрофон выключен',connecting:'Включаем микрофон…',listening:'Микрофон включён',speech:'Слышу тебя',waiting:'Микрофон включён · пауза',processing:'Вопрос принят',error:'Микрофон выключен'};
+  $('micCard').dataset.state=state;$('micTitle').textContent=titles[state];
+  if($('listenerStatus').textContent!==message)$('listenerStatus').textContent=message;
+  if(state!=='speech')$('lessonLevel').style.width='0%';
+  if(state==='error'||(state==='off'&&!$('handsFree').checked))$('micIntro').hidden=true;
+}
 function stopHandsFree(){
   listenEpoch++;
   if(listener){listener.sttAbort?.abort();listener.abort.abort();listener.source?.disconnect();listener.high?.disconnect();listener.low?.disconnect();listener.node?.disconnect();stopTracks(listener.mic);listener=null;}
-  $('listenerStatus').textContent='Микрофон выключен';
+  childSpeakingUntil=0;setListenerState('off',paused?'Перерыв. Микрофон и камера выключены.':'Включи «Без кнопки» или напиши вопрос.');
 }
 async function startHandsFree(){
   stopHandsFree();
   if(!running||paused||!$('handsFree').checked)return;
-  if(!status.speech?.enabled){$('listenerStatus').textContent='Для голосовых вопросов настройте SpeechKit';return;}
+  if(!status.speech?.enabled){setListenerState('off','Попроси родителя подключить голосовые вопросы. Пока можно написать.');return;}
+  setListenerState('connecting','Разреши микрофон в окне браузера. Затем можно говорить без кнопки.');
   const epoch=listenEpoch,entry={abort:new AbortController()};listener=entry;
   try{
     const ctx=context();await ctx.resume();
@@ -792,42 +871,43 @@ async function startHandsFree(){
       const suppressed=!running||paused||document.hidden||tutorBusy||questionRecording||listenerPending||playing||performance.now()<echoUntil||presence.state==='absent';
       const samples=gate.push(data,suppressed);
       const message=tutorBusy?'Готовлю ответ · микрофон на паузе':listenerPending?'Распознаю вопрос…':suppressed?(presence.state==='absent'?'Жду возвращения к камере':'Микрофон на паузе · слушаю после ответа'):gate.active.length?'Слышу речь…':'Слушаю · скажи «помоги» или задай вопрос';
-      if($('listenerStatus').textContent!==message)$('listenerStatus').textContent=message;
+      setListenerState(listenerPending?'processing':suppressed?'waiting':gate.active.length?'speech':'listening',message);
+      if(gate.active.length){childSpeakingUntil=performance.now()+1500;$('lessonLevel').style.width=Math.min(100,gate.level*600)+'%';}
       if(samples)recognizeHandsFree(encodeWav(samples,ctx.sampleRate),epoch).catch(fail);
     };
     entry.source.connect(entry.high);entry.high.connect(entry.low);entry.low.connect(entry.node);entry.node.connect(ctx.destination);
-    entry.mic.getAudioTracks()[0].onended=()=>{if(epoch===listenEpoch){stopHandsFree();$('listenerStatus').textContent='Микрофон отключён · включите снова';}};
-  }catch(e){if(epoch===listenEpoch){stopHandsFree();$('handsFree').checked=false;throw mediaError(e);}}
+    entry.mic.getAudioTracks()[0].onended=()=>{if(epoch===listenEpoch){stopHandsFree();$('handsFree').checked=false;setListenerState('error','Доступ к микрофону потерян. Включи «Без кнопки», чтобы попробовать снова.');}};
+  }catch(e){if(epoch===listenEpoch){stopHandsFree();$('handsFree').checked=false;setListenerState('error','Не удалось включить микрофон. Разреши доступ в браузере или напиши вопрос.');throw mediaError(e);}}
 }
 async function recognizeHandsFree(wav,listenId){
   listenerPending=true;controls();const epoch=helpEpoch;const abort=new AbortController();if(listener)listener.sttAbort=abort;
-  $('listenerStatus').textContent='Распознаю вопрос…';
+  setListenerState('processing','Распознаю вопрос. Сейчас отвечу.');
   try{
     const result=await api('speech',wav,true,50000,abort.signal);
     if(listenId!==listenEpoch||epoch!==helpEpoch||!running||paused)return;
     if(isDirectedSpeech(result.text,performance.now()<followupUntil))await answerQuestion(result.text);
-    else $('listenerStatus').textContent='Речь без вопроса пропущена';
+    else setListenerState('listening','Скажи «помоги» и задай вопрос.');
   }catch(e){
     if(listenId!==listenEpoch||epoch!==helpEpoch)return;
-    if(/не имеет доступа|добавьте|лимит|код 429/i.test(e.message)){$('handsFree').checked=false;stopHandsFree();$('listenerStatus').textContent=e.message;fail(e);}
-    else $('listenerStatus').textContent='Не разобрал речь · повтори вопрос';
+    if(/не имеет доступа|добавьте|лимит|код 429/i.test(e.message)){$('handsFree').checked=false;stopHandsFree();setListenerState('error',e.message);fail(e);}
+    else setListenerState('listening','Не разобрал речь. Попробуй ещё раз.');
   }finally{listenerPending=false;controls();}
 }
 async function voiceQuestion() {
   if(questionRecording) { questionStop=true; return; }
   if(tutorBusy||listenerPending||!running||paused)return;
   stopHandsFree();questionRecording=true; questionStop=false; questionCancel=false;
-  questionAbort=new AbortController(); stopAudio(); controls();
+  questionAbort=new AbortController(); stopAudio();setListenerState('connecting','Разреши микрофон в браузере.'); controls();
   let ctx,source,node,mic;
   let wav;
   try {
     ctx=new AudioContext(); await ctx.resume();
     mic=await withTimeout(navigator.mediaDevices.getUserMedia({audio:{channelCount:1,echoCancellation:true,noiseSuppression:true}}),20000,stopTracks,questionAbort.signal);
-    questionStream=mic;
+    questionStream=mic;setListenerState('speech','Говори. Когда закончишь, нажми «Закончить вопрос».');
     await ctx.audioWorklet.addModule('/recorder.js');
     source=ctx.createMediaStreamSource(mic); node=new AudioWorkletNode(ctx,'recorder');
     const chunks=[]; let count=0;
-    node.port.onmessage=({data})=>{chunks.push(data);count+=data.length;};
+    node.port.onmessage=({data})=>{chunks.push(data);count+=data.length;const rms=Math.sqrt(data.reduce((v,x)=>v+x*x,0)/data.length);if(rms>.008)childSpeakingUntil=performance.now()+1500;};
     source.connect(node);node.connect(ctx.destination);
     const began=performance.now();
     while(!questionStop && !questionCancel && count<ctx.sampleRate*25) {
@@ -844,7 +924,7 @@ async function voiceQuestion() {
   if(!wav || questionCancel) return;
   const epoch=++helpEpoch; tutorBusy=true;controls();
   try {
-    $('tutorStatus').textContent='SpeechKit распознаёт вопрос…';
+    $('tutorStatus').textContent='Распознаю твой вопрос…';
     const result=await api('speech',wav,true,50000);
     if(epoch!==helpEpoch) return;
     tutorBusy=false;
@@ -860,6 +940,7 @@ function action(id, fn) { $(id).addEventListener('click', async () => {
 function updateVoiceMode() {
   const direct = $('voiceMode').value === 'direct';
   $('recordBtn').textContent = direct ? 'Записать напоминание · 8 сек' : 'Записать образец · 20 сек';
+  $('voiceModeHint').textContent=direct?'Запись сохранится как есть. Для новых ответов вашим голосом выберите второй вариант.':'Новые фразы будут создаваться вашим голосом на компьютере. Первый ответ после запуска может готовиться дольше.';
   $('readText').textContent = direct ? 'Давай вернёмся к заданию. Если нужна помощь, позови меня.' : 'Привет! Я рядом, если тебе нужна помощь. Давай спокойно разберёмся с заданием. Сначала прочитаем условие, потом подумаем над решением. Не нужно торопиться. У тебя всё получится.';
 }
 $('voiceMode').addEventListener('change', () => { voiceModeTouched = true; updateVoiceMode(); controls(); });
@@ -875,20 +956,23 @@ action('cameraBtn', async () => { connecting = true; controls(); try { if (strea
 action('scanBtn', scan); action('recordBtn', record); action('generateBtn', async () => { await api('generate', new Uint8Array()); await poll(); });
 action('testVoiceBtn', () => playVoice('preview')); action('startBtn', start); action('pauseBtn', pause); action('stopBtn', stop);
 action('lessonVoiceBtn', () => playVoice('lesson')); action('stopSpeechBtn', cancelTutor);
-$('handsFree').addEventListener('change',()=>startHandsFree().catch(fail));
+$('handsFree').addEventListener('change',()=>{clearError();$('readyHandsFree').checked=$('handsFree').checked;startHandsFree().catch(fail);});
+$('readyHandsFree').addEventListener('change',()=>{$('handsFree').checked=$('readyHandsFree').checked;});
+action('dismissMicIntroBtn',()=>{$('micIntro').hidden=true;});
+document.querySelector('.brand').addEventListener('click',event=>{event.preventDefault();if(running)stop();setupStep('face');});
 $('replyVoice').addEventListener('change',()=>{if(running&&$('replyVoice').value==='parent')api('voice-warm',new Uint8Array()).catch(()=>{});});
 $('voiceQuestionBtn').addEventListener('click',()=>voiceQuestion().catch(fail));
 $('scanAudio').addEventListener('change',()=>{if(!$('scanAudio').checked) window.speechSynthesis?.cancel();});
 document.querySelectorAll('[data-setup-step]').forEach(button=>button.addEventListener('click',()=>setupStep(button.dataset.setupStep)));
 action('nextVoiceBtn',()=>setupStep('voice'));action('nextReadyBtn',()=>setupStep('ready'));
-action('viewFrontBtn',()=>{previewYaw=0;});action('viewSideBtn',()=>{previewYaw=.12;});
+action('viewFrontBtn',()=>{previewYaw=0;});action('viewSideBtn',()=>{previewYaw=.26;});
 action('editProportionsBtn',openPortraitEditor);
 action('savePortraitBtn',savePortrait);
-action('resetPortraitBtn',()=>{portraitAnchors=defaultPortraitAnchors(portraitView.landmarks);renderPortraitEditor();rebuildPortrait();});
+action('resetPortraitBtn',async()=>{portraitAnchors=await fitPortrait(portraitView);renderPortraitEditor();rebuildPortrait();});
 action('cancelPortraitBtn',async()=>{
   clearTimeout(portraitRebuildTimer);portraitDraft=false;$('portraitEditor').hidden=true;
   disposeAvatar();mesh=null;portraitView=null;portraitAnchors=null;avatarViews=[];
-  $('placeholder').hidden=false;$('placeholder').style.display='grid';$('faceStatus').textContent='Голова ещё не отсканирована';
+  $('placeholder').hidden=false;$('placeholder').style.display='flex';$('faceStatus').textContent='Голова ещё не отсканирована';
   await restoreAvatar();
 });
 $('portraitPoint').addEventListener('change',()=>{selectedAnchor=$('portraitPoint').value;renderPortraitEditor();});
@@ -941,7 +1025,7 @@ async function restoreAvatar() {
       return {...view,canvas};
     }));
     portraitView=null;portraitAnchors=null;portraitDraft=false;portraitConfirmed=saved.version===5;
-    if(saved.portrait){const photo=new Image();photo.src=saved.portrait.photo;await photo.decode();const canvas=document.createElement('canvas');canvas.width=photo.width;canvas.height=photo.height;canvas.getContext('2d').drawImage(photo,0,0);portraitView={...saved.portrait,canvas};portraitAnchors=saved.anchors || defaultPortraitAnchors(saved.portrait.landmarks);}
+    if(saved.portrait){const photo=new Image();photo.src=saved.portrait.photo;await photo.decode();const canvas=document.createElement('canvas');canvas.width=photo.width;canvas.height=photo.height;canvas.getContext('2d').drawImage(photo,0,0);portraitView={...saved.portrait,canvas};portraitAnchors=saved.anchors || await fitPortrait(portraitView);}
     const front = views.find(view=>view.role==='front') || [...views].sort((a,b)=>Math.abs(a.yaw||0)-Math.abs(b.yaw||0))[0];
     buildMesh(front.landmarks, front.canvas, vision.FaceLandmarker.FACE_LANDMARKS_TESSELATION, views);
     $('faceStatus').textContent = portraitConfirmed ? 'Фронтальный аватар загружен' : 'Старый скан · проверьте контур';

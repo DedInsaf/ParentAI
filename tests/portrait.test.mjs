@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {positionsFor} from '../web/core.mjs';
 import {defaultPortraitAnchors,portraitAnchorIssue,portraitBodyGeometry,portraitHairGeometry,portraitEarGeometry} from '../web/portrait-geometry.mjs';
+import {fitPortraitAnchors} from '../web/portrait-fit.mjs';
 import {OVAL} from '../web/head-geometry.mjs';
 
 function fixture() {
@@ -24,7 +25,8 @@ test('portrait uses a single photo scale and preserves adjusted neck/shoulder me
       assert.equal(geometry.uv.length,geometry.positions.length/3*2);
       assert.ok(geometry.indices.every(i=>i>=0&&i<geometry.positions.length/3));
       // Photo UV and projected vertices must agree, regardless of camera aspect ratio.
-      for(let i=0;i<geometry.positions.length/3;i++) {
+      const projected=geometry===body?Array.from({length:geometry.positions.length/3},(_,i)=>i):geometry.groups?[...new Set(geometry.groups.filter(g=>g.materialIndex===0).flatMap(g=>geometry.indices.slice(g.start,g.start+g.count)))]:Array.from({length:geometry.positions.length/3},(_,i)=>i);
+      for(const i of projected) {
         assert.ok(Math.abs(geometry.positions[i*3]-(geometry.uv[i*2]-lm[1].x)*4.2)<1e-9);
         assert.ok(Math.abs(geometry.positions[i*3+1]-(1-geometry.uv[i*2+1]-lm[1].y)*-aspect*4.2)<1e-9);
       }
@@ -45,4 +47,34 @@ test('portrait rejects crossed contours and keeps automatic estimates explicitly
   Object.assign(a,structuredClone(original));a.earLeft.x=.5;assert.match(portraitAnchorIssue(a,lm),/краями лица/);
   Object.assign(a,structuredClone(original));a.chestRight.y=a.shoulderRight.y;assert.match(portraitAnchorIssue(a,lm),/ниже плеч/);
   Object.assign(a,structuredClone(original));a.shoulderLeft.x=NaN;assert.match(portraitAnchorIssue(a,lm),/внутри снимка/);
+});
+
+test('hair has rear volume and reserves the portrait texture for the front',()=>{
+  const lm=fixture(),a=defaultPortraitAnchors(lm),frame={nose:lm[1],aspect:.75,scale:4.2},face=positionsFor(lm,1000,750);
+  const hair=portraitHairGeometry(lm,a,frame,face),body=portraitBodyGeometry(lm,a,frame,face);
+  const zs=hair.positions.filter((_,i)=>i%3===2),width=(lm[454].x-lm[234].x)*4.2;
+  assert.ok(Math.max(...zs)-Math.min(...zs)>width*.6);
+  assert.ok(hair.groups.some(g=>g.materialIndex===1));
+  assert.equal(hair.groups.length,2);assert.equal(body.groups.length,3);
+  assert.equal(portraitEarGeometry(lm,a,frame,face,-1).groups.length,2);
+  assert.equal(hair.groups.reduce((sum,g)=>sum+g.count,0),hair.indices.length);
+  assert.equal(body.groups.reduce((sum,g)=>sum+g.count,0),body.indices.length);
+  assert.ok(body.groups.some(g=>g.materialIndex===1));assert.ok(body.groups.some(g=>g.materialIndex===2));
+  // Front rows keep the forehead seam fixed when adding volume behind it.
+  for(let j=0;j<17;j++){const id=OVAL[[28,29,30,31,32,33,34,35,0,1,2,3,4,5,6,7,8][j]];assert.equal(hair.positions[j*3+2],face[id*3+2]);}
+});
+test('measured skin and clothing preserve a broad neck despite an open V-neck shirt',()=>{
+  const lm=fixture(),width=200,height=200,data=new Uint8Array(width*height);
+  const paint=(x1,x2,y1,y2,value)=>{for(let y=Math.round(y1*height);y<Math.round(y2*height);y++)for(let x=Math.round(x1*width);x<Math.round(x2*width);x++)data[y*width+x]=value;};
+  paint(.37,.63,.1,.3,1);paint(.40,.60,.3,.46,3);
+  paint(.43,.57,.46,.51,2);paint(.47,.53,.51,.56,2); // exposed chest tapers
+  paint(.23,.77,.56,.84,4);
+  const a=fitPortraitAnchors(lm,{data,width,height});
+  assert.equal(portraitAnchorIssue(a,lm),'');
+  assert.ok(a.neckRight.x-a.neckLeft.x>.12);assert.ok(a.neckLeft.y<.515);
+  assert.ok(a.shoulderLeft.x<.26);assert.ok(a.crown.y<.12);
+});
+test('unusable segmentation falls back to an editable valid contour',()=>{
+  const lm=fixture(),a=fitPortraitAnchors(lm,{data:new Uint8Array(100),width:10,height:10});
+  assert.deepEqual(a,defaultPortraitAnchors(lm));
 });
