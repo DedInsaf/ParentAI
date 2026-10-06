@@ -42,6 +42,42 @@ class AudioTests(unittest.TestCase):
 
 
 class RuntimeTests(unittest.TestCase):
+    def frontal_profile(self):
+        import base64
+        photo='data:image/jpeg;base64,'+base64.b64encode(b'\xff\xd8\xfffixture').decode()
+        points=[{'x':.5,'y':.3,'z':0} for _ in range(478)]
+        points[10]['y']=.2;points[152]['y']=.46;points[234]['x']=.4;points[454]['x']=.6
+        anchors={
+            'crown':{'x':.5,'y':.10},'templeLeft':{'x':.38,'y':.25},'templeRight':{'x':.62,'y':.25},
+            'earLeft':{'x':.38,'y':.32},'earRight':{'x':.62,'y':.32},
+            'neckLeft':{'x':.43,'y':.51},'neckRight':{'x':.57,'y':.51},
+            'shoulderLeft':{'x':.23,'y':.56},'shoulderRight':{'x':.77,'y':.56},
+            'chestLeft':{'x':.22,'y':.80},'chestRight':{'x':.78,'y':.80},
+        }
+        return {'version':5,'views':[{'landmarks':points,'photo':photo,'yaw':0,'role':'front'}],
+                'portrait':{'landmarks':points,'photo':photo,'yaw':0,'role':'portrait'},'anchors':anchors}
+
+    def test_frontal_portrait_roundtrip_with_real_outline(self):
+        value=self.frontal_profile();self.r.avatar(value)
+        self.assertEqual(self.r.avatar(),value)
+        restored=Runtime(self.temp.name);self.addCleanup(restored.close)
+        self.assertEqual(restored.avatar(),value)
+        value['anchors']['neckLeft']['x']=.41;self.r.avatar(value)
+        self.assertEqual(self.r.avatar()['anchors']['neckLeft']['x'],.41)
+
+    def test_invalid_portrait_does_not_replace_saved_profile(self):
+        import copy
+        valid=self.frontal_profile();self.r.avatar(valid)
+        for mutate in [lambda v:v.pop('anchors'),
+                       lambda v:v['anchors']['neckLeft'].update(x=.58),
+                       lambda v:v['anchors']['crown'].update(y=.3),
+                       lambda v:v['anchors']['shoulderLeft'].update(x=float('nan')),
+                       lambda v:v['portrait'].update(role='side'),
+                       lambda v:v['views'][0].update(yaw=.3)]:
+            broken=copy.deepcopy(valid);mutate(broken)
+            with self.assertRaises(ValueError):self.r.avatar(broken)
+            self.assertEqual(self.r.avatar(),valid)
+
     def test_portrait_is_preserved_and_required_for_body_profile(self):
         import base64
         photo='data:image/jpeg;base64,'+base64.b64encode(b'\xff\xd8\xfffixture').decode()

@@ -1,8 +1,9 @@
-import {neutralFacePositions, scanQuality, scanCoverage, portraitQuality, faceYaw, Presence, encodeWav, withTimeout, closeFaceOpenings, FACE_OPENINGS, mouthRig, speechOpening} from './core.mjs';
+import {positionsFor,neutralFacePositions, scanQuality, portraitQuality, faceYaw, Presence, encodeWav, withTimeout, closeFaceOpenings, FACE_OPENINGS, mouthRig, speechOpening} from './core.mjs';
 import {skullGeometry, earGeometry, neckGeometry, torsoGeometry, hairGeometry, OVAL, blinkAmount} from './head-geometry.mjs';
-import {bakeFaceAtlas} from './face-atlas.mjs';
+import {bakeFaceAtlas,bakePortraitFaceAtlas} from './face-atlas.mjs';
 import {SpeechGate,isDirectedSpeech} from './listening.mjs';
 import {mouthInteriorGeometry,mouthInteriorPositions,upperTeethGeometry} from './mouth-geometry.mjs';
+import {PORTRAIT_HANDLES,defaultPortraitAnchors,portraitAnchorIssue,portraitBodyGeometry,portraitHairContour,portraitHairGeometry,portraitEarGeometry} from './portrait-geometry.mjs';
 const $ = id => document.getElementById(id);
 const video = $('camera');
 const fail = e => { $('error').hidden = false; $('error').textContent = e.message || String(e); };
@@ -23,6 +24,8 @@ let questionRecording=false, questionStop=false, questionCancel=false, questionA
 let currentJob=null, lipShape=0, lipPucker=0;
 let previewYaw=0,showWireframe=false,scanSpeechAt=0,scanSpeechText='',scanEpoch=0;
 let portraitView=null,headPivot=null,teethMesh=null,tongueMesh=null;
+let portraitAnchors=null,portraitDraft=false,portraitConfirmed=false,selectedAnchor='neckLeft',portraitRebuildTimer;
+const portraitGroups={body:['neckLeft','neckRight','shoulderLeft','shoulderRight','chestLeft','chestRight'],hair:['crown','templeLeft','templeRight'],ears:['earLeft','earRight']};
 let listener=null,listenEpoch=0,echoUntil=0,followupUntil=0,listenerPending=false,cameraEpoch=0,cameraAbort;
 const audioSources=new Set();let audioNext=0;
 const voiceBusy = () => ['generating', 'cancelling'].includes(status.voice);
@@ -55,11 +58,15 @@ async function api(path, body, retry = true, timeout = 15000, signal) {
 function controls() {
   const transition = pendingActions.has('startBtn') || pendingActions.has('pauseBtn');
   $('scanBtn').disabled = !online || transition || !stream || scanning || running || recording || connecting;
-  $('nextVoiceBtn').disabled=!mesh || scanning;
+  $('nextVoiceBtn').disabled=!mesh || scanning || portraitDraft;
+  $('editProportionsBtn').hidden=!portraitView;
+  $('editProportionsBtn').disabled=scanning || running;
+  $('savePortraitBtn').disabled=scanning || !portraitView || running || pendingActions.has('savePortraitBtn') || Boolean(portraitAnchorIssue(portraitAnchors,portraitView.landmarks));
+  for(const control of $('portraitEditor').querySelectorAll('button:not(#savePortraitBtn),select'))control.disabled=scanning || running || pendingActions.has('savePortraitBtn');
   $('previewMotionBtn').disabled=!mesh || !status.phrases?.length || scanning || recording || running;
   $('nextReadyBtn').disabled=!(status.phrases?.length) || recording || voiceBusy();
   for(const id of ['viewFrontBtn','viewSideBtn','viewMeshBtn']) $(id).disabled=!mesh || scanning;
-  for(const button of document.querySelectorAll('[data-setup-step]')) button.disabled=scanning || recording || running;
+  for(const button of document.querySelectorAll('[data-setup-step]')) button.disabled=scanning || recording || running || (portraitDraft&&button.dataset.setupStep!=='face');
   $('cameraBtn').disabled = !online || transition || connecting || scanning || running || recording;
   $('recordBtn').disabled = !online || transition || recording || scanning || running || voiceBusy();
   $('voiceMode').disabled = recording || running || voiceBusy();
@@ -67,7 +74,7 @@ function controls() {
   $('generateBtn').disabled = !online || transition || recording || running || !status.reference || referenceRejected || status.reference_mode !== $('voiceMode').value || voiceBusy();
   $('generateBtn').textContent = $('voiceMode').value === 'direct' ? 'Сохранить напоминание' : 'Создать голос';
   $('testVoiceBtn').disabled = !online || !(status.phrases?.length) || recording || running;
-  $('startBtn').disabled = !online || transition || !mesh || !(status.phrases?.length) || running || scanning || recording || voiceBusy();
+  $('startBtn').disabled = !online || transition || !mesh || portraitDraft || !(status.phrases?.length) || running || scanning || recording || voiceBusy();
   $('pauseBtn').disabled = !running || transition;
   $('stopBtn').disabled = !running;
   $('lessonVoiceBtn').disabled = !running || paused || tutorBusy || questionRecording || !(status.phrases?.length);
@@ -192,7 +199,7 @@ function detectVideo(now) {
 
 async function scan() {
   const epoch=++scanEpoch;
-  scanning = true; $('scanProgress').value = 0; controls(); clearError();
+  scanning = true; $('portraitEditor').hidden=true; $('scanProgress').value = 0; controls(); clearError();
   const scanPanel=document.querySelector('.setup');
   scanPanel.classList.add('scanning-screen');scanPanel.setAttribute('role','dialog');scanPanel.setAttribute('aria-modal','true');scanPanel.setAttribute('aria-label','Сканирование лица и шеи');
   $('cancelScanBtn').focus({preventScroll:true});
@@ -202,8 +209,8 @@ async function scan() {
     const takePose = async (phase, instruction, validate) => {
       const phaseStarted=performance.now();
       scanInstruction(instruction,true);
-      $('scanPhase').textContent=['1 из 4 · лицо прямо','2 из 4 · поворот','3 из 4 · другой поворот','4 из 4 · плечи и футболка'][phase];
-      scanPanel.classList.toggle('portrait-scan',phase===3);
+      $('scanPhase').textContent=['1 из 2 · лицо прямо','2 из 2 · портрет по грудь'][phase];
+      scanPanel.classList.toggle('portrait-scan',phase===1);
       let stableStart = 0, previous, frameTime = -1;
       const deadline = performance.now() + 45000;
       while (scanning && epoch===scanEpoch && performance.now() < deadline) {
@@ -216,19 +223,19 @@ async function scan() {
         const movement = previous && lm ? Math.hypot(lm[1].x - previous.x, lm[1].y - previous.y) : 0;
         previous = lm?.[1];
         if (issue || movement > .018) {
-          stableStart = 0; $('scanProgress').value = phase / 4;
+          stableStart = 0; $('scanProgress').value = phase / 2;
           scanInstruction(issue || 'Не двигайтесь, сейчас сделаем снимок'); $('scanCountdown').textContent=''; continue;
         }
         if (!stableStart) stableStart = now;
         $('cameraHint').textContent = 'Отлично. Не двигайтесь';
         $('scanCountdown').textContent=String(Math.max(1,2-Math.floor((now-stableStart)/1000)));
-        $('scanProgress').value = Math.min((phase + 1) / 4, (phase + (now - stableStart) / 1800) / 4);
+        $('scanProgress').value = Math.min((phase + 1) / 2, (phase + (now - stableStart) / 1800) / 2);
         if (now - stableStart >= 1800) {
           if(now-phaseStarted<3500 || ($('scanAudio').checked && window.speechSynthesis?.speaking && now-phaseStarted<12000)) continue;
           // Freeze pixels and run the detector on that exact image. VIDEO inference
           // can otherwise describe a different frame while the head is turning.
           const canvas = document.createElement('canvas');
-          canvas.width = Math.min(720, video.videoWidth);
+          canvas.width = Math.min(1080, video.videoWidth);
           canvas.height = Math.round(video.videoHeight * canvas.width / video.videoWidth);
           canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
           lastMediaTimestamp=Math.max(performance.now(),lastMediaTimestamp+.01);
@@ -236,38 +243,25 @@ async function scan() {
           const frozen=imageResult.faceLandmarks?.[0];
           if(imageResult.faceLandmarks?.length!==1 || validate(frozen)) {stableStart=0;continue;}
           scanTone();
-          return {landmarks: frozen, canvas, photo: canvas.toDataURL('image/jpeg', .92), yaw: faceYaw(frozen),role:phase===0?'front':phase===3?'portrait':'side'};
+          return {landmarks: frozen, canvas, photo: canvas.toDataURL('image/jpeg', .92), yaw: faceYaw(frozen),role:phase===0?'front':'portrait'};
         }
       }
       if (!scanning) return null;
-      throw new Error('Не удалось снять этот ракурс. Поверните голову медленнее и оставьте уши в кадре.');
+      throw new Error('Не удалось сделать снимок. Посмотрите прямо, держите голову ровно и оставьте волосы, уши и плечи в кадре.');
     };
     const front = await takePose(0, 'Посмотрите прямо в объектив. Держите голову ровно', lm => scanQuality(lm, video.videoWidth, video.videoHeight));
     if (!front) return;
-    $('cameraHint').textContent = 'Теперь медленно поверните голову в любую сторону';
-    const side = await takePose(1, 'Первый снимок готов. Медленно поверните голову в любую сторону', lm => {
-      const issue = scanCoverage(lm, video.videoWidth, video.videoHeight), yaw = Math.abs(faceYaw(lm));
-      return issue || (yaw < .20 ? 'Поверните голову сильнее, чтобы было видно ухо' : yaw > .62 ? 'Немного повернитесь обратно' : '');
-    });
-    if (!side) return;
-    $('cameraHint').textContent = 'Отлично. Теперь поверните голову в другую сторону';
-    const other = await takePose(2, 'Второй снимок готов. Теперь поверните голову в другую сторону', lm => {
-      const issue = scanCoverage(lm, video.videoWidth, video.videoHeight), yaw = faceYaw(lm);
-      return issue || (Math.abs(yaw) < .20 || yaw * side.yaw > -.04 ? 'Поверните голову в противоположную сторону' : Math.abs(yaw) > .62 ? 'Немного повернитесь обратно' : '');
-    });
-    if (!other) return;
-    const portrait=await takePose(3,'Лицо снято. Теперь отодвиньте камеру, чтобы были видны плечи и верх футболки. Смотрите прямо.',lm=>portraitQuality(lm,video.videoWidth,video.videoHeight));
+    const portrait=await takePose(1,'Лицо снято. Теперь отодвиньте камеру для портрета по грудь. Макушка, оба уха и плечи целиком в кадре. Смотрите прямо.',lm=>portraitQuality(lm,video.videoWidth,video.videoHeight));
     if(!portrait)return;
-    portraitView=portrait;
-    const views = [front, side, other];
-    buildMesh(front.landmarks, front.canvas, (await dependencies()).FaceLandmarker.FACE_LANDMARKS_TESSELATION, views);
-    $('faceStatus').textContent = 'Объёмная маска готова';
-    const serialize=({landmarks,photo,yaw,role})=>({landmarks,photo,yaw,role});
-    await api('avatar', JSON.stringify({version: 4, views: views.map(serialize),portrait:serialize(portrait)}));
-    $('faceStatus').textContent = '3D-голова сохранена';
-    scanInstruction('Сканирование закончено. Посмотрите на модель спереди и сбоку',true);
-    $('scanPhase').textContent='Готово · 4 снимка';previewYaw=0;
-  } finally { scanning = false; lastFrame = -1; $('scanCountdown').textContent='';scanPanel.classList.remove('scanning-screen','portrait-scan');scanPanel.removeAttribute('role');scanPanel.removeAttribute('aria-modal');scanPanel.removeAttribute('aria-label');controls();$('scanBtn').focus({preventScroll:true}); }
+    portraitView=portrait;portraitAnchors=defaultPortraitAnchors(portrait.landmarks);portraitConfirmed=false;portraitDraft=true;
+    avatarViews=[front];
+    previewYaw=0;
+    buildMesh(front.landmarks,front.canvas,(await dependencies()).FaceLandmarker.FACE_LANDMARKS_TESSELATION,avatarViews);
+    stopCamera();openPortraitEditor();
+    $('faceStatus').textContent='Проверьте пропорции на снимке';
+    scanInstruction('Снимки готовы. Совместите точки контура с собой на фотографии и сохраните аватар.',true);
+    $('scanPhase').textContent='Готово · 2 снимка';
+  } finally { scanning = false; lastFrame = -1; $('scanCountdown').textContent='';scanPanel.classList.remove('scanning-screen','portrait-scan');scanPanel.removeAttribute('role');scanPanel.removeAttribute('aria-modal');scanPanel.removeAttribute('aria-label');if(portraitDraft&&portraitView&&$('portraitEditor').hidden)openPortraitEditor();controls();$('scanBtn').focus({preventScroll:true}); }
 }
 function scanInstruction(text,force=false) {
   $('cameraHint').textContent=text;
@@ -318,6 +312,58 @@ function hairColor(view){
   const color=new THREE.Color().setRGB(...rgb.map(c=>c/255),THREE.SRGBColorSpace);
   $('hairColor').value='#'+color.getHexString();return color;
 }
+function rebuildPortrait() {
+  clearTimeout(portraitRebuildTimer);
+  if(!portraitView || !avatarViews.length || running)return;
+  const front=avatarViews.find(v=>v.role==='front') || avatarViews[0];
+  buildMesh(front.landmarks,front.canvas,avatarTopology,avatarViews);
+}
+function renderPortraitEditor() {
+  if(!portraitView || !portraitAnchors)return;
+  const canvas=$('portraitCanvas');canvas.width=portraitView.canvas.width;canvas.height=portraitView.canvas.height;
+  const ctx=canvas.getContext('2d');ctx.drawImage(portraitView.canvas,0,0);ctx.lineWidth=2;ctx.strokeStyle='#c4f9de';
+  const line=points=>{ctx.beginPath();points.forEach((p,i)=>ctx[i?'lineTo':'moveTo'](p.x*canvas.width,p.y*canvas.height));ctx.stroke();};
+  const a=portraitAnchors,lm=portraitView.landmarks;
+  line(Array.from({length:33},(_,i)=>portraitHairContour(a,i/32)));
+  line([{x:a.neckLeft.x,y:lm[152].y},a.neckLeft,a.shoulderLeft,a.chestLeft,a.chestRight,a.shoulderRight,a.neckRight,{x:a.neckRight.x,y:lm[152].y}]);
+  [...$('portraitHandles').children].forEach(button=>{
+    const p=a[button.dataset.anchor];button.style.left=`${p.x*100}%`;button.style.top=`${p.y*100}%`;
+    button.hidden=!portraitGroups[$('portraitGroup').value].includes(button.dataset.anchor);
+    button.setAttribute('aria-pressed',String(button.dataset.anchor===selectedAnchor));
+  });
+  $('portraitPoint').value=selectedAnchor;
+  $('portraitHint').textContent=portraitAnchorIssue(a,lm) || `${PORTRAIT_HANDLES[selectedAnchor]}. Перетащите точку или используйте стрелки. Начальный контур нужно проверить по фото.`;
+  controls();
+}
+function openPortraitEditor() {
+  if(!portraitView)return;
+  portraitDraft=true;stopCamera();$('portraitEditor').hidden=false;
+  $('portraitHandles').replaceChildren(...Object.entries(PORTRAIT_HANDLES).map(([key,label],i)=>{
+    const button=document.createElement('button');button.type='button';button.className='portrait-handle';button.dataset.anchor=key;
+    button.textContent=String(i+1);button.setAttribute('aria-label',label);button.title=label;return button;
+  }));
+  selectPortraitGroup();
+  renderPortraitEditor();$('portraitEditor').scrollIntoView({block:'start',behavior:'smooth'});
+}
+function selectPortraitGroup() {
+  const keys=portraitGroups[$('portraitGroup').value];
+  if(!keys.includes(selectedAnchor))selectedAnchor=keys[0];
+  $('portraitPoint').replaceChildren(...keys.map(key=>new Option(PORTRAIT_HANDLES[key],key)));
+}
+function movePortraitPoint(dx,dy) {
+  if(!portraitDraft || !portraitAnchors)return;
+  const p=portraitAnchors[selectedAnchor];p.x=Math.max(.015,Math.min(.985,p.x+dx));p.y=Math.max(.015,Math.min(.985,p.y+dy));
+  renderPortraitEditor();clearTimeout(portraitRebuildTimer);portraitRebuildTimer=setTimeout(rebuildPortrait,120);
+}
+async function savePortrait() {
+  const issue=portraitAnchorIssue(portraitAnchors,portraitView?.landmarks);
+  if(issue)throw new Error(issue);
+  const serialize=({landmarks,photo,yaw,role})=>({landmarks,photo,yaw,role});
+  const front=avatarViews.find(v=>v.role==='front') || avatarViews[0];
+  await api('avatar',JSON.stringify({version:5,views:[{...serialize(front),role:'front'}],portrait:{...serialize(portraitView),role:'portrait'},anchors:portraitAnchors}));
+  portraitDraft=false;portraitConfirmed=true;$('portraitEditor').hidden=true;rebuildPortrait();
+  $('faceStatus').textContent='Фронтальный аватар сохранён';$('cameraHint').textContent='Модель готова. Можно перейти к голосу.';
+}
 function disposeAvatar() {
   if (!avatarGroup) return;
   avatarGroup.traverse(item => {
@@ -329,6 +375,8 @@ function disposeAvatar() {
 }
 function buildMesh(lm, canvas, topology, views = [{landmarks:lm, canvas, yaw:0}]) {
   avatarViews=views; avatarTopology=topology;
+  const detail=views.find(v=>v.role==='front') || views.find(v=>v.canvas===canvas) || views[0];
+  if(portraitView){lm=portraitView.landmarks;canvas=portraitView.canvas;portraitAnchors ||= defaultPortraitAnchors(lm);}
   const indices = [];
   for (let i = 0; i < topology.length; i += 3) {
     const tri = [topology[i].start, topology[i].end, topology[i + 1].end];
@@ -336,12 +384,12 @@ function buildMesh(lm, canvas, topology, views = [{landmarks:lm, canvas, yaw:0}]
   }
   const filled = closeFaceOpenings(lm, indices, false);
   const geometry = new THREE.BufferGeometry();
-  base = new Float32Array(neutralFacePositions(filled.points, canvas.width, canvas.height));
+  base = new Float32Array((portraitView?positionsFor:neutralFacePositions)(filled.points, canvas.width, canvas.height));
   geometry.setAttribute('position', new THREE.BufferAttribute(base.slice(), 3));
   geometry.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(filled.points.flatMap(p => [p.x, 1 - p.y])), 2));
   geometry.setIndex(filled.indices); geometry.computeVertexNormals(); geometry.computeBoundingSphere();
   const front=views.find(v=>v.role==='front') || views.find(v=>v.canvas===canvas) || views[0];
-  const texture = new THREE.CanvasTexture(bakeFaceAtlas(front,views,filled.indices)); texture.colorSpace = THREE.SRGBColorSpace;
+  const texture = new THREE.CanvasTexture(portraitView?bakePortraitFaceAtlas(portraitView,detail,filled.indices):bakeFaceAtlas(front,views,filled.indices)); texture.colorSpace = THREE.SRGBColorSpace;
   // The photo already contains lighting. Additional directional light made skin waxy/overexposed.
   const next = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({map: texture,roughness:1,metalness:0,side: THREE.DoubleSide}));
   const rig = mouthRig(filled.points); jawWeights = rig.weights; mouthWidth = Math.abs(base[308*3]-base[78*3]);
@@ -364,6 +412,7 @@ function buildMesh(lm, canvas, topology, views = [{landmarks:lm, canvas, yaw:0}]
   const makeGeometry = data => {
     const result = new THREE.BufferGeometry();
     result.setAttribute('position',new THREE.Float32BufferAttribute(data.positions,3));
+    if(data.uv)result.setAttribute('uv',new THREE.Float32BufferAttribute(data.uv,2));
     result.setIndex(data.indices); result.computeVertexNormals(); return result;
   };
   const shellGeometry=makeGeometry(head), colors=[];
@@ -376,35 +425,45 @@ function buildMesh(lm, canvas, topology, views = [{landmarks:lm, canvas, yaw:0}]
   }
   shellGeometry.setAttribute('color',new THREE.Float32BufferAttribute(colors,3));
   pivot.add(new THREE.Mesh(shellGeometry,new THREE.MeshStandardMaterial({vertexColors:true,roughness:1,side:THREE.DoubleSide})));
-  const hairData=hairGeometry(head,$('hairStyle').value);
-  if(hairData.positions.length) pivot.add(new THREE.Mesh(makeGeometry(hairData),hairMaterial));
-  else hairMaterial.dispose();
-  const neckData=neckGeometry(head),neck=makeGeometry(neckData),neckUV=[];
-  const bodyLandmarks=portrait.landmarks;
-  const imageFaceHeight=Math.abs(bodyLandmarks[152].y-bodyLandmarks[10].y);
-  const imageFaceWidth=Math.abs(bodyLandmarks[454].x-bodyLandmarks[234].x);
-  for(let i=0;i<neckData.positions.length;i+=3) {
-    const x=neckData.positions[i],y=neckData.positions[i+1];
-    // Keep the wider mesh sampling skin, rather than the background beside the neck.
-    const u=bodyLandmarks[152].x+(x-cx)/width*imageFaceWidth*.72;
-    const v=bodyLandmarks[152].y+(cy-height*.5-y)/height*imageFaceHeight;
-    neckUV.push(Math.max(.01,Math.min(.99,u)),1-Math.max(.01,Math.min(.99,v)));
-  }
-  neck.setAttribute('uv',new THREE.Float32BufferAttribute(neckUV,2));
-  fixedBody.add(new THREE.Mesh(neck,skinMaterial));
-  const torsoData=torsoGeometry(head),torso=makeGeometry(torsoData),torsoUV=[];
-  for(let i=0;i<torsoData.positions.length;i+=3){
-    const u=bodyLandmarks[152].x+(torsoData.positions[i]-cx)/width*imageFaceWidth;
-    const v=bodyLandmarks[152].y+(cy-height*.5-torsoData.positions[i+1])/height*imageFaceHeight;
-    torsoUV.push(Math.max(.01,Math.min(.99,u)),1-Math.max(.01,Math.min(.99,v)));
-  }
-  torso.setAttribute('uv',new THREE.Float32BufferAttribute(torsoUV,2));
-  const shirtMaterial=new THREE.MeshStandardMaterial(portraitView?{map:bodyTexture,roughness:1,side:THREE.DoubleSide}:{color:0x263d54,roughness:1,side:THREE.DoubleSide});
-  fixedBody.add(new THREE.Mesh(torso,shirtMaterial));
-  for (const side of [-1,1]) {
-    const data=earGeometry(head,side), ear=makeGeometry(data);
-    ear.setAttribute('color',new THREE.Float32BufferAttribute(data.shade.flatMap(shade=>[skin.r*shade,skin.g*shade,skin.b*shade]),3));
-    pivot.add(new THREE.Mesh(ear,new THREE.MeshStandardMaterial({vertexColors:true,roughness:1,side:THREE.DoubleSide})));
+  $('legacyAppearance').hidden=Boolean(portraitView);
+  if(portraitView) {
+    skinMaterial.dispose();hairMaterial.dispose();
+    const frame={nose:lm[1],aspect:canvas.height/canvas.width,scale:4.2};
+    const photoMaterial=new THREE.MeshStandardMaterial({map:bodyTexture,roughness:1,side:THREE.DoubleSide});
+    fixedBody.add(new THREE.Mesh(makeGeometry(portraitBodyGeometry(lm,portraitAnchors,frame,base)),photoMaterial));
+    pivot.add(new THREE.Mesh(makeGeometry(portraitHairGeometry(lm,portraitAnchors,frame,base)),photoMaterial));
+    for(const side of [-1,1])pivot.add(new THREE.Mesh(makeGeometry(portraitEarGeometry(lm,portraitAnchors,frame,base,side)),photoMaterial));
+  } else {
+    const hairData=hairGeometry(head,$('hairStyle').value);
+    if(hairData.positions.length) pivot.add(new THREE.Mesh(makeGeometry(hairData),hairMaterial));
+    else hairMaterial.dispose();
+    const neckData=neckGeometry(head),neck=makeGeometry(neckData),neckUV=[];
+    const bodyLandmarks=portrait.landmarks;
+    const imageFaceHeight=Math.abs(bodyLandmarks[152].y-bodyLandmarks[10].y);
+    const imageFaceWidth=Math.abs(bodyLandmarks[454].x-bodyLandmarks[234].x);
+    for(let i=0;i<neckData.positions.length;i+=3) {
+      const x=neckData.positions[i],y=neckData.positions[i+1];
+      // Keep the wider mesh sampling skin, rather than the background beside the neck.
+      const u=bodyLandmarks[152].x+(x-cx)/width*imageFaceWidth*.72;
+      const v=bodyLandmarks[152].y+(cy-height*.5-y)/height*imageFaceHeight;
+      neckUV.push(Math.max(.01,Math.min(.99,u)),1-Math.max(.01,Math.min(.99,v)));
+    }
+    neck.setAttribute('uv',new THREE.Float32BufferAttribute(neckUV,2));
+    fixedBody.add(new THREE.Mesh(neck,skinMaterial));
+    const torsoData=torsoGeometry(head),torso=makeGeometry(torsoData),torsoUV=[];
+    for(let i=0;i<torsoData.positions.length;i+=3){
+      const u=bodyLandmarks[152].x+(torsoData.positions[i]-cx)/width*imageFaceWidth;
+      const v=bodyLandmarks[152].y+(cy-height*.5-torsoData.positions[i+1])/height*imageFaceHeight;
+      torsoUV.push(Math.max(.01,Math.min(.99,u)),1-Math.max(.01,Math.min(.99,v)));
+    }
+    torso.setAttribute('uv',new THREE.Float32BufferAttribute(torsoUV,2));
+    const shirtMaterial=new THREE.MeshStandardMaterial(portraitView?{map:bodyTexture,roughness:1,side:THREE.DoubleSide}:{color:0x263d54,roughness:1,side:THREE.DoubleSide});
+    fixedBody.add(new THREE.Mesh(torso,shirtMaterial));
+    for (const side of [-1,1]) {
+      const data=earGeometry(head,side), ear=makeGeometry(data);
+      ear.setAttribute('color',new THREE.Float32BufferAttribute(data.shade.flatMap(shade=>[skin.r*shade,skin.g*shade,skin.b*shade]),3));
+      pivot.add(new THREE.Mesh(ear,new THREE.MeshStandardMaterial({vertexColors:true,roughness:1,side:THREE.DoubleSide})));
+    }
   }
   const nextTeeth=new THREE.Mesh(makeGeometry(upperTeethGeometry(mouthWidth)),new THREE.MeshStandardMaterial({color:0xa99f91,roughness:.8,side:THREE.DoubleSide}));
   nextTeeth.position.fromArray(base,13*3);nextTeeth.visible=false;
@@ -596,8 +655,8 @@ function tick(now) {
     if (avatarGroup) {
       const motion = matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : ((running && !paused)||audioKind==='preview' ? 1 : 0);
       avatarGroup.rotation.y=running?0:previewYaw;
-      headPivot.rotation.y=Math.sin(now / 3300)*.085*motion;
-      headPivot.rotation.x=(Math.sin(now/2100)*.025+(playing?Math.sin(now/420)*.012:0))*motion;
+      headPivot.rotation.y=Math.sin(now / 3300)*.045*motion;
+      headPivot.rotation.x=(Math.sin(now/2100)*.015+(playing?Math.sin(now/420)*.008:0))*motion;
       headPivot.rotation.z=Math.sin(now/4700)*.012*motion;
     }
     renderer.render(scene,camera);
@@ -822,7 +881,38 @@ $('voiceQuestionBtn').addEventListener('click',()=>voiceQuestion().catch(fail));
 $('scanAudio').addEventListener('change',()=>{if(!$('scanAudio').checked) window.speechSynthesis?.cancel();});
 document.querySelectorAll('[data-setup-step]').forEach(button=>button.addEventListener('click',()=>setupStep(button.dataset.setupStep)));
 action('nextVoiceBtn',()=>setupStep('voice'));action('nextReadyBtn',()=>setupStep('ready'));
-action('viewFrontBtn',()=>{previewYaw=0;});action('viewSideBtn',()=>{previewYaw=Math.PI/3;});
+action('viewFrontBtn',()=>{previewYaw=0;});action('viewSideBtn',()=>{previewYaw=.12;});
+action('editProportionsBtn',openPortraitEditor);
+action('savePortraitBtn',savePortrait);
+action('resetPortraitBtn',()=>{portraitAnchors=defaultPortraitAnchors(portraitView.landmarks);renderPortraitEditor();rebuildPortrait();});
+action('cancelPortraitBtn',async()=>{
+  clearTimeout(portraitRebuildTimer);portraitDraft=false;$('portraitEditor').hidden=true;
+  disposeAvatar();mesh=null;portraitView=null;portraitAnchors=null;avatarViews=[];
+  $('placeholder').hidden=false;$('placeholder').style.display='grid';$('faceStatus').textContent='Голова ещё не отсканирована';
+  await restoreAvatar();
+});
+$('portraitPoint').addEventListener('change',()=>{selectedAnchor=$('portraitPoint').value;renderPortraitEditor();});
+$('portraitGroup').addEventListener('change',()=>{selectPortraitGroup();renderPortraitEditor();});
+for(const [id,dx,dy] of [['pointLeft',-.003,0],['pointRight',.003,0],['pointUp',0,-.003],['pointDown',0,.003]])action(id,()=>movePortraitPoint(dx,dy));
+let portraitDrag=null;
+$('portraitHandles').addEventListener('pointerdown',event=>{
+  const button=event.target.closest('[data-anchor]');if(!button || button.disabled)return;
+  selectedAnchor=button.dataset.anchor;portraitDrag={id:event.pointerId,button};button.setPointerCapture(event.pointerId);renderPortraitEditor();event.preventDefault();
+});
+$('portraitHandles').addEventListener('pointermove',event=>{
+  if(!portraitDrag || portraitDrag.id!==event.pointerId || pendingActions.has('savePortraitBtn'))return;
+  const rect=$('portraitImage').getBoundingClientRect(),p=portraitAnchors[selectedAnchor];
+  p.x=Math.max(.015,Math.min(.985,(event.clientX-rect.left)/rect.width));p.y=Math.max(.015,Math.min(.985,(event.clientY-rect.top)/rect.height));
+  renderPortraitEditor();
+});
+for(const name of ['pointerup','pointercancel'])$('portraitHandles').addEventListener(name,event=>{
+  if(!portraitDrag || portraitDrag.id!==event.pointerId)return;
+  portraitDrag.button.releasePointerCapture(event.pointerId);portraitDrag=null;rebuildPortrait();
+});
+$('portraitHandles').addEventListener('keydown',event=>{
+  const key=event.target.dataset.anchor,delta={ArrowLeft:[-.003,0],ArrowRight:[.003,0],ArrowUp:[0,-.003],ArrowDown:[0,.003]}[event.key];
+  if(!key || !delta)return;selectedAnchor=key;event.preventDefault();movePortraitPoint(...delta);
+});
 action('previewMotionBtn',()=>playVoice('preview'));
 action('viewMeshBtn',()=>{showWireframe=!showWireframe;applyModelView();});
 $('hairStyle').addEventListener('change',()=>{
@@ -850,11 +940,12 @@ async function restoreAvatar() {
       canvas.getContext('2d').drawImage(photo,0,0);
       return {...view,canvas};
     }));
-    if(saved.portrait){const photo=new Image();photo.src=saved.portrait.photo;await photo.decode();const canvas=document.createElement('canvas');canvas.width=photo.width;canvas.height=photo.height;canvas.getContext('2d').drawImage(photo,0,0);portraitView={...saved.portrait,canvas};}
+    portraitView=null;portraitAnchors=null;portraitDraft=false;portraitConfirmed=saved.version===5;
+    if(saved.portrait){const photo=new Image();photo.src=saved.portrait.photo;await photo.decode();const canvas=document.createElement('canvas');canvas.width=photo.width;canvas.height=photo.height;canvas.getContext('2d').drawImage(photo,0,0);portraitView={...saved.portrait,canvas};portraitAnchors=saved.anchors || defaultPortraitAnchors(saved.portrait.landmarks);}
     const front = views.find(view=>view.role==='front') || [...views].sort((a,b)=>Math.abs(a.yaw||0)-Math.abs(b.yaw||0))[0];
     buildMesh(front.landmarks, front.canvas, vision.FaceLandmarker.FACE_LANDMARKS_TESSELATION, views);
-    $('faceStatus').textContent = saved.version===4 ? 'Модель с плечами загружена' : 'Старый скан · рекомендуем переснять';
-    $('cameraHint').textContent = saved.version===4 ? 'Модель загружена. Можно перейти к голосу.' : 'Переснимите лицо с новыми голосовыми подсказками.';
+    $('faceStatus').textContent = portraitConfirmed ? 'Фронтальный аватар загружен' : 'Старый скан · проверьте контур';
+    $('cameraHint').textContent = portraitConfirmed ? 'Модель загружена. Можно перейти к голосу.' : 'Сделайте два снимка прямо или настройте пропорции по сохранённому портрету.';
   } catch(e) { $('faceStatus').textContent = 'Пересканируйте лицо'; fail(e); }
   finally { controls(); }
 }

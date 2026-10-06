@@ -63,6 +63,9 @@ export function portraitQuality(lm,width,height){
   if(eyeWidth<.06)return 'Подойдите немного ближе';
   if(Math.abs(faceYaw(lm))>.075 || Math.abs(lm[263].z-lm[33].z)/eyeWidth>.12)return 'Посмотрите прямо в объектив';
   const faceHeight=Math.abs(lm[152].y-lm[10].y);
+  const faceWidth=Math.abs(lm[454].x-lm[234].x),center=(lm[454].x+lm[234].x)/2;
+  if(lm[10].y-faceHeight*.35<.025)return 'Опустите лицо в кадре: макушка и волосы должны быть видны целиком';
+  if(center-faceWidth*1.35<.025 || center+faceWidth*1.35>.975)return 'Отодвиньте камеру и поместите лицо по центру: оба уха и плечи должны быть в кадре';
   if(lm[152].y+faceHeight*1.1>.95)return 'Отодвиньте камеру: должны быть видны плечи и верх футболки';
   if(lm[10].y<.03 || Math.abs(lm[263].y-lm[33].y)*height/width/eyeWidth>.08)return 'Держите голову ровно и полностью в кадре';
   return '';

@@ -1,3 +1,26 @@
+import {closeFaceOpenings} from './core.mjs';
+
+// Keep the portrait's coordinate system, with sharper facial pixels from the close-up.
+export function bakePortraitFaceAtlas(portrait,detail,indices) {
+  const atlas=document.createElement('canvas');atlas.width=portrait.canvas.width;atlas.height=portrait.canvas.height;
+  const ctx=atlas.getContext('2d');ctx.drawImage(portrait.canvas,0,0);
+  if(!detail || detail===portrait)return atlas;
+  const srcPoints=closeFaceOpenings(detail.landmarks,[],false).points;
+  const dstPoints=closeFaceOpenings(portrait.landmarks,[],false).points;
+  for(let i=0;i<indices.length;i+=3) {
+    const ids=indices.slice(i,i+3);
+    const src=ids.map(id=>[srcPoints[id].x*detail.canvas.width,srcPoints[id].y*detail.canvas.height]);
+    const dst=ids.map(id=>[dstPoints[id].x*atlas.width,dstPoints[id].y*atlas.height]);
+    const [p,q,r]=src,[a,b,c]=dst,u=q[0]-p[0],v=q[1]-p[1],s=r[0]-p[0],t=r[1]-p[1],det=u*t-s*v;
+    if(Math.abs(det)<.05)continue;
+    const aa=((b[0]-a[0])*t-(c[0]-a[0])*v)/det,cc=((c[0]-a[0])*u-(b[0]-a[0])*s)/det;
+    const bb=((b[1]-a[1])*t-(c[1]-a[1])*v)/det,dd=((c[1]-a[1])*u-(b[1]-a[1])*s)/det;
+    ctx.save();ctx.beginPath();ctx.moveTo(...a);ctx.lineTo(...b);ctx.lineTo(...c);ctx.closePath();ctx.clip();
+    ctx.setTransform(aa,bb,cc,dd,a[0]-aa*p[0]-cc*p[1],a[1]-bb*p[0]-dd*p[1]);ctx.drawImage(detail.canvas,0,0);ctx.restore();
+  }
+  return atlas;
+}
+
 // Warp visible cheek triangles from the side scans into the front UV atlas.
 // Unseen/foreshortened triangles keep the front photo; no invented side pixels.
 export function bakeFaceAtlas(front,views,indices){

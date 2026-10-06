@@ -7,3 +7,13 @@ body.in-lesson{max-width:1600px}body.in-lesson>header h1{font-size:24px}body.in-
 body:not(.in-lesson) #readyHint{display:none}.setup-steps button:focus-visible,.model-views button:focus-visible{outline:3px solid #f6d08b;outline-offset:3px}
 
 .portrait-scan .face-guide{height:33%;width:24%;top:8%}.portrait-scan .face-guide:after{content:"";position:absolute;width:260%;height:135%;left:-80%;top:112%;border:2px dashed rgba(255,255,255,.7);border-radius:45% 45% 8% 8%}#listenerStatus{font-size:.88rem;color:var(--muted,#697985)}
+
+#portraitEditor{margin-top:22px;border-top:1px solid #354352;padding-top:16px}#portraitEditor p{font-size:14px}.portrait-editor-image{position:relative;border-radius:12px;overflow:hidden;background:#0d1117;max-width:560px;margin:16px auto;touch-action:none}.portrait-editor-image canvas{display:block;width:100%;height:auto}.portrait-handle{position:absolute;transform:translate(-50%,-50%);width:36px;height:36px;padding:0;min-height:0;border:2px solid #fff;border-radius:50%;background:#275445d9;color:#fff;box-shadow:0 1px 8px #0008;touch-action:none;font-size:12px;font-weight:700}.portrait-handle[aria-pressed=true]{background:#f1bd6d;color:#18232a;border-color:#18232a}.portrait-handle:focus-visible{outline:3px solid #fff;outline-offset:3px}.portrait-nudges{display:flex;gap:8px;margin-top:12px}.portrait-nudges button{flex:1;font-size:22px;min-height:44px;background:#253440;color:#dce8e4}#portraitHint{min-height:2.5em;color:#c4e9d6}.scanning-screen #portraitEditor{display:none}.setup:has(#portraitEditor:not([hidden])) #setupCameraSlot,.setup:has(#portraitEditor:not([hidden]))>progress{display:none}@media(max-width:760px){.portrait-handle{width:34px;height:34px}.portrait-editor-image{margin:14px -8px}}
+
+.setup:has(#portraitEditor:not([hidden]))>h2,
+.setup:has(#portraitEditor:not([hidden]))>p,
+.setup:has(#portraitEditor:not([hidden]))>.eyebrow,
+.setup:has(#portraitEditor:not([hidden]))>.audio-guidance,
+.setup:has(#portraitEditor:not([hidden]))>.buttons{display:none}
+.setup:has(#portraitEditor:not([hidden])) #portraitEditor{border:0;margin:0;padding:0}
+.portrait-handle[aria-pressed=true]{z-index:2}

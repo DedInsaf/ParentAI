@@ -11,6 +11,7 @@ import threading
 import time
 import uuid
 from voice import prepare_reference
+from portrait import validate_anchors
 
 ROOT = Path(__file__).resolve().parent
 DATA = ROOT / 'data'
@@ -103,8 +104,9 @@ class Runtime:
             if not isinstance(views, list) or len(views) not in (1, 3):
                 raise ValueError('Нужно сохранить один или три ракурса головы')
             portrait=value.get('portrait')
-            if value.get('version')==4:
-                if not isinstance(portrait,dict) or len(views)!=3:
+            version=value.get('version')
+            if version in (4,5):
+                if not isinstance(portrait,dict) or len(views)!=(1 if version==5 else 3):
                     raise ValueError('Для модели с плечами нужен дополнительный снимок по грудь.')
                 views=views+[portrait]
             saved_views, total = [], 0
@@ -129,14 +131,14 @@ class Runtime:
                 if not isinstance(yaw, (float, int)) or not math.isfinite(yaw) or abs(yaw) > 2:
                     raise ValueError('Некорректный угол головы')
                 saved_view={'landmarks': points, 'photo': photo, 'yaw': yaw}
-                if value.get('version') in (3,4):
-                    if view.get('role') not in (('front','side','portrait') if value.get('version')==4 else ('front','side')):
+                if version in (3,4,5):
+                    if view.get('role') not in (('front','portrait') if version==5 else ('front','side','portrait') if version==4 else ('front','side')):
                         raise ValueError('Не указан тип ракурса.')
                     saved_view['role']=view['role']
                 saved_views.append(saved_view)
             if total > (8_000_000 if value.get('version')==4 else 6_000_000):
                 raise ValueError('Фотографии головы слишком большие')
-            if value.get('version') in (3,4) and sum(v['role']=='front' for v in saved_views)!=1:
+            if version in (3,4,5) and sum(v['role']=='front' for v in saved_views)!=1:
                 raise ValueError('Нужен ровно один фронтальный снимок.')
             saved = ({'landmarks': saved_views[0]['landmarks'], 'photo': saved_views[0]['photo']}
                      if legacy else {'version': 3 if value.get('version') in (3,4) else 2, 'views': saved_views[:3]})
@@ -144,6 +146,13 @@ class Runtime:
                 if [v['role'] for v in saved_views]!=['front','side','side','portrait']:
                     raise ValueError('Некорректная последовательность снимков.')
                 saved.update(version=4,portrait=saved_views[3])
+            if version==5:
+                if [v['role'] for v in saved_views]!=['front','portrait']:
+                    raise ValueError('Нужны фронтальный снимок и портрет по грудь.')
+                if any(abs(v['yaw'])>.08 for v in saved_views):
+                    raise ValueError('Снимки должны быть сделаны прямо в камеру.')
+                anchors=validate_anchors(value.get('anchors'),saved_views[1]['landmarks'])
+                saved=dict(version=5,views=[saved_views[0]],portrait=saved_views[1],anchors=anchors)
             atomic_json(path, saved)
             return {'ok': True}
 

@@ -103,4 +103,6 @@ test('body portrait requires space below the chin and keeps a strict front pose'
   assert.equal(portraitQuality(lm,960,720),'');
   lm[152].y=.7;assert.match(portraitQuality(lm,960,720),/плечи/);
   lm[152].y=.5;lm[1].x=.54;assert.match(portraitQuality(lm,960,720),/прямо/);
+  lm[1].x=.5;lm[10].y=.05;assert.match(portraitQuality(lm,960,720),/макушка/);
+  lm[10].y=.2;lm[234].x=.05;lm[454].x=.4;assert.match(portraitQuality(lm,960,720),/по центру/);
 });
