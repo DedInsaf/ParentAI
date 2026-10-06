@@ -46,7 +46,9 @@ export function neckGeometry(head) {
   const {cx,cy,width,height,edgeZ}=head, positions=[],indices=[];
   const profiles=Array.from({length:25},(_,i)=>{
     const t=i/24;
-    return [.19-.035*Math.sin(Math.PI*t)+.015*t, .32+.51*t, .15-.016*Math.sin(Math.PI*t)];
+    // Tuck under the jaw, narrow gently at mid-neck, then meet the collar.
+    // The old diameter was only a third of face width and looked like a stalk.
+    return [.30-.03*Math.sin(Math.PI*t)+.025*t, .32+.51*t, .21-.018*Math.sin(Math.PI*t)+.018*t];
   });
   for(const [ring,[rx,drop,rz]] of profiles.entries()) for(let j=0;j<32;j++) {
     const a=j/32*Math.PI*2;
@@ -85,7 +87,7 @@ export function blinkAmount(seconds) {
 
 export function torsoGeometry(head){
   const {cx,cy,width,height,edgeZ}=head,positions=[],indices=[];
-  const profiles=[[.21,.74,.15],[.64,.85,.20],[1.07,1,.25],[1.12,1.2,.27],[1.06,1.56,.27]];
+  const profiles=[[.34,.74,.23],[.64,.85,.24],[1.07,1,.25],[1.12,1.2,.27],[1.06,1.56,.27]];
   const rows=32,segments=48;
   for(let row=0;row<=rows;row++){
     const v=row/rows*(profiles.length-1),i=Math.min(profiles.length-2,Math.floor(v));

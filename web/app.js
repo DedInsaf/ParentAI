@@ -2,6 +2,7 @@ import {neutralFacePositions, scanQuality, scanCoverage, portraitQuality, faceYa
 import {skullGeometry, earGeometry, neckGeometry, torsoGeometry, hairGeometry, OVAL, blinkAmount} from './head-geometry.mjs';
 import {bakeFaceAtlas} from './face-atlas.mjs';
 import {SpeechGate,isDirectedSpeech} from './listening.mjs';
+import {mouthInteriorGeometry,mouthInteriorPositions,upperTeethGeometry} from './mouth-geometry.mjs';
 const $ = id => document.getElementById(id);
 const video = $('camera');
 const fail = e => { $('error').hidden = false; $('error').textContent = e.message || String(e); };
@@ -345,14 +346,11 @@ function buildMesh(lm, canvas, topology, views = [{landmarks:lm, canvas, yaw:0}]
   const next = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({map: texture,roughness:1,metalness:0,side: THREE.DoubleSide}));
   const rig = mouthRig(filled.points); jawWeights = rig.weights; mouthWidth = Math.abs(base[308*3]-base[78*3]);
   cavityIds = FACE_OPENINGS[2];
-  const cavityPositions = new Float32Array((cavityIds.length + 1) * 3);
-  cavityIds.forEach((id, i) => cavityPositions.set(base.slice(id * 3, id * 3 + 3), i * 3));
-  for (const axis of [0,1,2]) cavityPositions[cavityIds.length*3+axis] = cavityIds.reduce((sum,id)=>sum+base[id*3+axis],0)/cavityIds.length;
-  for (let i=2;i<cavityPositions.length;i+=3) cavityPositions[i] -= .012;
+  const cavityData=mouthInteriorGeometry(base,cavityIds,mouthWidth);
   const cavityGeometry = new THREE.BufferGeometry();
-  cavityGeometry.setAttribute('position', new THREE.BufferAttribute(cavityPositions, 3));
-  cavityGeometry.setIndex(cavityIds.flatMap((_,i)=>[i,(i+1)%cavityIds.length,cavityIds.length]));
-  const nextCavity = new THREE.Mesh(cavityGeometry, new THREE.MeshBasicMaterial({color:0x301720,side:THREE.DoubleSide}));
+  cavityGeometry.setAttribute('position', new THREE.BufferAttribute(cavityData.positions, 3));
+  cavityGeometry.setIndex(cavityData.indices);
+  const nextCavity = new THREE.Mesh(cavityGeometry, new THREE.MeshBasicMaterial({color:0x241218,side:THREE.DoubleSide}));
 
   const head=skullGeometry(base), {cx,cy,width,height,edgeZ,depth}=head;
   const skin = sampledColor(views, view => view.landmarks[view.yaw < 0 ? 454 : 234], 0xc58f78);
@@ -387,7 +385,8 @@ function buildMesh(lm, canvas, topology, views = [{landmarks:lm, canvas, yaw:0}]
   const imageFaceWidth=Math.abs(bodyLandmarks[454].x-bodyLandmarks[234].x);
   for(let i=0;i<neckData.positions.length;i+=3) {
     const x=neckData.positions[i],y=neckData.positions[i+1];
-    const u=bodyLandmarks[152].x+(x-cx)/width*imageFaceWidth;
+    // Keep the wider mesh sampling skin, rather than the background beside the neck.
+    const u=bodyLandmarks[152].x+(x-cx)/width*imageFaceWidth*.72;
     const v=bodyLandmarks[152].y+(cy-height*.5-y)/height*imageFaceHeight;
     neckUV.push(Math.max(.01,Math.min(.99,u)),1-Math.max(.01,Math.min(.99,v)));
   }
@@ -407,12 +406,12 @@ function buildMesh(lm, canvas, topology, views = [{landmarks:lm, canvas, yaw:0}]
     ear.setAttribute('color',new THREE.Float32BufferAttribute(data.shade.flatMap(shade=>[skin.r*shade,skin.g*shade,skin.b*shade]),3));
     pivot.add(new THREE.Mesh(ear,new THREE.MeshStandardMaterial({vertexColors:true,roughness:1,side:THREE.DoubleSide})));
   }
-  const lipX=(base[13*3]+base[14*3])/2,lipY=base[13*3+1],lipZ=(base[13*3+2]+base[14*3+2])/2;
-  const toothGeometry=new THREE.BoxGeometry(mouthWidth*.60,mouthWidth*.065,mouthWidth*.018,8,1,1);
-  toothGeometry.translate(lipX,lipY-mouthWidth*.045,lipZ-.009);
-  const nextTeeth=new THREE.Mesh(toothGeometry,new THREE.MeshBasicMaterial({color:0xe8ded0}));nextTeeth.visible=false;
-  const tongueGeometry=new THREE.SphereGeometry(mouthWidth*.2,12,8);tongueGeometry.scale(1,.25,.08);tongueGeometry.translate(lipX,lipY-mouthWidth*.10,lipZ-.008);
-  const nextTongue=new THREE.Mesh(tongueGeometry,new THREE.MeshBasicMaterial({color:0x8e4755}));nextTongue.visible=false;
+  const nextTeeth=new THREE.Mesh(makeGeometry(upperTeethGeometry(mouthWidth)),new THREE.MeshStandardMaterial({color:0xa99f91,roughness:.8,side:THREE.DoubleSide}));
+  nextTeeth.position.fromArray(base,13*3);nextTeeth.visible=false;
+  const tongueGeometry=new THREE.SphereGeometry(mouthWidth*.16,12,8);tongueGeometry.scale(1,.20,.12);
+  tongueGeometry.translate(0,mouthWidth*.013,-mouthWidth*.055);
+  const nextTongue=new THREE.Mesh(tongueGeometry,new THREE.MeshBasicMaterial({color:0x71343f}));
+  nextTongue.position.fromArray(base,14*3);nextTongue.visible=false;
   pivot.add(nextCavity,next,nextTeeth,nextTongue);
   group.add(pivot,fixedBody);
   group.position.set(cx,cy,edgeZ-depth*.32);
@@ -579,13 +578,21 @@ function tick(now) {
     pos.needsUpdate = true;
     if (cavityMesh) {
       const mouth = cavityMesh.geometry.getAttribute('position');
-      cavityIds.forEach((id,i)=>{ mouth.array[i*3]=pos.array[id*3]; mouth.array[i*3+1]=pos.array[id*3+1]; mouth.array[i*3+2]=pos.array[id*3+2]-.012; });
-      for (const axis of [0,1,2]) mouth.array[cavityIds.length*3+axis]=cavityIds.reduce((sum,id)=>sum+mouth.array[cavityIds.indexOf(id)*3+axis],0)/cavityIds.length;
+      mouthInteriorPositions(pos.array,cavityIds,mouthWidth,mouth.array);
       mouth.needsUpdate = true;
     }
     mesh.geometry.computeVertexNormals();
-    if(teethMesh)teethMesh.visible=jaw>mouthWidth*.022;
-    if(tongueMesh)tongueMesh.visible=jaw>mouthWidth*.065;
+    const aperture=Math.max(0,pos.array[13*3+1]-pos.array[14*3+1]);
+    if(teethMesh) {
+      teethMesh.visible=jaw>mouthWidth*.05 && aperture>mouthWidth*.045;
+      teethMesh.position.fromArray(pos.array,13*3).sub(avatarGroup.position);
+      teethMesh.scale.x=1+lipShape;
+    }
+    if(tongueMesh) {
+      tongueMesh.visible=jaw>mouthWidth*.08 && aperture>mouthWidth*.08;
+      tongueMesh.position.fromArray(pos.array,14*3).sub(avatarGroup.position);
+      tongueMesh.scale.x=1+lipShape;
+    }
     if (avatarGroup) {
       const motion = matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : ((running && !paused)||audioKind==='preview' ? 1 : 0);
       avatarGroup.rotation.y=running?0:previewYaw;

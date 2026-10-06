@@ -28,5 +28,16 @@ test('shirt shoulders extend beyond the head and connect at the neck',async()=>{
   const torsoTop=Math.max(...torso.positions.filter((_,i)=>i%3===1));
   const neckBottom=Math.min(...neck.positions.filter((_,i)=>i%3===1));
   assert.ok(torsoTop>neckBottom); // overlap prevents a visible gap
+  // The visible neck must support the head, with a collar enclosing its base.
+  for(let row=9;row<25;row++) {
+    const xs=neck.positions.slice(row*32*3,(row+1)*32*3).filter((_,i)=>i%3===0);
+    assert.ok(Math.max(...xs)-Math.min(...xs)>=head.width*.53);
+  }
+  const neckBase=neck.positions.slice(24*32*3,25*32*3);
+  const collar=torso.positions.slice(0,48*3);
+  for(const axis of [0,2]) {
+    const extent=points=>Math.max(...points.filter((_,i)=>i%3===axis))-Math.min(...points.filter((_,i)=>i%3===axis));
+    assert.ok(extent(collar)>=extent(neckBase));
+  }
   assert.ok(torso.indices.every(i=>i>=0&&i<torso.positions.length/3));
 });
