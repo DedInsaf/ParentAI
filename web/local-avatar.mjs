@@ -2,7 +2,7 @@ import {closeFaceOpenings, FACE_OPENINGS, mouthRig, neutralFacePositions} from '
 import {skullGeometry, earGeometry, neckGeometry, torsoGeometry, hairGeometry, OVAL} from './head-geometry.mjs';
 import {bakeFaceAtlas} from './face-atlas.mjs';
 import {mouthInteriorGeometry, mouthInteriorPositions} from './mouth-geometry.mjs';
-import {defaultPortraitAnchors, portraitBodyGeometry, portraitHairGeometry, portraitEarGeometry} from './portrait-geometry.mjs';
+import {defaultPortraitAnchors, portraitHairGeometry} from './portrait-geometry.mjs';
 
 const clamp=value=>Math.max(0,Math.min(.999999,value));
 
@@ -19,6 +19,32 @@ function sample(THREE,view,x,y,fallback){
   const ctx=view.canvas.getContext('2d',{willReadFrequently:true}),w=view.canvas.width,h=view.canvas.height;
   const px=ctx.getImageData(clamp(x)*w|0,clamp(y)*h|0,1,1).data;
   return new THREE.Color().setRGB(px[0]/255,px[1]/255,px[2]/255,THREE.SRGBColorSpace);
+}
+function colorBytes(color){const hex=color.getHex();return [(hex>>16)&255,(hex>>8)&255,hex&255];}
+function cleanedPortrait(view,topColor,bottomColor,boundary){
+  const canvas=document.createElement('canvas');canvas.width=view.canvas.width;canvas.height=view.canvas.height;
+  const ctx=canvas.getContext('2d',{willReadFrequently:true});ctx.drawImage(view.canvas,0,0);
+  const mask=view.segmentation;if(!mask?.data?.length){ctx.fillStyle='#'+topColor.getHexString();ctx.fillRect(0,0,canvas.width,canvas.height);return canvas;}
+  const pixels=ctx.getImageData(0,0,canvas.width,canvas.height),top=colorBytes(topColor),bottom=colorBytes(bottomColor);
+  for(let y=0;y<canvas.height;y++)for(let x=0;x<canvas.width;x++){
+    const mx=Math.min(mask.width-1,Math.floor(x/canvas.width*mask.width)),my=Math.min(mask.height-1,Math.floor(y/canvas.height*mask.height));
+    if(mask.data[my*mask.width+mx]!==0)continue;
+    const fill=y/canvas.height<boundary?top:bottom,i=(y*canvas.width+x)*4;
+    pixels.data[i]=fill[0];pixels.data[i+1]=fill[1];pixels.data[i+2]=fill[2];pixels.data[i+3]=255;
+  }
+  ctx.putImageData(pixels,0,0);return canvas;
+}
+function segmentedColor(THREE,view,category,fallback){
+  const mask=view.segmentation;if(!mask?.data?.length)return new THREE.Color(fallback);
+  const ctx=view.canvas.getContext('2d',{willReadFrequently:true}),pixels=ctx.getImageData(0,0,view.canvas.width,view.canvas.height).data;
+  let r=0,g=0,b=0,count=0;
+  for(let my=0;my<mask.height;my+=2)for(let mx=0;mx<mask.width;mx+=2){
+    if(mask.data[my*mask.width+mx]!==category)continue;
+    const x=Math.min(view.canvas.width-1,Math.floor((mx+.5)/mask.width*view.canvas.width));
+    const y=Math.min(view.canvas.height-1,Math.floor((my+.5)/mask.height*view.canvas.height)),i=(y*view.canvas.width+x)*4;
+    r+=pixels[i];g+=pixels[i+1];b+=pixels[i+2];count++;
+  }
+  return count>12?new THREE.Color().setRGB(r/count/255,g/count/255,b/count/255,THREE.SRGBColorSpace):new THREE.Color(fallback);
 }
 
 export class LocalAvatar {
@@ -41,7 +67,7 @@ export class LocalAvatar {
     const rig=mouthRig(points),mouthWidth=Math.abs(base[308*3]-base[78*3]),cavityIds=FACE_OPENINGS[2];
     const cavityData=mouthInteriorGeometry(base,cavityIds,mouthWidth),cavityGeometry=geometry(THREE,cavityData);
     const cavity=new THREE.Mesh(cavityGeometry,new THREE.MeshBasicMaterial({color:0x241218,side:THREE.DoubleSide}));
-    const head=skullGeometry(base),skin=sample(THREE,front,front.landmarks[1].x,front.landmarks[1].y+.12,0xc58f78);
+    const head=skullGeometry(base),skin=segmentedColor(THREE,portrait,3,0xc58f78);
     const shellGeometry=geometry(THREE,head),colors=[],ctx=front.canvas.getContext('2d',{willReadFrequently:true});
     for(let i=0;i<head.positions.length/3;i++){
       const p=front.landmarks[OVAL[i%OVAL.length]],rgb=ctx.getImageData(clamp(p.x)*front.canvas.width|0,clamp(p.y)*front.canvas.height|0,1,1).data;
@@ -51,22 +77,37 @@ export class LocalAvatar {
     const skinMaterial=new THREE.MeshStandardMaterial({color:skin,roughness:1,side:THREE.DoubleSide});
     const shell=new THREE.Mesh(shellGeometry,new THREE.MeshStandardMaterial({vertexColors:true,roughness:1,side:THREE.DoubleSide}));
     const group=new THREE.Group(),pivot=new THREE.Group(),body=new THREE.Group();pivot.add(shell);
-    const hairSample=sample(THREE,portrait,portrait.landmarks[10].x,Math.max(.01,portrait.landmarks[10].y-.05),0x37261c);
+    const hairSample=segmentedColor(THREE,portrait,1,0x37261c);
     const anchors=portrait.anchors||defaultPortraitAnchors(portrait.landmarks);
     if(portrait.anchors){
-      const frontWidth=Math.abs(front.landmarks[454].x-front.landmarks[234].x),portraitWidth=Math.max(.01,Math.abs(portrait.landmarks[454].x-portrait.landmarks[234].x));
-      const frame={nose:portrait.landmarks[1],aspect:portrait.canvas.height/portrait.canvas.width,scale:4.2*frontWidth/portraitWidth};
-      const portraitTexture=new THREE.CanvasTexture(portrait.canvas);portraitTexture.colorSpace=THREE.SRGBColorSpace;
-      const photoMaterial=new THREE.MeshStandardMaterial({map:portraitTexture,roughness:1,side:THREE.DoubleSide});
-      const shirt=sample(THREE,portrait,(anchors.chestLeft.x+anchors.chestRight.x)/2,Math.max(anchors.shoulderLeft.y,anchors.shoulderRight.y)+.08,0x365064);
+      const portraitWidth=Math.max(.01,Math.abs(portrait.landmarks[454].x-portrait.landmarks[234].x)),portraitHeight=Math.max(.01,Math.abs(portrait.landmarks[152].y-portrait.landmarks[10].y));
+      const scale=Math.abs(base[454*3]-base[234*3])/portraitWidth,vertical=Math.abs(base[152*3+1]-base[10*3+1])/portraitHeight;
+      const aspect=vertical/scale,nose=portrait.landmarks[1];
+      const frame={nose:{x:nose.x-base[1*3]/scale,y:nose.y+base[1*3+1]/vertical},aspect,scale};
+      const shirt=segmentedColor(THREE,portrait,4,0x365064);
       const clothMaterial=new THREE.MeshStandardMaterial({color:shirt,roughness:1,side:THREE.DoubleSide});
-      body.add(new THREE.Mesh(geometry(THREE,portraitBodyGeometry(portrait.landmarks,anchors,frame,base)),[photoMaterial,skinMaterial,clothMaterial]));
+      const neckData=neckGeometry(head),measuredNeck=(anchors.neckRight.x-anchors.neckLeft.x)/portraitWidth;
+      const neckScale=Math.max(.78,Math.min(1.28,measuredNeck/.60));
+      for(let i=0;i<neckData.positions.length;i+=3)neckData.positions[i]=head.cx+(neckData.positions[i]-head.cx)*neckScale;
+      body.add(new THREE.Mesh(geometry(THREE,neckData),skinMaterial));
+      const torsoData=torsoGeometry(head),measuredShoulders=(anchors.shoulderRight.x-anchors.shoulderLeft.x)/portraitWidth;
+      const torsoScale=Math.max(.78,Math.min(1.25,measuredShoulders/2.24));
+      for(let i=0;i<torsoData.positions.length;i+=3)torsoData.positions[i]=head.cx+(torsoData.positions[i]-head.cx)*torsoScale;
+      body.add(new THREE.Mesh(geometry(THREE,torsoData),clothMaterial));
       const strands=document.createElement('canvas');strands.width=128;strands.height=128;const sc=strands.getContext('2d');sc.fillStyle='#'+hairSample.getHexString();sc.fillRect(0,0,128,128);
       for(let i=0;i<150;i++){sc.strokeStyle=i%3?'rgba(255,255,255,.04)':'rgba(0,0,0,.11)';sc.beginPath();const x=(i*31.7)%128;sc.moveTo(x,-4);sc.bezierCurveTo(x-8,35,x+7,88,x-4,132);sc.stroke();}
       const strandTexture=new THREE.CanvasTexture(strands);strandTexture.colorSpace=THREE.SRGBColorSpace;
       const rearHair=new THREE.MeshStandardMaterial({map:strandTexture,roughness:1,side:THREE.DoubleSide});
-      pivot.add(new THREE.Mesh(geometry(THREE,portraitHairGeometry(portrait.landmarks,anchors,frame,base)),[photoMaterial,rearHair]));
-      for(const side of [-1,1])pivot.add(new THREE.Mesh(geometry(THREE,portraitEarGeometry(portrait.landmarks,anchors,frame,base,side)),[photoMaterial,skinMaterial]));
+      const hairCanvas=cleanedPortrait(portrait,hairSample,hairSample,1),hairTexture=new THREE.CanvasTexture(hairCanvas);hairTexture.colorSpace=THREE.SRGBColorSpace;
+      const hairPhotoMaterial=new THREE.MeshStandardMaterial({map:hairTexture,roughness:1,side:THREE.DoubleSide});
+      const fittedHair=portraitHairGeometry(portrait.landmarks,anchors,frame,base),hairSeam=[28,29,30,31,32,33,34,35,0,1,2,3,4,5,6,7,8];
+      for(let j=0;j<hairSeam.length;j++){const id=OVAL[hairSeam[j]];fittedHair.positions[j*3]=base[id*3];fittedHair.positions[j*3+1]=base[id*3+1];fittedHair.positions[j*3+2]=base[id*3+2];}
+      pivot.add(new THREE.Mesh(geometry(THREE,fittedHair),[hairPhotoMaterial,rearHair]));
+      for(const side of [-1,1]){
+        const earData=earGeometry(head,side),ear=geometry(THREE,earData),colors=earData.shade.flatMap(value=>[skin.r*value,skin.g*value,skin.b*value]);
+        ear.setAttribute('color',new THREE.Float32BufferAttribute(colors,3));
+        pivot.add(new THREE.Mesh(ear,new THREE.MeshStandardMaterial({vertexColors:true,roughness:1,side:THREE.DoubleSide})));
+      }
     }else{
       const hairData=hairGeometry(head,'short');
       if(hairData.positions.length)pivot.add(new THREE.Mesh(geometry(THREE,hairData),new THREE.MeshStandardMaterial({color:hairSample,roughness:.95,side:THREE.DoubleSide})));

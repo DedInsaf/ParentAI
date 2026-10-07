@@ -276,6 +276,7 @@ async function fitPortrait(view) {
       worker.onerror=event=>{clearTimeout(timer);reject(new Error(event.message||'Контур не найден'));};
       worker.postMessage(bitmap,[bitmap]);
     });
+    view.segmentation=mask;
     return fitPortraitAnchors(view.landmarks,mask);
   } catch { return defaultPortraitAnchors(view.landmarks); }
   finally {worker?.terminate();bitmap?.close();}
@@ -671,6 +672,7 @@ async function restoreAvatar() {
     if(saved.version===7){
       $('faceStatus').textContent='Восстанавливаем локальный аватар…';await dependencies();
       const views=await Promise.all(saved.views.map(async view=>{const image=new Image();image.src=view.photo;await image.decode();const canvas=document.createElement('canvas');canvas.width=image.width;canvas.height=image.height;canvas.getContext('2d').drawImage(image,0,0);return {...view,canvas,anchors:view.role==='portrait'?saved.anchors:undefined};}));
+      const portrait=views.find(view=>view.role==='portrait');if(portrait)await fitPortrait(portrait);
       installModel(LocalAvatar.create(THREE,views,avatarTopology));
       $('faceStatus').textContent='Локальный 3D-аватар загружен';$('cameraHint').textContent='Аватар хранится на этом устройстве.';return;
     }

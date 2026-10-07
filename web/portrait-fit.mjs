@@ -50,7 +50,12 @@ export function fitPortraitAnchors(lm,{data,width,height}) {
   for(const [key,id,side] of [['earLeft',234,-1],['earRight',454,1]]){
     let best=null;
     for(let y=lm[id].y-fh*.04;y<lm[id].y+fh*.16;y+=1/height)for(let n=0;n<=fw*.22;n+=1/width){const x=lm[id].x+side*n,c=at(x,y);if((c===2||c===3)&&(!best||side*x>side*best.x))best={x,y};}
-    if(best&&side*(best.x-lm[id].x)>fw*.015)a[key]=best;
+    if(best&&side*(best.x-lm[id].x)>fw*.015){
+      // Segmentation often includes a lock of hair or a shadow below one ear.
+      // Measure only its horizontal reach; MediaPipe gives the stable ear height.
+      const reach=Math.min(fw*.16,Math.max(fw*.035,side*(best.x-lm[id].x)));
+      a[key]={x:lm[id].x+side*reach,y:lm[id].y+fh*.035};
+    }
   }
   return portraitAnchorIssue(a,lm)?defaultPortraitAnchors(lm):a;
 }

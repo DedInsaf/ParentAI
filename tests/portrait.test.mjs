@@ -60,7 +60,7 @@ test('hair has rear volume and reserves the portrait texture for the front',()=>
   assert.equal(hair.groups.reduce((sum,g)=>sum+g.count,0),hair.indices.length);
   assert.equal(body.groups.reduce((sum,g)=>sum+g.count,0),body.indices.length);
   assert.ok(body.groups.some(g=>g.materialIndex===1));assert.ok(body.groups.some(g=>g.materialIndex===2));
-  // Front rows keep the forehead seam fixed when adding volume behind it.
+  // Front rows keep the forehead seam depth fixed when adding volume behind it.
   for(let j=0;j<17;j++){const id=OVAL[[28,29,30,31,32,33,34,35,0,1,2,3,4,5,6,7,8][j]];assert.equal(hair.positions[j*3+2],face[id*3+2]);}
 });
 test('measured skin and clothing preserve a broad neck despite an open V-neck shirt',()=>{
