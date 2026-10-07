@@ -28,6 +28,11 @@ test('shirt shoulders extend beyond the head and connect at the neck',async()=>{
   const torsoTop=Math.max(...torso.positions.filter((_,i)=>i%3===1));
   const neckBottom=Math.min(...neck.positions.filter((_,i)=>i%3===1));
   assert.ok(torsoTop>neckBottom); // overlap prevents a visible gap
+  // The front centre of the first ring forms a visible rounded neckline and
+  // must sit below the side seam instead of covering the neck with a flat bar.
+  const sideY=torso.positions[1],frontY=torso.positions[(12*3)+1];
+  assert.ok(frontY<sideY-head.height*.06);
+  assert.ok(torsoTop<head.cy-head.height*.80); // shoulders leave a useful neck length
   // The visible neck must support the head, with a collar enclosing its base.
   for(let row=9;row<25;row++) {
     const xs=neck.positions.slice(row*32*3,(row+1)*32*3).filter((_,i)=>i%3===0);

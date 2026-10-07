@@ -78,6 +78,18 @@ function projectedUv(data,left,right,top,bottom){
   }
   return data;
 }
+function frontNeckSurface(source){
+  const positions=[],indices=[],rings=25,segments=32,columns=17;
+  // j=0..16 is the camera-facing half of the cylindrical neck.  Keeping the
+  // photograph off the rear half prevents a narrow portrait strip from being
+  // wrapped and repeated around the whole neck.
+  for(let ring=0;ring<rings;ring++)for(let j=0;j<columns;j++){
+    const offset=(ring*segments+j)*3;
+    positions.push(source.positions[offset],source.positions[offset+1],source.positions[offset+2]+.004);
+    if(ring&&j){const a=(ring-1)*columns+j-1,b=a+1,c=ring*columns+j-1,d=c+1;indices.push(a,c,b,b,c,d);}
+  }
+  return {positions,indices};
+}
 function segmentedColor(THREE,view,category,fallback){
   const mask=view.segmentation;if(!mask?.data?.length)return new THREE.Color(fallback);
   const ctx=view.canvas.getContext('2d',{willReadFrequently:true}),pixels=ctx.getImageData(0,0,view.canvas.width,view.canvas.height).data;
@@ -89,6 +101,17 @@ function segmentedColor(THREE,view,category,fallback){
     r+=pixels[i];g+=pixels[i+1];b+=pixels[i+2];count++;
   }
   return count>12?new THREE.Color().setRGB(r/count/255,g/count/255,b/count/255,THREE.SRGBColorSpace):new THREE.Color(fallback);
+}
+function faceSkinColor(THREE,view,fallback){
+  if(!view?.canvas||!view?.landmarks)return new THREE.Color(fallback);
+  const ctx=view.canvas.getContext('2d',{willReadFrequently:true}),pixels=ctx.getImageData(0,0,view.canvas.width,view.canvas.height).data;
+  // Stable cheek, temple and chin samples avoid hair, eyes, lips and the deep
+  // shadow below the jaw.  This keeps the generated neck attached visually to
+  // the photographed face under the user's actual lighting.
+  const ids=[50,101,118,123,187,205,280,330,347,352,411,425,152];
+  let r=0,g=0,b=0,count=0;
+  for(const id of ids){const p=view.landmarks[id];if(!p)continue;const x=clamp(p.x)*view.canvas.width|0,y=clamp(p.y)*view.canvas.height|0,i=(y*view.canvas.width+x)*4;r+=pixels[i];g+=pixels[i+1];b+=pixels[i+2];count++;}
+  return count?new THREE.Color().setRGB(r/count/255,g/count/255,b/count/255,THREE.SRGBColorSpace):new THREE.Color(fallback);
 }
 
 export class LocalAvatar {
@@ -111,7 +134,7 @@ export class LocalAvatar {
     const rig=mouthRig(points),mouthWidth=Math.abs(base[308*3]-base[78*3]),cavityIds=FACE_OPENINGS[2];
     const cavityData=mouthInteriorGeometry(base,cavityIds,mouthWidth),cavityGeometry=geometry(THREE,cavityData);
     const cavity=new THREE.Mesh(cavityGeometry,new THREE.MeshBasicMaterial({color:0x241218,side:THREE.DoubleSide}));
-    const head=skullGeometry(base),skin=segmentedColor(THREE,portrait,3,0xc58f78);
+    const head=skullGeometry(base),skin=faceSkinColor(THREE,front,0xc58f78);
     const shellGeometry=geometry(THREE,head),colors=[],ctx=front.canvas.getContext('2d',{willReadFrequently:true});
     for(let i=0;i<head.positions.length/3;i++){
       const p=front.landmarks[OVAL[i%OVAL.length]],rgb=ctx.getImageData(clamp(p.x)*front.canvas.width|0,clamp(p.y)*front.canvas.height|0,1,1).data;
@@ -135,9 +158,14 @@ export class LocalAvatar {
       const neckScale=Math.max(.96,Math.min(1.28,measuredNeck/.60));
       for(let i=0;i<neckData.positions.length;i+=3)neckData.positions[i]=head.cx+(neckData.positions[i]-head.cx)*neckScale;
       body.add(new THREE.Mesh(geometry(THREE,neckData),skinMaterial));
+      const neckFront=frontNeckSurface(neckData);
+      const neckInset=(anchors.neckRight.x-anchors.neckLeft.x)*.22;
+      projectedUv(neckFront,{x:anchors.neckLeft.x+neckInset},{x:anchors.neckRight.x-neckInset},portrait.landmarks[152].y,Math.max(anchors.neckLeft.y,anchors.neckRight.y));
+      const neckCanvas=categoryPortrait(portrait,[2,3],skin),neckTexture=new THREE.CanvasTexture(neckCanvas);neckTexture.colorSpace=THREE.SRGBColorSpace;
+      body.add(new THREE.Mesh(geometry(THREE,neckFront),new THREE.MeshStandardMaterial({map:neckTexture,roughness:1,side:THREE.DoubleSide})));
       const torsoData=torsoGeometry(head),measuredShoulders=(anchors.shoulderRight.x-anchors.shoulderLeft.x)/portraitWidth;
       const torsoScale=Math.max(.78,Math.min(1.25,measuredShoulders/2.24));
-      for(let i=0;i<torsoData.positions.length;i+=3){torsoData.positions[i]=head.cx+(torsoData.positions[i]-head.cx)*torsoScale;torsoData.positions[i+1]+=head.height*.035;}
+      for(let i=0;i<torsoData.positions.length;i+=3)torsoData.positions[i]=head.cx+(torsoData.positions[i]-head.cx)*torsoScale;
       const shoulderY=Math.min(anchors.shoulderLeft.y,anchors.shoulderRight.y),chestY=Math.max(anchors.chestLeft.y,anchors.chestRight.y);
       projectedUv(torsoData,anchors.shoulderLeft,anchors.shoulderRight,shoulderY+(chestY-shoulderY)*.24,chestY);
       body.add(new THREE.Mesh(geometry(THREE,torsoData),clothMaterial));

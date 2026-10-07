@@ -87,7 +87,9 @@ export function blinkAmount(seconds) {
 
 export function torsoGeometry(head){
   const {cx,cy,width,height,edgeZ}=head,positions=[],indices=[];
-  const profiles=[[.34,.74,.23],[.64,.85,.24],[1.07,1,.25],[1.12,1.2,.27],[1.06,1.56,.27]];
+  // Start at the actual base of the neck.  The previous .74 profile was high
+  // enough to hide most of the neck behind a straight strip of shirt.
+  const profiles=[[.34,.815,.23],[.64,.88,.24],[1.07,1,.25],[1.12,1.2,.27],[1.06,1.56,.27]];
   const rows=32,segments=48;
   for(let row=0;row<=rows;row++){
     const v=row/rows*(profiles.length-1),i=Math.min(profiles.length-2,Math.floor(v));
@@ -95,7 +97,11 @@ export function torsoGeometry(head){
     const [rx,drop,rz]=profiles[i].map((x,k)=>x*(1-e)+profiles[i+1][k]*e);
     for(let j=0;j<segments;j++){
       const a=j/segments*Math.PI*2;
-      positions.push(cx+width*rx*Math.cos(a),cy-height*drop,edgeZ-width*.33+width*rz*Math.sin(a));
+      // Lower only the front-centre edge to form a soft round collar.  It
+      // exposes the neck while the sides and back still overlap it cleanly.
+      const collarFade=Math.max(0,1-row/7),front=Math.max(0,Math.sin(a));
+      const collarDip=.075*Math.pow(front,4)*collarFade*collarFade;
+      positions.push(cx+width*rx*Math.cos(a),cy-height*(drop+collarDip),edgeZ-width*.33+width*rz*Math.sin(a));
       if(row){const b=(row-1)*segments+j,c=(row-1)*segments+(j+1)%segments,d=row*segments+j,f=row*segments+(j+1)%segments;indices.push(b,d,c,c,d,f);}
     }
   }
