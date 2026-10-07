@@ -8,6 +8,7 @@ import urllib.error
 from runtime import Runtime
 from server import AppServer
 from tutor import Tutor
+from test_avatar_model import glb
 
 
 class ServerTests(unittest.TestCase):
@@ -44,6 +45,18 @@ class ServerTests(unittest.TestCase):
         (Path(self.temp.name)/'ollama.log').write_text('private')
         for url in ['/audio/ollama.log','/../runtime.py','/audio/../runtime.py']:
             self.assertEqual(self.request(url)[0],404)
+
+    def test_generated_avatar_is_private_and_bad_export_preserves_previous(self):
+        self.assertEqual(self.request('/api/avatar-model')[0],403)
+        self.assertEqual(self.request('/api/avatar-model', glb())[0],403)
+        headers={'Origin':self.s.origin,'X-App-Token':self.s.token}
+        code, body = self.request('/api/avatar-model', glb(), headers)
+        self.assertEqual(code,200)
+        filename=json.loads(body)['model']
+        self.assertEqual(self.request('/api/avatar-model',headers=headers)[1],glb())
+        self.assertEqual(self.request('/audio/'+filename)[0],404)
+        self.assertEqual(self.request('/api/avatar-model',b'bad',headers)[0],400)
+        self.assertEqual(self.request('/api/avatar-model',headers=headers)[1],glb())
 
     def test_speech_dialog_and_reply_audio_are_protected(self):
         for path in ('/api/speech','/api/dialog','/api/dialog-cancel'):

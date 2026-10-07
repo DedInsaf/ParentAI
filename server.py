@@ -1,4 +1,4 @@
-"""Loopback-only HTTP bridge. Parent photos and reference recordings stay local; child STT is explicit."""
+"""Loopback-only bridge. Avaturn scanning is explicit; models and voice references are private."""
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import mimetypes
@@ -9,6 +9,7 @@ from runtime import ROOT
 from tutor import Tutor
 from speech import SpeechRecognizer, SpeechSynthesizer
 from dialogue import Dialogues
+from avatar_model import MAX_MODEL_BYTES, model_path, save_model, scanner_status
 import os
 
 
@@ -65,15 +66,21 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(200, self.server.dialogues.snapshot(key))
             except (ValueError,OSError) as exc:
                 return self.send(404, {'error': str(exc)})
-        if path in ('/api/status', '/api/avatar'):
+        if path in ('/api/status', '/api/avatar', '/api/avatar-model'):
             if self.headers.get('X-App-Token') != self.server.token:
                 return self.send(403, {'error': 'Invalid token'})
+            if path == '/api/avatar-model':
+                try:
+                    return self.send(200, model_path(self.server.runtime).read_bytes(), 'model/gltf-binary')
+                except (ValueError, OSError) as exc:
+                    return self.send(404, {'error': str(exc)})
             if path == '/api/avatar':
                 value = self.server.runtime.avatar()
             else:
                 value = {**self.server.runtime.snapshot(), 'tutor': self.server.tutor.public_status(),
                          'speech': self.server.speech.public_status(),'fast_voice':self.server.fast_voice.public_status()}
                 value['voice_engine']=self.server.runtime.voice_engine.status()
+                value['scanner']=scanner_status()
             return self.send(200, value)
         if path == '/api/session':
             if self.headers.get('Sec-Fetch-Site', 'same-origin') not in ('same-origin', 'none'):
@@ -97,11 +104,16 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(403, {'error': 'Invalid origin or token'})
         try:
             size = int(self.headers.get('Content-Length', '0'))
-            if not 0 <= size <= 10_000_000:
-                return self.send(413, {'error': 'Запись слишком большая'})
+            path = urlsplit(self.path).path
+            limit = MAX_MODEL_BYTES if path == '/api/avatar-model' else 10_000_000
+            if not 0 <= size <= limit:
+                return self.send(413, {'error': 'Модель слишком большая' if path == '/api/avatar-model' else 'Запись слишком большая'})
             self.connection.settimeout(70)
             payload = self.rfile.read(size)
-            path = urlsplit(self.path).path
+            if len(payload) != size:
+                raise ValueError('Передача данных прервалась. Повторите попытку.')
+            if path == '/api/avatar-model':
+                return self.send(200, save_model(self.server.runtime, payload))
             if path == '/api/avatar':
                 return self.send(200, self.server.runtime.avatar(json.loads(payload)))
             if path == '/api/speech':

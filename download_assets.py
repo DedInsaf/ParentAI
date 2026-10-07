@@ -7,6 +7,9 @@ ROOT = Path(__file__).resolve().parent / 'web' / 'vendor'
 BASE = 'https://cdn.jsdelivr.net/npm/'
 ASSETS = {
     'three.module.js': BASE+'three@0.160.0/build/three.module.js',
+    'loaders/GLTFLoader.js': BASE+'three@0.160.0/examples/jsm/loaders/GLTFLoader.js',
+    'utils/BufferGeometryUtils.js': BASE+'three@0.160.0/examples/jsm/utils/BufferGeometryUtils.js',
+    'avaturn-sdk.mjs': BASE+'@avaturn/sdk@1.1.0/dist/index.js',
     'vision/vision_bundle.mjs': BASE+'@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs',
     'vision/face_landmarker.task': 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task',
     'vision/selfie_multiclass.tflite': 'https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_multiclass_256x256/float32/1/selfie_multiclass_256x256.tflite',
