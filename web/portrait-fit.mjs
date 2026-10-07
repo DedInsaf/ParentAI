@@ -1,5 +1,29 @@
 import {defaultPortraitAnchors,portraitAnchorIssue} from './portrait-geometry.mjs';
 
+export function combineCategoryMasks(masks,width,height) {
+  if(!Array.isArray(masks)||!masks.length||masks.some(mask=>mask?.length!==width*height))throw new Error('Некорректные маски портрета');
+  const result=new Uint8Array(width*height),counts=new Uint8Array(6);
+  for(let i=0;i<result.length;i++){
+    counts.fill(0);for(const mask of masks)if(mask[i]<counts.length)counts[mask[i]]++;
+    let best=masks[0][i],votes=counts[best]||0;
+    for(let category=0;category<counts.length;category++)if(counts[category]>votes){best=category;votes=counts[category];}
+    result[i]=best;
+  }
+  // Two conservative majority passes remove isolated background holes without
+  // shaving off thin ears, hair strands or the shirt collar.
+  let current=result;
+  for(let pass=0;pass<2;pass++){
+    const next=current.slice();
+    for(let y=1;y<height-1;y++)for(let x=1;x<width-1;x++){
+      counts.fill(0);for(let oy=-1;oy<=1;oy++)for(let ox=-1;ox<=1;ox++)counts[current[(y+oy)*width+x+ox]]++;
+      let best=current[y*width+x],votes=counts[best];for(let category=0;category<counts.length;category++)if(counts[category]>votes){best=category;votes=counts[category];}
+      if(votes>=6)next[y*width+x]=best;
+    }
+    current=next;
+  }
+  return current;
+}
+
 // Fit to measured classes in image space, rather than average head/body ratios.
 // Labels: background, hair, body skin, face skin, clothes, accessories.
 export function fitPortraitAnchors(lm,{data,width,height}) {
@@ -58,4 +82,21 @@ export function fitPortraitAnchors(lm,{data,width,height}) {
     }
   }
   return portraitAnchorIssue(a,lm)?defaultPortraitAnchors(lm):a;
+}
+
+export function fitStablePortraitAnchors(lm,mask) {
+  const {data,width,height}=mask;
+  if(data?.length!==width*height)return defaultPortraitAnchors(lm);
+  const shifted=(dx,dy)=>{
+    const output=new Uint8Array(data.length);
+    for(let y=0;y<height;y++)for(let x=0;x<width;x++){
+      const sx=Math.max(0,Math.min(width-1,x-dx)),sy=Math.max(0,Math.min(height-1,y-dy));
+      output[y*width+x]=data[sy*width+sx];
+    }
+    return fitPortraitAnchors(lm,{data:output,width,height});
+  };
+  const candidates=[[0,0],[-1,0],[1,0],[0,-1],[0,1]].map(([dx,dy])=>shifted(dx,dy));
+  const result=structuredClone(candidates[0]),median=values=>values.sort((a,b)=>a-b)[values.length>>1];
+  for(const key of Object.keys(result))for(const axis of ['x','y'])result[key][axis]=median(candidates.map(candidate=>candidate[key][axis]));
+  return portraitAnchorIssue(result,lm)?candidates[0]:result;
 }

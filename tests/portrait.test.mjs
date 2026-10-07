@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {positionsFor} from '../web/core.mjs';
 import {defaultPortraitAnchors,portraitAnchorIssue,portraitBodyGeometry,portraitHairGeometry,portraitEarGeometry} from '../web/portrait-geometry.mjs';
-import {fitPortraitAnchors} from '../web/portrait-fit.mjs';
+import {fitPortraitAnchors,fitStablePortraitAnchors,combineCategoryMasks} from '../web/portrait-fit.mjs';
 import {OVAL} from '../web/head-geometry.mjs';
 
 function fixture() {
@@ -77,4 +77,22 @@ test('measured skin and clothing preserve a broad neck despite an open V-neck sh
 test('unusable segmentation falls back to an editable valid contour',()=>{
   const lm=fixture(),a=fitPortraitAnchors(lm,{data:new Uint8Array(100),width:10,height:10});
   assert.deepEqual(a,defaultPortraitAnchors(lm));
+});
+
+test('multi-pass portrait analysis closes isolated holes and keeps consensus edges',()=>{
+  const w=7,h=7,base=new Uint8Array(w*h).fill(1),noisy=base.slice(),dark=base.slice();
+  noisy[3*w+3]=0;dark[3*w+3]=0; // two bad passes must not beat three clean passes
+  const result=combineCategoryMasks([base,base,base,noisy,dark],w,h);
+  assert.equal(result[3*w+3],1);
+  assert.ok(result.every(value=>value===1));
+});
+
+test('stable portrait fit tolerates a one-pixel segmentation shift',()=>{
+  const lm=fixture(),width=200,height=200,data=new Uint8Array(width*height);
+  const paint=(x1,x2,y1,y2,value)=>{for(let y=Math.round(y1*height);y<Math.round(y2*height);y++)for(let x=Math.round(x1*width);x<Math.round(x2*width);x++)data[y*width+x]=value;};
+  paint(.37,.63,.1,.3,1);paint(.40,.60,.3,.46,3);paint(.43,.57,.46,.53,2);paint(.23,.77,.53,.84,4);
+  const direct=fitPortraitAnchors(lm,{data,width,height}),stable=fitStablePortraitAnchors(lm,{data,width,height});
+  assert.equal(portraitAnchorIssue(stable,lm),'');
+  assert.ok(Math.abs(stable.neckLeft.x-direct.neckLeft.x)<=1/width);
+  assert.ok(Math.abs(stable.shoulderRight.x-direct.shoulderRight.x)<=1/width);
 });

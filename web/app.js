@@ -4,7 +4,7 @@ import {SpeechGate,isDirectedSpeech} from './listening.mjs';
 import {AvatarMotion} from './avatar-motion.mjs';
 import {ModelAvatar} from './avatar-model.mjs';
 import {LocalAvatar} from './local-avatar.mjs';
-import {fitPortraitAnchors} from './portrait-fit.mjs';
+import {fitStablePortraitAnchors} from './portrait-fit.mjs';
 import {defaultPortraitAnchors} from './portrait-geometry.mjs';
 const $ = id => document.getElementById(id);
 const video = $('camera');
@@ -241,7 +241,8 @@ async function scan() {
     }
     if(epoch!==scanEpoch)return;
     stopCamera();scanInstruction('Все снимки готовы. Находим волосы, шею и плечи.',true);
-    const portrait=views.find(view=>view.role==='portrait');portrait.anchors=await fitPortrait(portrait);
+    $('captureStep').textContent='Анализ снимков';$('captureCountdown').textContent='';
+    const portrait=views.find(view=>view.role==='portrait');portrait.anchors=await fitPortrait(portrait,message=>scanInstruction(message),9500);
     scanInstruction('Создаём объёмную модель прямо на устройстве.',true);
     const model=LocalAvatar.create(THREE,views,avatarTopology);
     await api('avatar',JSON.stringify({version:7,views:views.map(({role,yaw,landmarks,photo})=>({role,yaw,landmarks,photo})),anchors:portrait.anchors}),true,60000,abort.signal);
@@ -266,18 +267,21 @@ function scanInstruction(text,force=false) {
   const utterance=new SpeechSynthesisUtterance(text);utterance.lang='ru-RU';utterance.rate=.92;
   const voice=speechSynthesis.getVoices().find(v=>v.lang.startsWith('ru')&&v.localService);if(voice)utterance.voice=voice;speechSynthesis.speak(utterance);
 }
-async function fitPortrait(view) {
+async function fitPortrait(view,onProgress=()=>{},minimumMs=0) {
+  const began=performance.now();
   let worker,bitmap;
   try {
     bitmap=await createImageBitmap(view.canvas);
     const mask=await new Promise((resolve,reject)=>{
-      worker=new Worker('/portrait-worker.js');const timer=setTimeout(()=>reject(new Error('Контур не найден')),20000);
-      worker.onmessage=({data})=>{clearTimeout(timer);data.error?reject(new Error(data.error)):resolve(data);};
+      worker=new Worker('/portrait-worker.js');const timer=setTimeout(()=>reject(new Error('Контур не найден')),45000);
+      worker.onmessage=({data})=>{if(data.progress){onProgress(data.message);return;}clearTimeout(timer);data.error?reject(new Error(data.error)):resolve(data);};
       worker.onerror=event=>{clearTimeout(timer);reject(new Error(event.message||'Контур не найден'));};
       worker.postMessage(bitmap,[bitmap]);
     });
     view.segmentation=mask;
-    return fitPortraitAnchors(view.landmarks,mask);
+    const anchors=fitStablePortraitAnchors(view.landmarks,mask),remaining=minimumMs-(performance.now()-began);
+    if(remaining>0){onProgress('Финально проверяем пропорции головы, шеи и плеч…');await sleep(remaining);}
+    return anchors;
   } catch { return defaultPortraitAnchors(view.landmarks); }
   finally {worker?.terminate();bitmap?.close();}
 }

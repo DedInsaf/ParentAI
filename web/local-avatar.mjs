@@ -78,18 +78,6 @@ function projectedUv(data,left,right,top,bottom){
   }
   return data;
 }
-function frontNeckSurface(source){
-  const positions=[],indices=[],rings=25,segments=32,columns=17;
-  // j=0..16 is the camera-facing half of the cylindrical neck.  Keeping the
-  // photograph off the rear half prevents a narrow portrait strip from being
-  // wrapped and repeated around the whole neck.
-  for(let ring=0;ring<rings;ring++)for(let j=0;j<columns;j++){
-    const offset=(ring*segments+j)*3;
-    positions.push(source.positions[offset],source.positions[offset+1],source.positions[offset+2]+.004);
-    if(ring&&j){const a=(ring-1)*columns+j-1,b=a+1,c=ring*columns+j-1,d=c+1;indices.push(a,c,b,b,c,d);}
-  }
-  return {positions,indices};
-}
 function segmentedColor(THREE,view,category,fallback){
   const mask=view.segmentation;if(!mask?.data?.length)return new THREE.Color(fallback);
   const ctx=view.canvas.getContext('2d',{willReadFrequently:true}),pixels=ctx.getImageData(0,0,view.canvas.width,view.canvas.height).data;
@@ -158,11 +146,6 @@ export class LocalAvatar {
       const neckScale=Math.max(.96,Math.min(1.28,measuredNeck/.60));
       for(let i=0;i<neckData.positions.length;i+=3)neckData.positions[i]=head.cx+(neckData.positions[i]-head.cx)*neckScale;
       body.add(new THREE.Mesh(geometry(THREE,neckData),skinMaterial));
-      const neckFront=frontNeckSurface(neckData);
-      const neckInset=(anchors.neckRight.x-anchors.neckLeft.x)*.22;
-      projectedUv(neckFront,{x:anchors.neckLeft.x+neckInset},{x:anchors.neckRight.x-neckInset},portrait.landmarks[152].y,Math.max(anchors.neckLeft.y,anchors.neckRight.y));
-      const neckCanvas=categoryPortrait(portrait,[2,3],skin),neckTexture=new THREE.CanvasTexture(neckCanvas);neckTexture.colorSpace=THREE.SRGBColorSpace;
-      body.add(new THREE.Mesh(geometry(THREE,neckFront),new THREE.MeshStandardMaterial({map:neckTexture,roughness:1,side:THREE.DoubleSide})));
       const torsoData=torsoGeometry(head),measuredShoulders=(anchors.shoulderRight.x-anchors.shoulderLeft.x)/portraitWidth;
       const torsoScale=Math.max(.78,Math.min(1.25,measuredShoulders/2.24));
       for(let i=0;i<torsoData.positions.length;i+=3)torsoData.positions[i]=head.cx+(torsoData.positions[i]-head.cx)*torsoScale;
