@@ -1,4 +1,4 @@
-"""Loopback-only bridge. Avaturn scanning is explicit; models and voice references are private."""
+"""Loopback-only bridge. Avatar scans and voice references stay private on the device."""
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import mimetypes

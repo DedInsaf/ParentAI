@@ -22,7 +22,7 @@ def load_local_env(path):
             continue
         key, value = line.split('=', 1)
         key, value = key.strip(), value.strip().strip('"').strip("'")
-        if key in {'YANDEX_API_KEY', 'YANDEX_FOLDER_ID', 'PARENTAI_TUTOR_MODEL', 'YANDEX_SPEECHKIT_API_KEY', 'YANDEX_TTS_API_KEY', 'PARENTAI_VOICE_DEVICE', 'PARENTAI_AVATURN_SUBDOMAIN'}:
+        if key in {'YANDEX_API_KEY', 'YANDEX_FOLDER_ID', 'PARENTAI_TUTOR_MODEL', 'YANDEX_SPEECHKIT_API_KEY', 'YANDEX_TTS_API_KEY', 'PARENTAI_VOICE_DEVICE'}:
             os.environ.setdefault(key, value)
 
 

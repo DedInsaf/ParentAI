@@ -55,11 +55,9 @@ class ModelTests(unittest.TestCase):
                 doc = copy.deepcopy(model_document()); mutate(doc)
                 with self.assertRaises(ValueError): validate_model(glb(doc))
 
-    def test_scanner_requires_own_project_and_refuses_urls(self):
-        for name in ['', 'demo', 'https://evil.example', '../data', 'a.avaturn.dev']:
-            with patch.dict('os.environ', {'PARENTAI_AVATURN_SUBDOMAIN': name}): self.assertFalse(scanner_status()['enabled'])
-        with patch.dict('os.environ', {'PARENTAI_AVATURN_SUBDOMAIN': 'parent-ai'}):
-            self.assertEqual(scanner_status()['url'], 'https://parent-ai.avaturn.dev')
+    def test_scanner_is_on_device(self):
+        self.assertEqual(scanner_status()['mode'], 'on-device')
+        self.assertTrue(scanner_status()['enabled'])
 
     def test_private_model_path_cannot_escape_profile_directory(self):
         with tempfile.TemporaryDirectory() as directory:

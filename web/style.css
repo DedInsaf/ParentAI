@@ -259,5 +259,7 @@ body.in-lesson #readyHint:empty{display:none}
 .avatar-consent{align-items:flex-start;margin-block:20px}.avatar-consent input{margin-top:5px}
 #scannerDialog{width:min(1100px,calc(100vw - 24px));max-width:none;height:calc(100dvh - 32px);max-height:none;border:0;border-radius:24px;padding:18px;background:#faf7f2;color:#263e35;overflow:hidden}
 #scannerDialog::backdrop{background:rgba(32,48,40,.55);backdrop-filter:blur(4px)}
-#scannerDialog[open]{display:flex;flex-direction:column;gap:12px}.scanner-heading{display:flex;align-items:center;justify-content:space-between;gap:12px}.scanner-heading h2{margin:0;font-size:1.15rem}#scannerMessage{margin:0;font-size:.9rem}#avatarScanner{flex:1;min-height:0;border-radius:18px;overflow:hidden;background:#fff}.avatar-scanner-frame{height:100%;width:100%;border:0}
+#scannerDialog[open]{display:flex;flex-direction:column;gap:12px}.scanner-heading{display:flex;align-items:center;justify-content:space-between;gap:12px}.scanner-heading h2{margin:0;font-size:1.15rem}#scannerMessage{margin:0;font-size:.9rem}
 @media(max-width:600px){#scannerDialog{width:100vw;height:100dvh;margin:0;max-height:100dvh;border-radius:0;padding:12px}.scanner-heading button{font-size:.8rem;padding:10px}.scan-steps{font-size:.88rem;gap:8px}}
+
+#scannerCamera{flex:1;min-height:0;overflow:hidden;border-radius:20px;background:#e8eee5}#scannerCamera .camera-frame{height:100%;max-height:none}#scannerCamera video{height:100%;width:100%;object-fit:contain}.capture-status{display:flex;align-items:center;justify-content:space-between;padding:6px 12px}#captureCountdown{font-size:2rem;font-weight:700;color:#3c6657}

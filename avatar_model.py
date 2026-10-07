@@ -119,14 +119,14 @@ def validate_model(raw):
         raise ValueError('Сканер вернул повреждённую модель. Повторите создание аватара.') from exc
 
 
-def save_model(runtime, raw):
+def save_model(runtime, raw, provider='parentai-server'):
     metadata = validate_model(raw)
     from runtime import atomic_json
     with runtime.lock:
         filename = 'avatar-' + uuid.uuid4().hex + '.glb'
         path = runtime.data / filename
         path.write_bytes(raw)
-        profile = {'version': 6, 'provider': 'avaturn', 'model': filename, **metadata}
+        profile = {'version': 6, 'provider': provider, 'model': filename, **metadata}
         try:
             atomic_json(runtime.data / 'avatar.json', profile)
         except Exception:
@@ -151,8 +151,5 @@ def model_path(runtime):
 
 
 def scanner_status():
-    import os
-    subdomain = os.getenv('PARENTAI_AVATURN_SUBDOMAIN', '').strip().lower()
-    enabled = bool(re.fullmatch(r'[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?', subdomain)) and subdomain != 'demo'
-    return {'provider': 'Avaturn', 'enabled': enabled, 'url': f'https://{subdomain}.avaturn.dev' if enabled else '',
-            'message': 'Сканирование подключено' if enabled else 'Владелец приложения ещё не подключил сканирование Avaturn.'}
+    return {'provider': 'ParentAI', 'enabled': True, 'mode': 'on-device',
+            'message': 'Сканирование и построение модели выполняются на устройстве.'}

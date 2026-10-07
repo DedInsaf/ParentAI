@@ -101,6 +101,23 @@ class RuntimeTests(unittest.TestCase):
         views[1]['role']='front'
         with self.assertRaises(ValueError): self.r.avatar({'version':3,'views':views})
 
+    def test_local_six_view_avatar_roundtrip_and_order(self):
+        import base64
+        photo='data:image/jpeg;base64,'+base64.b64encode(b'\xff\xd8\xfffixture').decode()
+        points=[{'x':.5,'y':.4,'z':0} for _ in range(478)]
+        poses=[('front',0),('left',-.16),('right',.16),('left_outer',-.30),('right_outer',.30),('portrait',0)]
+        anchors=self.frontal_profile()['anchors']
+        value={'version':7,'views':[{'role':role,'yaw':yaw,'landmarks':points,'photo':photo} for role,yaw in poses],'anchors':anchors}
+        self.r.avatar(value)
+        saved=self.r.avatar()
+        self.assertEqual(saved['version'],7)
+        self.assertEqual(saved['engine'],'mediapipe-local')
+        self.assertEqual(saved['anchors'],anchors)
+        self.assertEqual([view['role'] for view in saved['views']],[role for role,_ in poses])
+        broken={**value,'views':list(reversed(value['views']))}
+        with self.assertRaises(ValueError): self.r.avatar(broken)
+        self.assertEqual(self.r.avatar(),saved)
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)

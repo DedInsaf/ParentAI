@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {faceWeights, embeddedModel} from '../web/avatar-model.mjs';
-import {exportUrl} from '../web/avatar-scanner.mjs';
 
 test('Russian lip forms close, round and stretch actual morphs without synthetic teeth', () => {
   assert.ok(faceWeights(1, 'closed', 0).jawopen < faceWeights(1, 'wide', 0).jawopen);
@@ -10,14 +9,6 @@ test('Russian lip forms close, round and stretch actual morphs without synthetic
   assert.ok(faceWeights(1, 'wide', 0).mouthstretchleft > 0);
   assert.equal(faceWeights(0, null, 1).eyeblinkright, 1);
   for (const v of Object.values(faceWeights(20, 'wide', 4))) assert.ok(v >= 0 && v <= 1);
-});
-
-test('scanner accepts only animated exports from embedded data or known HTTPS origins', () => {
-  const result = {avatarSupportsFaceAnimations: true, urlType: 'httpURL', url: 'https://assets.avaturn.me/model.glb'};
-  assert.equal(exportUrl(result, 'https://parentai.avaturn.dev'), result.url);
-  for (const url of ['http://assets.avaturn.me/a', 'https://evil.example/a', 'https://assets.avaturn.me.evil.example/a', 'https://user:password@assets.avaturn.me/a']) assert.throws(() => exportUrl({...result, url}, 'https://parentai.avaturn.dev'));
-  assert.throws(() => exportUrl({...result, avatarSupportsFaceAnimations: false}, 'https://parentai.avaturn.dev'));
-  assert.equal(exportUrl({...result, urlType: 'dataURL', url: 'data:model/gltf-binary;base64,Z2xURg=='}, 'https://parentai.avaturn.dev'), 'data:model/gltf-binary;base64,Z2xURg==');
 });
 
 test('3D parser rejects broken headers and external textures before calling GLTFLoader', () => {

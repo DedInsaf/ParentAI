@@ -1,15 +1,17 @@
-import {Presence, encodeWav, withTimeout, speechOpening} from './core.mjs';
+import {Presence, encodeWav, withTimeout, speechOpening, scanQuality, scanCoverage, portraitQuality, faceYaw} from './core.mjs';
 import {blinkAmount} from './head-geometry.mjs';
 import {SpeechGate,isDirectedSpeech} from './listening.mjs';
 import {AvatarMotion} from './avatar-motion.mjs';
 import {ModelAvatar} from './avatar-model.mjs';
-import {scannerSDK,readExport} from './avatar-scanner.mjs';
+import {LocalAvatar} from './local-avatar.mjs';
+import {fitPortraitAnchors} from './portrait-fit.mjs';
+import {defaultPortraitAnchors} from './portrait-geometry.mjs';
 const $ = id => document.getElementById(id);
 const video = $('camera');
 const fail = e => { $('error').hidden = false; $('error').textContent = e.message || String(e); };
 const clearError = () => { $('error').hidden = true; };
 const sleep = ms => new Promise(r => setTimeout(r, ms));
-let token, status = {}, stream, detector, THREE, renderer, scene, camera, mesh, avatarGroup, modelAvatar;
+let token, status = {}, stream, detector, avatarTopology, THREE, renderer, scene, camera, mesh, avatarGroup, modelAvatar;
 let audioContext, analyser, audioSource, pcm, playing = false, recording = false, scanning = false;
 let running = false, paused = false, lastFrame = -1, lastDetect = 0, lastResult = null, lastSeenFrame = 0;
 let lastMediaTimestamp = -1;
@@ -23,7 +25,7 @@ let activeCues=[], audioStarted=0, dialogId=null, helpEpoch=0;
 let questionRecording=false, questionStop=false, questionCancel=false, questionAbort, questionStream;
 let currentJob=null;
 let previewYaw=0,showWireframe=false,scanEpoch=0;
-let scanner=null,scannerAbort=null,exporting=false;
+let scannerAbort=null;
 let listener=null,listenEpoch=0,echoUntil=0,followupUntil=0,listenerPending=false,cameraEpoch=0,cameraAbort;
 const audioSources=new Set();let audioNext=0;
 const avatarMotion=new AvatarMotion();let childSpeakingUntil=0;
@@ -58,7 +60,7 @@ function controls() {
   const transition = pendingActions.has('startBtn') || pendingActions.has('pauseBtn');
   $('scanBtn').disabled = !online || transition || !status.scanner?.enabled || scanning || running || recording || connecting;
   $('nextVoiceBtn').disabled=!mesh || scanning;
-  $('scannerUnavailable').hidden=Boolean(status.scanner?.enabled);
+  $('scannerUnavailable').hidden=true;
   $('previewMotionBtn').disabled=!mesh || !status.phrases?.length || scanning || recording || running;
   $('nextReadyBtn').disabled=!(status.phrases?.length) || recording || voiceBusy();
   for(const id of ['viewFrontBtn','viewSideBtn','viewMeshBtn']) $(id).disabled=!mesh || scanning;
@@ -126,6 +128,7 @@ async function dependencies() {
     const options = {baseOptions: {modelAssetPath: '/vendor/vision/face_landmarker.task', delegate: 'GPU'}, runningMode: 'VIDEO', numFaces: 2};
     try { detector = await vision.FaceLandmarker.createFromOptions(files, options); }
     catch { options.baseOptions.delegate = 'CPU'; detector = await vision.FaceLandmarker.createFromOptions(files, options); }
+    avatarTopology=vision.FaceLandmarker.FACE_LANDMARKS_TESSELATION;
     if (!renderer) initScene();
     return vision;
   })().catch(e => { dependenciesPromise = null; throw new Error('Не удалось загрузить 3D/распознавание. Проверьте загрузку ресурсов в разделе «Состояние» и повторите. ' + e.message); });
@@ -193,55 +196,83 @@ function detectVideo(now) {
 }
 
 async function scan() {
-  const config=status.scanner;
-  if(!config?.enabled) throw new Error('Сканирование ещё не подключено владельцем ParentAI.');
-  if(!$('avatarConsent').checked) { $('avatarConsent').focus(); throw new Error('Разрешите Avaturn обработать ваши снимки для создания аватара.'); }
-  stopCamera();stopAudio();
-  scanning=true;exporting=false;const epoch=++scanEpoch,abort=new AbortController();scannerAbort=abort;
-  $('scannerDialog').showModal();$('scannerMessage').textContent='Открываем сканирование…';controls();
+  if(!$('avatarConsent').checked){$('avatarConsent').focus();throw new Error('Разрешите ParentAI создать аватар из снимков на этом устройстве.');}
+  stopAudio();scanning=true;const epoch=++scanEpoch,abort=new AbortController();scannerAbort=abort;
+  $('scannerDialog').showModal();$('scannerCamera').appendChild(video.closest('.camera-frame'));controls();
   try {
-    const instance=await scannerSDK($('avatarScanner'),config.url,async result=>{
-      if(epoch!==scanEpoch || exporting)return;
-      exporting=true;$('scannerMessage').textContent='Получаем ваш аватар…';
-      let candidate;
-      const timeout=setTimeout(()=>abort.abort(),120000);
-      try {
-        const buffer=await readExport(result,config.url,abort.signal);
-        if(epoch!==scanEpoch)return;
-        await renderDependencies();
-        candidate=await ModelAvatar.create(THREE,buffer);
-        if(epoch!==scanEpoch){candidate.dispose();return;}
-        $('scannerMessage').textContent='Сохраняем образ…';
-        await api('avatar-model',buffer,true,120000,abort.signal);
-        if(epoch!==scanEpoch){candidate.dispose();return;}
-        installModel(candidate);candidate=null;
-        $('faceStatus').textContent='Ваш 3D-аватар готов';
-        $('cameraHint').textContent='Проверьте поворот и голос. Можно перейти к записи голоса.';
-        cancelScan();scanInstruction('Ваш аватар готов. Посмотрите, как он поворачивается. Затем запишем ваш голос.');
-      } catch(error) {
-        candidate?.dispose();
-        if(epoch===scanEpoch){$('scannerMessage').textContent=error.message;fail(error);}
-      } finally { clearTimeout(timeout);exporting=false;controls(); }
-    });
-    if(epoch!==scanEpoch){instance.sdk.destroy();return;}
-    scanner=instance.sdk;
-    await withTimeout(instance.ready,45000,()=>instance.sdk.destroy(),abort.signal);
+    scanInstruction('Подключаем камеру. Сядьте лицом к свету, чтобы волосы и уши были видны.');
+    await dependencies();await enableCamera();
+    const poses=[['front',0,'Посмотрите прямо в объектив и мягко сомкните губы.'],['left',-.16,'Немного поверните голову налево.'],['right',.16,'Теперь немного поверните голову направо.'],['left_outer',-.30,'Поверните голову налево чуть сильнее.'],['right_outer',.30,'Теперь поверните голову направо чуть сильнее.'],['portrait',0,'Снова смотрите прямо. Отодвиньте камеру, чтобы были видны макушка, оба уха, шея и плечи.']];
+    const views=[];
+    for(const [role,yaw,instruction] of poses){
+      if(epoch!==scanEpoch)return;
+      $('captureStep').textContent=`Снимок ${views.length+1} из ${poses.length}`;scanInstruction(instruction,true);
+      let stable=0,previous=null;const began=performance.now();
+      while(epoch===scanEpoch){
+        const now=performance.now();if(now-began>90000)throw new Error('Не удалось сделать снимок. Отдохните и попробуйте ещё раз.');
+        const result=landmarks(now),points=result?.faceLandmarks?.length===1?result.faceLandmarks[0]:null;
+        let issue=!points?'В кадре должен быть один человек.':role==='portrait'?portraitQuality(points,video.videoWidth,video.videoHeight):role==='front'?scanQuality(points,video.videoWidth,video.videoHeight):scanCoverage(points,video.videoWidth,video.videoHeight);
+        if(!issue&&role!=='portrait'&&Math.abs(faceYaw(points)-yaw)>.07)issue=instruction;
+        const movement=points&&previous?Math.max(...[1,33,263,152].map(i=>Math.hypot(points[i].x-previous[i].x,points[i].y-previous[i].y))):1;
+        if(issue||movement>.008)stable=0;else if(!stable)stable=now;
+        previous=points;
+        if(issue)scanInstruction(issue);
+        const remaining=stable?Math.max(0,2-(now-stable)/1000):2;
+        $('captureCountdown').textContent=stable?String(Math.ceil(remaining)):'…';
+        if(stable&&remaining<=0){
+          const canvas=document.createElement('canvas'),scale=Math.min(1,960/video.videoWidth);canvas.width=Math.round(video.videoWidth*scale);canvas.height=Math.round(video.videoHeight*scale);canvas.getContext('2d').drawImage(video,0,0,canvas.width,canvas.height);
+          lastMediaTimestamp=Math.max(now,lastMediaTimestamp+.01);
+          const frozen=detector.detectForVideo(canvas,lastMediaTimestamp).faceLandmarks;
+          if(frozen.length!==1){stable=0;continue;}
+          const fresh=frozen[0];
+          const frozenIssue=role==='portrait'?portraitQuality(fresh,canvas.width,canvas.height):role==='front'?scanQuality(fresh,canvas.width,canvas.height):scanCoverage(fresh,canvas.width,canvas.height);
+          if(frozenIssue||(role!=='portrait'&&Math.abs(faceYaw(fresh)-yaw)>.07)){stable=0;continue;}
+          views.push({role,yaw,canvas,landmarks:fresh.map(p=>({x:p.x,y:p.y,z:p.z})),photo:canvas.toDataURL('image/jpeg',.88)});
+          scanInstruction('Снимок готов.',true);await sleep(1200);break;
+        }
+        await sleep(80);
+      }
+    }
     if(epoch!==scanEpoch)return;
-    $('scannerMessage').textContent='Следуйте шагам сканера. Выберите аватар с анимацией лица (T2). После завершения он появится здесь автоматически.';
-    scanInstruction('Сядьте лицом к свету. Сначала войдите в аккаунт Avaturn. Sign in означает войти. Затем сделайте снимки по шагам сканера и выберите аватар с анимацией лица. В конце нажмите Next, то есть дальше.');
-  } catch(error) {if(epoch===scanEpoch){cancelScan();throw new Error('Сканер не открылся. Проверьте интернет и настройки проекта Avaturn. '+error.message);}}
+    stopCamera();scanInstruction('Все снимки готовы. Находим волосы, шею и плечи.',true);
+    const portrait=views.find(view=>view.role==='portrait');portrait.anchors=await fitPortrait(portrait);
+    scanInstruction('Создаём объёмную модель прямо на устройстве.',true);
+    const model=LocalAvatar.create(THREE,views,avatarTopology);
+    await api('avatar',JSON.stringify({version:7,views:views.map(({role,yaw,landmarks,photo})=>({role,yaw,landmarks,photo})),anchors:portrait.anchors}),true,60000,abort.signal);
+    if(epoch!==scanEpoch){model.dispose();return;}
+    installModel(model);cancelScan();
+    $('faceStatus').textContent='Локальный 3D-аватар готов';$('cameraHint').textContent='Аватар создан на этом устройстве. Проверьте поворот и запишите голос.';
+    scanInstruction('Ваш аватар готов. Фотографии никуда не отправлялись.',true);
+  } catch(error){if(epoch===scanEpoch){cancelScan();throw error;}}
 }
 function cancelScan() {
-  scanEpoch++;scanning=false;scannerAbort?.abort();scanner?.destroy();scanner=null;
-  $('avatarScanner').replaceChildren();if($('scannerDialog').open)$('scannerDialog').close();
+  scanEpoch++;scanning=false;scannerAbort?.abort();stopCamera();
+  $('setupCameraSlot').appendChild(video.closest('.camera-frame'));
+  if($('scannerDialog').open)$('scannerDialog').close();
   window.speechSynthesis?.cancel();controls();$('scanBtn').focus({preventScroll:true});
 }
-function scanInstruction(text) {
-  $('cameraHint').textContent=text;
-  if(!$('scanAudio').checked || !window.speechSynthesis)return;
-  speechSynthesis.cancel();const utterance=new SpeechSynthesisUtterance(text);utterance.lang='ru-RU';utterance.rate=.92;
-  const voice=speechSynthesis.getVoices().find(v=>v.lang.startsWith('ru')&&v.localService);if(voice)utterance.voice=voice;
-  speechSynthesis.speak(utterance);
+let lastScanInstruction='',lastScanInstructionAt=0;
+function scanInstruction(text,force=false) {
+  $('cameraHint').textContent=text;$('scannerMessage').textContent=text;
+  if(!$('scanAudio').checked||!window.speechSynthesis)return;
+  const now=performance.now();if(!force&&(text===lastScanInstruction||now-lastScanInstructionAt<4500))return;
+  lastScanInstruction=text;lastScanInstructionAt=now;speechSynthesis.cancel();
+  const utterance=new SpeechSynthesisUtterance(text);utterance.lang='ru-RU';utterance.rate=.92;
+  const voice=speechSynthesis.getVoices().find(v=>v.lang.startsWith('ru')&&v.localService);if(voice)utterance.voice=voice;speechSynthesis.speak(utterance);
+}
+async function fitPortrait(view) {
+  let worker,bitmap;
+  try {
+    bitmap=await createImageBitmap(view.canvas);
+    const mask=await new Promise((resolve,reject)=>{
+      worker=new Worker('/portrait-worker.js');const timer=setTimeout(()=>reject(new Error('Контур не найден')),20000);
+      worker.onmessage=({data})=>{clearTimeout(timer);data.error?reject(new Error(data.error)):resolve(data);};
+      worker.onerror=event=>{clearTimeout(timer);reject(new Error(event.message||'Контур не найден'));};
+      worker.postMessage(bitmap,[bitmap]);
+    });
+    return fitPortraitAnchors(view.landmarks,mask);
+  } catch { return defaultPortraitAnchors(view.landmarks); }
+  finally {worker?.terminate();bitmap?.close();}
 }
 async function renderDependencies() {
   THREE ||= await import('./vendor/three.module.js');if(!renderer)initScene();
@@ -627,13 +658,19 @@ $('cancelHelpBtn').addEventListener('click', cancelTutor);
 $('clearHelpBtn').addEventListener('click', () => { cancelTutor(); dialogId=null;followupUntil=0; $('tutorMessages').replaceChildren(); $('assignment').value = ''; });
 window.addEventListener('popstate', () => { if (running) stop(); });
 document.addEventListener('visibilitychange', () => { if (document.hidden) { recordCancelled = true; recordingAbort?.abort(); stopTracks(recordingStream);if(scanning)cancelScan();window.speechSynthesis?.cancel();stopHandsFree();stopCamera(); } if (document.hidden && running && !paused) { pause(); $('monitorStatus').textContent = 'Перерыв · окно скрыто'; } });
-window.addEventListener('beforeunload', () => { stopHandsFree();stopTracks(questionStream);stopTracks(recordingStream);stopAudio(); stopCamera(); scannerAbort?.abort();scanner?.destroy();modelAvatar?.dispose();detector?.close(); audioContext?.close(); });
+window.addEventListener('beforeunload', () => { stopHandsFree();stopTracks(questionStream);stopTracks(recordingStream);stopAudio(); stopCamera(); scannerAbort?.abort();modelAvatar?.dispose();detector?.close(); audioContext?.close(); });
 async function restoreAvatar() {
   try {
     const saved=await api('avatar');if(!saved)return;
+    if(saved.version===7){
+      $('faceStatus').textContent='Восстанавливаем локальный аватар…';await dependencies();
+      const views=await Promise.all(saved.views.map(async view=>{const image=new Image();image.src=view.photo;await image.decode();const canvas=document.createElement('canvas');canvas.width=image.width;canvas.height=image.height;canvas.getContext('2d').drawImage(image,0,0);return {...view,canvas,anchors:view.role==='portrait'?saved.anchors:undefined};}));
+      installModel(LocalAvatar.create(THREE,views,avatarTopology));
+      $('faceStatus').textContent='Локальный 3D-аватар загружен';$('cameraHint').textContent='Аватар хранится на этом устройстве.';return;
+    }
     if(saved.version!==6){
       $('faceStatus').textContent='Нужен новый скан';
-      $('cameraHint').textContent='Ваш прежний снимок сохранён. Для настоящего 3D-аватара создайте новый образ через сканер.';
+      $('cameraHint').textContent='Ваш прежний снимок сохранён. Для локального объёмного аватара создайте новый образ через сканер.';
       return;
     }
     $('faceStatus').textContent='Восстанавливаем ваш аватар…';await renderDependencies();
