@@ -157,8 +157,8 @@ class Runtime:
             if version==7:
                 if [v['role'] for v in saved_views] != ['front','left','right','left_outer','right_outer','portrait']:
                     raise ValueError('Некорректная последовательность локального сканирования.')
-                expected={'front':0,'left':-.16,'right':.16,'left_outer':-.30,'right_outer':.30,'portrait':0}
-                if any(abs(v['yaw']-expected[v['role']])>.03 for v in saved_views):
+                ranges={'front':(-.09,.09),'left':(.055,.40),'right':(-.40,-.055),'left_outer':(.18,.75),'right_outer':(-.75,-.18),'portrait':(-.09,.09)}
+                if any(not ranges[v['role']][0] <= v['yaw'] <= ranges[v['role']][1] for v in saved_views):
                     raise ValueError('Некорректные углы локального сканирования.')
                 anchors=validate_anchors(value.get('anchors'),saved_views[-1]['landmarks'])
                 saved={'version':7,'engine':'mediapipe-local','views':saved_views,'anchors':anchors}

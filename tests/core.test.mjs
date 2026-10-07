@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {Presence, positionsFor, neutralFacePositions, encodeWav, scanQuality, scanCoverage, faceYaw, mouthRig, speechOpening} from '../web/core.mjs';
+import {Presence, positionsFor, neutralFacePositions, encodeWav, scanQuality, scanCoverage, scanTurnIssue, faceYaw, mouthRig, speechOpening} from '../web/core.mjs';
 test('coordinates use matching physical units on a wide camera',()=>{
   const p=positionsFor([{x:.6,y:.6,z:.1},{x:.5,y:.5,z:0}],1280,720,1);
   assert.ok(Math.abs(p[1]/p[0]+720/1280)<1e-6);
@@ -34,6 +34,16 @@ test('three-view scan distinguishes front and opposite side turns',()=>{
   assert.equal(scanCoverage(lm,960,720),''); assert.equal(faceYaw(lm),0);
   lm[1].x=.56; assert.ok(faceYaw(lm)>.25);
   lm[1].x=.44; assert.ok(faceYaw(lm)<-.25);
+});
+test('mirrored scan accepts a range and explains the direction instead of stalling',()=>{
+  const lm=Array.from({length:468},()=>({x:.5,y:.5,z:0}));
+  lm[33]={x:.4,y:.5,z:0};lm[263]={x:.6,y:.5,z:0};lm[1]={x:.5,y:.5,z:0};
+  assert.match(scanTurnIssue(lm,960,720,1),/ещё немного.*←/);
+  lm[1].x=.54;assert.equal(scanTurnIssue(lm,960,720,1),'');
+  assert.match(scanTurnIssue(lm,960,720,-1),/другую сторону.*→/);
+  lm[1].x=.44;assert.equal(scanTurnIssue(lm,960,720,-1),'');
+  lm[1].x=.48;assert.match(scanTurnIssue(lm,960,720,-1,true),/ещё немного/);
+  lm[1].x=.56;assert.equal(scanTurnIssue(lm,960,720,1,true),'');
 });
 test('front capture rejects a mild side pose that the old threshold accepted',()=>{
   const lm=Array.from({length:478},()=>({x:.5,y:.5,z:0}));

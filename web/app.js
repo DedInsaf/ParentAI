@@ -1,4 +1,4 @@
-import {Presence, encodeWav, withTimeout, speechOpening, scanQuality, scanCoverage, portraitQuality, faceYaw} from './core.mjs';
+import {Presence, encodeWav, withTimeout, speechOpening, scanQuality, scanTurnIssue, portraitQuality, faceYaw} from './core.mjs';
 import {blinkAmount} from './head-geometry.mjs';
 import {SpeechGate,isDirectedSpeech} from './listening.mjs';
 import {AvatarMotion} from './avatar-motion.mjs';
@@ -202,22 +202,28 @@ async function scan() {
   try {
     scanInstruction('Подключаем камеру. Сядьте лицом к свету, чтобы волосы и уши были видны.');
     await dependencies();await enableCamera();
-    const poses=[['front',0,'Посмотрите прямо в объектив и мягко сомкните губы.'],['left',-.16,'Немного поверните голову налево.'],['right',.16,'Теперь немного поверните голову направо.'],['left_outer',-.30,'Поверните голову налево чуть сильнее.'],['right_outer',.30,'Теперь поверните голову направо чуть сильнее.'],['portrait',0,'Снова смотрите прямо. Отодвиньте камеру, чтобы были видны макушка, оба уха, шея и плечи.']];
+    const poses=[
+      {role:'front',direction:0,instruction:'Посмотрите прямо в объектив и мягко сомкните губы.'},
+      {role:'left',direction:1,instruction:'Немного поверните голову к стрелке ←'},
+      {role:'right',direction:-1,instruction:'Теперь немного поверните голову к стрелке →'},
+      {role:'left_outer',direction:1,outer:true,instruction:'Поверните голову к стрелке ← чуть сильнее'},
+      {role:'right_outer',direction:-1,outer:true,instruction:'Поверните голову к стрелке → чуть сильнее'},
+      {role:'portrait',direction:0,instruction:'Снова смотрите прямо. Отодвиньте камеру, чтобы были видны макушка, оба уха, шея и плечи.'},
+    ];
     const views=[];
-    for(const [role,yaw,instruction] of poses){
+    for(const {role,direction,outer=false,instruction} of poses){
       if(epoch!==scanEpoch)return;
       $('captureStep').textContent=`Снимок ${views.length+1} из ${poses.length}`;scanInstruction(instruction,true);
       let stable=0,previous=null;const began=performance.now();
       while(epoch===scanEpoch){
         const now=performance.now();if(now-began>90000)throw new Error('Не удалось сделать снимок. Отдохните и попробуйте ещё раз.');
         const result=landmarks(now),points=result?.faceLandmarks?.length===1?result.faceLandmarks[0]:null;
-        let issue=!points?'В кадре должен быть один человек.':role==='portrait'?portraitQuality(points,video.videoWidth,video.videoHeight):role==='front'?scanQuality(points,video.videoWidth,video.videoHeight):scanCoverage(points,video.videoWidth,video.videoHeight);
-        if(!issue&&role!=='portrait'&&Math.abs(faceYaw(points)-yaw)>.07)issue=instruction;
+        const issue=!points?'В кадре должен быть один человек.':role==='portrait'?portraitQuality(points,video.videoWidth,video.videoHeight):role==='front'?scanQuality(points,video.videoWidth,video.videoHeight):scanTurnIssue(points,video.videoWidth,video.videoHeight,direction,outer);
         const movement=points&&previous?Math.max(...[1,33,263,152].map(i=>Math.hypot(points[i].x-previous[i].x,points[i].y-previous[i].y))):1;
-        if(issue||movement>.008)stable=0;else if(!stable)stable=now;
+        if(issue||movement>.012)stable=0;else if(!stable)stable=now;
         previous=points;
         if(issue)scanInstruction(issue);
-        const remaining=stable?Math.max(0,2-(now-stable)/1000):2;
+        const remaining=stable?Math.max(0,1.2-(now-stable)/1000):1.2;
         $('captureCountdown').textContent=stable?String(Math.ceil(remaining)):'…';
         if(stable&&remaining<=0){
           const canvas=document.createElement('canvas'),scale=Math.min(1,960/video.videoWidth);canvas.width=Math.round(video.videoWidth*scale);canvas.height=Math.round(video.videoHeight*scale);canvas.getContext('2d').drawImage(video,0,0,canvas.width,canvas.height);
@@ -225,9 +231,9 @@ async function scan() {
           const frozen=detector.detectForVideo(canvas,lastMediaTimestamp).faceLandmarks;
           if(frozen.length!==1){stable=0;continue;}
           const fresh=frozen[0];
-          const frozenIssue=role==='portrait'?portraitQuality(fresh,canvas.width,canvas.height):role==='front'?scanQuality(fresh,canvas.width,canvas.height):scanCoverage(fresh,canvas.width,canvas.height);
-          if(frozenIssue||(role!=='portrait'&&Math.abs(faceYaw(fresh)-yaw)>.07)){stable=0;continue;}
-          views.push({role,yaw,canvas,landmarks:fresh.map(p=>({x:p.x,y:p.y,z:p.z})),photo:canvas.toDataURL('image/jpeg',.88)});
+          const frozenIssue=role==='portrait'?portraitQuality(fresh,canvas.width,canvas.height):role==='front'?scanQuality(fresh,canvas.width,canvas.height):scanTurnIssue(fresh,canvas.width,canvas.height,direction,outer);
+          if(frozenIssue){stable=0;continue;}
+          views.push({role,yaw:faceYaw(fresh),canvas,landmarks:fresh.map(p=>({x:p.x,y:p.y,z:p.z})),photo:canvas.toDataURL('image/jpeg',.88)});
           scanInstruction('Снимок готов.',true);await sleep(1200);break;
         }
         await sleep(80);

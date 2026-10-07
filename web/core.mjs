@@ -23,6 +23,21 @@ export function faceYaw(lm) {
   return (lm[1].x - (lm[33].x + lm[263].x) / 2) / eyeWidth;
 }
 
+// The camera image is mirrored for the parent. Turning toward the on-screen
+// left arrow therefore moves the nose to the right in the unmirrored pixels.
+// Accept a useful range instead of one exact angle so normal camera jitter and
+// different face proportions cannot stall the scan.
+export function scanTurnIssue(lm,width,height,direction,outer=false) {
+  const coverage=scanCoverage(lm,width,height);
+  if(coverage)return coverage;
+  const signed=faceYaw(lm)*direction,min=outer?.20:.065,max=outer?.72:.38;
+  const arrow=direction>0?'←':'→';
+  if(signed<-.025)return `Поверните голову в другую сторону — к стрелке ${arrow}`;
+  if(signed<min)return `Поверните голову ещё немного к стрелке ${arrow}`;
+  if(signed>max)return `Чуть вернитесь к камере, не выпрямляя голову ${arrow}`;
+  return '';
+}
+
 export function scanQuality(lm, width, height) {
   const coverage = scanCoverage(lm, width, height);
   if (coverage) return coverage;
