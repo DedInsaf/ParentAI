@@ -240,7 +240,7 @@ async function scan() {
       }
     }
     if(epoch!==scanEpoch)return;
-    stopCamera();scanInstruction('Все снимки готовы. Находим волосы, шею и плечи.',true);
+    stopCamera();scanInstruction('Все снимки готовы. Несколько раз проверяем волосы, шею и одежду. Это может занять до 30 секунд.',true);
     $('captureStep').textContent='Анализ снимков';$('captureCountdown').textContent='';
     // Segment the same frontal frame that drives the face mesh.  A separate
     // portrait frame often has a different head tilt and can never join the

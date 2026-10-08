@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {positionsFor} from '../web/core.mjs';
-import {defaultPortraitAnchors,portraitAnchorIssue,portraitBodyGeometry,matteBodyGeometry,portraitHairGeometry,portraitEarGeometry} from '../web/portrait-geometry.mjs';
+import {defaultPortraitAnchors,portraitAnchorIssue,portraitBodyGeometry,matteBodyGeometry,photoHairPatchGeometry,portraitHairGeometry,portraitEarGeometry} from '../web/portrait-geometry.mjs';
 import {fitPortraitAnchors,fitStablePortraitAnchors,combineCategoryMasks} from '../web/portrait-fit.mjs';
 import {OVAL} from '../web/head-geometry.mjs';
 
@@ -62,6 +62,20 @@ test('hair has rear volume and reserves the portrait texture for the front',()=>
   assert.ok(body.groups.some(g=>g.materialIndex===1));assert.ok(body.groups.some(g=>g.materialIndex===2));
   // Front rows keep the forehead seam depth fixed when adding volume behind it.
   for(let j=0;j<17;j++){const id=OVAL[[28,29,30,31,32,33,34,35,0,1,2,3,4,5,6,7,8][j]];assert.equal(hair.positions[j*3+2],face[id*3+2]);}
+});
+test('dense photo hair patch preserves frontal pixels and bends only in depth',()=>{
+  const lm=fixture(),a=defaultPortraitAnchors(lm),frame={nose:lm[1],aspect:.75,scale:4.2},face=positionsFor(lm,1000,750);
+  const hair=photoHairPatchGeometry(lm,a,frame,face);
+  assert.equal(hair.columns,49);assert.equal(hair.rows,33);
+  assert.equal(hair.positions.length,hair.columns*hair.rows*3);
+  assert.equal(hair.uv.length,hair.columns*hair.rows*2);
+  for(let i=0;i<hair.positions.length/3;i++){
+    const px=hair.uv[i*2],py=1-hair.uv[i*2+1];
+    assert.ok(Math.abs(hair.positions[i*3]-(px-frame.nose.x)*frame.scale)<1e-9);
+    assert.ok(Math.abs(hair.positions[i*3+1]+(py-frame.nose.y)*frame.aspect*frame.scale)<1e-9);
+  }
+  const zs=hair.positions.filter((_,i)=>i%3===2);
+  assert.ok(Math.max(...zs)-Math.min(...zs)>(lm[454].x-lm[234].x)*frame.scale*.08);
 });
 test('measured skin and clothing preserve a broad neck despite an open V-neck shirt',()=>{
   const lm=fixture(),width=200,height=200,data=new Uint8Array(width*height);

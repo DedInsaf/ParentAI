@@ -2,7 +2,7 @@ import {closeFaceOpenings, FACE_OPENINGS, mouthRig, neutralFacePositions} from '
 import {skullGeometry, earGeometry, neckGeometry, torsoGeometry, hairGeometry, OVAL} from './head-geometry.mjs';
 import {bakeFaceAtlas} from './face-atlas.mjs';
 import {mouthInteriorGeometry, mouthInteriorPositions} from './mouth-geometry.mjs';
-import {defaultPortraitAnchors, portraitHairGeometry, portraitEarGeometry, matteBodyGeometry} from './portrait-geometry.mjs';
+import {defaultPortraitAnchors, photoHairPatchGeometry, portraitEarGeometry, matteBodyGeometry} from './portrait-geometry.mjs';
 import {portraitAvatarTexture,portraitCutout,portraitHairCutout} from './portrait-texture.mjs';
 
 const clamp=value=>Math.max(0,Math.min(.999999,value));
@@ -100,30 +100,15 @@ export class LocalAvatar {
       const clothMaterial=new THREE.MeshStandardMaterial({color:shirt,roughness:1,side:THREE.DoubleSide});
       const bodyData=matteBodyGeometry(bust.landmarks,anchors,bodyFrame,base,bust.matte);
       body.add(new THREE.Mesh(geometry(THREE,bodyData),[portraitMaterial,skinMaterial,clothMaterial]));
-      const fittedHair=portraitHairGeometry(bust.landmarks,anchors,frame,base,bust.matte);
-      const fittedWidth=Math.abs(base[454*3]-base[234*3]),hairLift=fittedWidth*.018;
-      // The outer photographed hair must sit above the fitted skull. A uniform
-      // tiny offset left parts of it inside the skull, so depth testing exposed
-      // separate triangular shards. Keep the hairline close and lift the crown.
-      for(let row=0;row<fittedHair.frontRows;row++)for(let j=0;j<fittedHair.columns;j++){
-        const t=row/(fittedHair.frontRows-1);
-        fittedHair.positions[(row*fittedHair.columns+j)*3+2]+=hairLift+fittedWidth*.11*t*t;
-      }
-      for(const [j,{leftId,rightId,amount}] of fittedHair.seam.entries())for(let axis=0;axis<3;axis++){
-        fittedHair.positions[j*3+axis]=base[leftId*3+axis]*(1-amount)+base[rightId*3+axis]*amount+(axis===2?hairLift:0);
-      }
-      // Draw the photographed front and the synthetic rear as separate meshes.
-      // The fitted rear ribbons used to cross the camera silhouette and expose
-      // individual triangles. The skull-fitted cap stays behind the photo and
-      // provides clean volume when the head turns.
-      const photoGroup=fittedHair.groups.find(item=>item.materialIndex===0);
-      const photoHair={positions:fittedHair.positions,uv:fittedHair.uv,indices:fittedHair.indices.slice(photoGroup.start,photoGroup.start+photoGroup.count),groups:[]};
+      const fittedWidth=Math.abs(base[454*3]-base[234*3]);
+      const photoHair=photoHairPatchGeometry(bust.landmarks,anchors,frame,base);
       const rearCap=hairGeometry(head,'short');
       if(rearCap.positions.length){
         const rearMesh=new THREE.Mesh(geometry(THREE,rearCap),new THREE.MeshStandardMaterial({color:hairSample,roughness:.95,side:THREE.DoubleSide}));
         rearMesh.position.z-=fittedWidth*.10;pivot.add(rearMesh);
       }
-      pivot.add(new THREE.Mesh(geometry(THREE,photoHair),hairPhotoMaterial));
+      const photoHairMesh=new THREE.Mesh(geometry(THREE,photoHair),hairPhotoMaterial);photoHairMesh.renderOrder=2;
+      pivot.add(photoHairMesh);
       for(const side of [-1,1]){
         const earData=portraitEarGeometry(bust.landmarks,anchors,frame,base,side);
         pivot.add(new THREE.Mesh(geometry(THREE,earData),[portraitMaterial,skinMaterial]));

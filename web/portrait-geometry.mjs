@@ -195,6 +195,30 @@ export function portraitHairContour(a,t) {
   const side=t<.5?a.templeLeft:a.templeRight,angle=Math.abs(t-.5)*Math.PI;
   return {x:a.crown.x+(side.x-a.crown.x)*Math.sin(angle),y:a.crown.y+(side.y-a.crown.y)*(1-Math.cos(angle))};
 }
+
+// Dense front patch: every x/y vertex stays in the photograph's coordinate
+// system, so an orthographic frontal render reproduces the captured hairstyle
+// instead of stretching it between a few radial strips. Depth bends only the
+// surface away from the camera and therefore appears when the head turns.
+export function photoHairPatchGeometry(lm,a,frame,face,columns=49,rows=33) {
+  const faceWidth=lm[454].x-lm[234].x,faceHeight=lm[152].y-lm[10].y;
+  const cx=(lm[234].x+lm[454].x)/2;
+  const left=Math.max(.005,Math.min(a.templeLeft.x,lm[234].x-faceWidth*.22));
+  const right=Math.min(.995,Math.max(a.templeRight.x,lm[454].x+faceWidth*.22));
+  const top=Math.max(.005,Math.min(a.crown.y,lm[10].y-faceHeight*.32));
+  const bottom=Math.min(.995,Math.max(a.templeLeft.y,a.templeRight.y,lm[234].y,lm[454].y)+faceHeight*.10);
+  const edgeZ=OVAL.reduce((sum,id)=>sum+face[id*3+2],0)/OVAL.length,worldWidth=faceWidth*frame.scale;
+  const positions=[],uv=[],indices=[];
+  for(let row=0;row<rows;row++)for(let column=0;column<columns;column++){
+    const u=column/(columns-1),v=row/(rows-1),p={x:left+(right-left)*u,y:top+(bottom-top)*v};
+    const side=Math.abs((p.x-cx)/Math.max(.001,(right-left)*.5));
+    const crown=1-Math.min(1,Math.hypot(side*.72,(v-.38)*.72));
+    const z=edgeZ+worldWidth*(.12*crown-.12*side*side-.015*v);
+    positions.push(...portraitPoint(p,frame,z));uv.push(p.x,1-p.y);
+    if(row&&column){const a0=(row-1)*columns+column-1,b=a0+1,c=row*columns+column-1,d=c+1;indices.push(a0,c,b,b,c,d);}
+  }
+  return {positions,uv,indices,left,right,top,bottom,columns,rows};
+}
 export function portraitHairGeometry(lm,a,frame,face,matte) {
   const contour=[28,29,30,31,32,33,34,35,0,1,2,3,4,5,6,7,8];
   const usableMatte=Number.isInteger(matte?.width)&&Number.isInteger(matte?.height)&&matte.width>1&&matte.height>1&&matte.alpha?.length===matte.width*matte.height;
