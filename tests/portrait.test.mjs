@@ -186,7 +186,7 @@ test('matte body interpolates a missing contour row and rejects absent body data
   assert.throws(()=>matteBodyGeometry(lm,a,frame,face,{alpha:new Float32Array(40000),width:200,height:200}),/выделить/);
 });
 
-test('matte hair follows asymmetric photographed silhouette and stays inside its foreground',()=>{
+test('matte hair uses a smooth cap, closes at the temples and keeps a recessed rear volume',()=>{
   const lm=fixture(),a=defaultPortraitAnchors(lm),width=400,height=400,alpha=new Float32Array(width*height);
   for(let y=0;y<height;y++)for(let x=0;x<width;x++){
     const px=(x+.5)/width,py=(y+.5)/height,d=(px-.5)/.14,top=.09+.08*d*d+.035*Math.max(0,d);
@@ -198,19 +198,17 @@ test('matte hair follows asymmetric photographed silhouette and stays inside its
   const matte={alpha,width,height},frame={nose:lm[1],aspect:.75,scale:4.2},face=positionsFor(lm,1000,750);
   const fitted=portraitHairGeometry(lm,a,frame,face,matte),estimated=portraitHairGeometry(lm,a,frame,face),outer=j=>({x:fitted.uv[(10*fitted.columns+j)*2],y:1-fitted.uv[(10*fitted.columns+j)*2+1]});
   assert.equal(fitted.columns,97);assert.equal(fitted.frontRows,11);assert.equal(fitted.photoRearRows,2);assert.equal(fitted.seam.length,97);
-  assert.ok(outer(24).y<outer(72).y-.01);
+  assert.ok(outer(48).y<outer(24).y);assert.ok(outer(48).y<outer(72).y);
   assert.ok(Math.abs(outer(72).y-(1-estimated.uv[(10*17+12)*2+1]))>.01);
-  let longestEdge=0,softVertices=0;
+  let longestEdge=0;
   for(let j=0;j<fitted.columns;j++){
-    const p=outer(j),x=Math.max(0,Math.min(width-1,Math.floor(p.x*width))),y=Math.max(0,Math.min(height-1,Math.floor(p.y*height)));
-    assert.ok(alpha[y*width+x]>=.02);if(alpha[y*width+x]<.2)softVertices++;
+    const p=outer(j);assert.ok(Number.isFinite(p.x)&&Number.isFinite(p.y));
     const {leftId,rightId,amount}=fitted.seam[j];
     for(let axis=0;axis<3;axis++)assert.ok(Math.abs(fitted.positions[j*3+axis]-(face[leftId*3+axis]*(1-amount)+face[rightId*3+axis]*amount))<1e-9);
     if(j){const before=outer(j-1);longestEdge=Math.max(longestEdge,Math.hypot(p.x-before.x,p.y-before.y));}
   }
   assert.ok(longestEdge<(lm[454].x-lm[234].x)*.10);
-  assert.ok(softVertices>fitted.columns/4);
-  assert.ok(outer(95).x<.65);assert.ok(outer(96).x<.65);
+  assert.ok(Math.abs(outer(0).x-lm[234].x)<.002);assert.ok(Math.abs(outer(96).x-lm[454].x)<.002);
   assert.ok(fitted.groups.some(g=>g.materialIndex===1));
   const photo=fitted.groups.find(g=>g.materialIndex===0),photoIds=new Set(fitted.indices.slice(photo.start,photo.start+photo.count));
   for(let row=11;row<=12;row++)for(let j=0;j<fitted.columns;j++){

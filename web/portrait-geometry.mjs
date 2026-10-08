@@ -243,7 +243,38 @@ export function portraitHairGeometry(lm,a,frame,face,matte) {
     }
     return {outer,inner};
   });
-  const outerPoints=edges.map(edge=>edge.outer),innerPoints=edges.map(edge=>edge.inner);
+  // At both temples the photographed fringe must close into the face seam.
+  // Leaving the ray result at full width made two vertical photo ribbons hang
+  // beside the ears. Ease the first/last columns back into the real hairline.
+  const edgeFade=j=>{
+    const t=j/(columns-1),side=(Math.min(t,1-t)-.16)/.25;
+    return Math.max(0,Math.min(1,side))**2*(3-2*Math.max(0,Math.min(1,side)));
+  };
+  const rawOuter=edges.map((edge,j)=>mix(seamPoints[j],mix(edge.inner,edge.outer,.28),edgeFade(j)));
+  // MODNet intentionally retains wispy hair. Those pixels look natural in a
+  // flat cutout but a single stray pixel becomes a sharp 3D triangle. Smooth
+  // the silhouette along the scalp while keeping its broad photographed shape.
+  let outerPoints=rawOuter;
+  for(let pass=0;pass<3;pass++)outerPoints=outerPoints.map((p,j)=>{
+    if(j<2||j>columns-3)return mix(seamPoints[j],p,edgeFade(j));
+    const weights=[.08,.22,.40,.22,.08],near=[-2,-1,0,1,2].map((d,k)=>({p:outerPoints[j+d],w:weights[k]}));
+    return {x:near.reduce((sum,item)=>sum+item.p.x*item.w,0),y:near.reduce((sum,item)=>sum+item.p.y*item.w,0)};
+  });
+  if(usableMatte){
+    const cx=(lm[234].x+lm[454].x)/2,fh=lm[152].y-lm[10].y;
+    const leftX=Math.min(a.templeLeft.x,lm[234].x-(lm[454].x-lm[234].x)*.16);
+    const rightX=Math.max(a.templeRight.x,lm[454].x+(lm[454].x-lm[234].x)*.16);
+    const topY=Math.min(a.crown.y,lm[10].y-fh*.26),bottomY=Math.max(a.templeLeft.y,a.templeRight.y,lm[234].y,lm[454].y);
+    outerPoints=outerPoints.map((p,j)=>{
+      const t=j/(columns-1),arch=Math.sin(Math.PI*t);
+      const x=t<=.5?leftX+(cx-leftX)*arch:rightX+(cx-rightX)*arch;
+      const envelope={x,y:topY+(bottomY-topY)*(1-arch)};
+      // A broad cap contains the whole photographed hair mask. Clipping that
+      // mask with narrow radial estimates was the source of the sharp shards.
+      return mix(seamPoints[j],mix(envelope,p,.10),edgeFade(j));
+    });
+  }
+  const innerPoints=edges.map((edge,j)=>mix(seamPoints[j],edge.inner,edgeFade(j)));
   const crown=usableMatte?outerPoints.reduce((best,p)=>p.y<best.y?p:best):a.crown;
   const edgeZ=seamDepth.reduce((sum,z)=>sum+z,0)/columns;
   const connect=(row,materialIndex)=>{
@@ -264,7 +295,11 @@ export function portraitHairGeometry(lm,a,frame,face,matte) {
   // does not wrap around the back or get stretched into an invented side view.
   for(let ring=1;ring<=12;ring++)for(let j=0;j<columns;j++) {
     const t=j/(columns-1),photoTransition=usableMatte&&ring<=2;
-    const u=photoTransition?ring/2:usableMatte?(ring-2)/10:ring/12,k=Math.cos(u*Math.PI/2);
+    const u=photoTransition?ring/2:usableMatte?(ring-2)/10:ring/12;
+    // Keep the synthetic rear volume inside the photographed front silhouette.
+    // If both share the same outline, opaque rear triangles peek through the
+    // soft alpha edge and look like sharp tufts in the frontal view.
+    const k=Math.cos(u*Math.PI/2)*(photoTransition?1:.55);
     const edge=usableMatte?innerPoints[j]:outerPoints[j];
     const p=photoTransition?mix(outerPoints[j],edge,u):{x:crown.x+(edge.x-crown.x)*k,y:centerY+(edge.y-centerY)*k};
     const arch=Math.sin(t*Math.PI),rib=(.5+.5*Math.sin(j*3.7+u*4))*fw*.006*Math.sin(u*Math.PI);

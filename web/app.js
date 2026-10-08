@@ -242,14 +242,17 @@ async function scan() {
     if(epoch!==scanEpoch)return;
     stopCamera();scanInstruction('Все снимки готовы. Находим волосы, шею и плечи.',true);
     $('captureStep').textContent='Анализ снимков';$('captureCountdown').textContent='';
-    const portrait=views.find(view=>view.role==='portrait');portrait.anchors=await fitPortrait(portrait,message=>scanInstruction(message),abort.signal);
+    // Segment the same frontal frame that drives the face mesh.  A separate
+    // portrait frame often has a different head tilt and can never join the
+    // animated chin without a visible seam.
+    const front=views.find(view=>view.role==='front');front.anchors=await fitPortrait(front,message=>scanInstruction(message),abort.signal);
     if(epoch!==scanEpoch)return;
     scanInstruction('Создаём объёмную модель прямо на устройстве.',true);
     const model=LocalAvatar.create(THREE,views,avatarTopology);
-    try {await api('avatar',JSON.stringify({version:7,views:views.map(({role,yaw,landmarks,photo})=>({role,yaw,landmarks,photo})),anchors:portrait.anchors}),true,60000,abort.signal);}
+    try {await api('avatar',JSON.stringify({version:7,views:views.map(({role,yaw,landmarks,photo})=>({role,yaw,landmarks,photo})),anchors:front.anchors}),true,60000,abort.signal);}
     catch(error){model.dispose();throw error;}
     if(epoch!==scanEpoch){model.dispose();return;}
-    installModel(model);showPortraitCutout(portrait);cancelScan();
+    installModel(model);showPortraitCutout(front);cancelScan();
     $('faceStatus').textContent='Локальный 3D-аватар готов';$('cameraHint').textContent='Аватар создан на этом устройстве. Проверьте поворот и запишите голос.';
     scanInstruction('Ваш аватар готов. Фотографии никуда не отправлялись.',true);
   } catch(error){if(epoch===scanEpoch){cancelScan();throw error;}}
@@ -669,7 +672,7 @@ $('voiceQuestionBtn').addEventListener('click',()=>voiceQuestion().catch(fail));
 $('scanAudio').addEventListener('change',()=>{if(!$('scanAudio').checked) window.speechSynthesis?.cancel();});
 document.querySelectorAll('[data-setup-step]').forEach(button=>button.addEventListener('click',()=>setupStep(button.dataset.setupStep)));
 action('nextVoiceBtn',()=>setupStep('voice'));action('nextReadyBtn',()=>setupStep('ready'));
-action('viewFrontBtn',()=>{previewYaw=0;});action('viewSideBtn',()=>{previewYaw=.55;});
+action('viewFrontBtn',()=>{previewYaw=0;});action('viewSideBtn',()=>{previewYaw=.28;});
 action('previewMotionBtn',()=>playVoice('preview'));
 action('viewMeshBtn',()=>{showWireframe=!showWireframe;applyModelView();});
 $('tutorForm').addEventListener('submit', askTutor);
@@ -684,11 +687,11 @@ async function restoreAvatar() {
     const saved=await api('avatar');if(!saved||restoringEpoch!==scanEpoch)return;
     if(saved.version===7){
       $('faceStatus').textContent='Восстанавливаем локальный аватар…';await dependencies();
-      const views=await Promise.all(saved.views.map(async view=>{const image=new Image();image.src=view.photo;await image.decode();const canvas=document.createElement('canvas');canvas.width=image.width;canvas.height=image.height;canvas.getContext('2d').drawImage(image,0,0);return {...view,canvas,anchors:view.role==='portrait'?saved.anchors:undefined};}));
-      const portrait=views.find(view=>view.role==='portrait');if(portrait){portrait.anchors=await fitPortrait(portrait,message=>{if(restoringEpoch===scanEpoch)$('faceStatus').textContent=message;},abort.signal);}
+      const views=await Promise.all(saved.views.map(async view=>{const image=new Image();image.src=view.photo;await image.decode();const canvas=document.createElement('canvas');canvas.width=image.width;canvas.height=image.height;canvas.getContext('2d').drawImage(image,0,0);return {...view,canvas,anchors:view.role==='front'?saved.anchors:undefined};}));
+      const front=views.find(view=>view.role==='front');if(front){front.anchors=await fitPortrait(front,message=>{if(restoringEpoch===scanEpoch)$('faceStatus').textContent=message;},abort.signal);}
       if(restoringEpoch!==scanEpoch)return;
       installModel(LocalAvatar.create(THREE,views,avatarTopology));
-      showPortraitCutout(portrait);
+      showPortraitCutout(front);
       $('faceStatus').textContent='Локальный 3D-аватар загружен';$('cameraHint').textContent='Аватар хранится на этом устройстве.';return;
     }
     if(saved.version!==6){

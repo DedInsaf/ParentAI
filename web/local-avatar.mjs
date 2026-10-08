@@ -2,8 +2,8 @@ import {closeFaceOpenings, FACE_OPENINGS, mouthRig, neutralFacePositions} from '
 import {skullGeometry, earGeometry, neckGeometry, torsoGeometry, hairGeometry, OVAL} from './head-geometry.mjs';
 import {bakeFaceAtlas} from './face-atlas.mjs';
 import {mouthInteriorGeometry, mouthInteriorPositions} from './mouth-geometry.mjs';
-import {defaultPortraitAnchors, portraitHairGeometry, matteBodyGeometry} from './portrait-geometry.mjs';
-import {portraitAvatarTexture} from './portrait-texture.mjs';
+import {defaultPortraitAnchors, portraitHairGeometry, portraitEarGeometry, matteBodyGeometry} from './portrait-geometry.mjs';
+import {portraitAvatarTexture,portraitCutout,portraitHairCutout} from './portrait-texture.mjs';
 
 const clamp=value=>Math.max(0,Math.min(.999999,value));
 
@@ -48,7 +48,12 @@ function faceSkinColor(THREE,view,fallback){
 export class LocalAvatar {
   static create(THREE,views,topology){
     const front=views.find(v=>v.role==='front'),portrait=views.find(v=>v.role==='portrait');
-    if(!front||!portrait)throw new Error('Не хватает фронтального снимка или кадра с плечами.');
+    if(!front)throw new Error('Не хватает фронтального снимка.');
+    // The frontal scan is the only source that is already aligned with the
+    // animated face.  Using a later, wider capture for the neck changed camera
+    // pitch and exposure, which created the visible cut below the chin.
+    const bust=front.matte&&front.anchors?front:portrait;
+    if(!bust?.matte)throw new Error('Не удалось выделить волосы, шею и одежду.');
     const indices=[];
     for(let i=0;i<topology.length;i+=3){const tri=[topology[i].start,topology[i].end,topology[i+1].end];if(tri.every(n=>n<468))indices.push(...tri);}
     const filled=closeFaceOpenings(front.landmarks,indices,false),points=filled.points;
@@ -75,39 +80,53 @@ export class LocalAvatar {
     const skinMaterial=new THREE.MeshStandardMaterial({color:skin,roughness:1,side:THREE.DoubleSide});
     const shell=new THREE.Mesh(shellGeometry,new THREE.MeshStandardMaterial({vertexColors:true,roughness:1,side:THREE.DoubleSide}));
     const group=new THREE.Group(),pivot=new THREE.Group(),body=new THREE.Group();pivot.add(shell);
-    const hairSample=segmentedColor(THREE,portrait,1,0x37261c);
-    const anchors=portrait.anchors||defaultPortraitAnchors(portrait.landmarks);
-    if(portrait.anchors){
-      const portraitWidth=Math.max(.01,Math.abs(portrait.landmarks[454].x-portrait.landmarks[234].x)),portraitHeight=Math.max(.01,Math.abs(portrait.landmarks[152].y-portrait.landmarks[10].y));
+    const hairSample=segmentedColor(THREE,bust,1,0x37261c);
+    const anchors=bust.anchors||defaultPortraitAnchors(bust.landmarks);
+    if(bust.anchors){
+      const portraitWidth=Math.max(.01,Math.abs(bust.landmarks[454].x-bust.landmarks[234].x)),portraitHeight=Math.max(.01,Math.abs(bust.landmarks[152].y-bust.landmarks[10].y));
       const scale=Math.abs(base[454*3]-base[234*3])/portraitWidth,vertical=Math.abs(base[152*3+1]-base[10*3+1])/portraitHeight;
-      const aspect=vertical/scale,nose=portrait.landmarks[1];
+      const aspect=vertical/scale,nose=bust.landmarks[1];
       const frame={nose:{x:nose.x-base[1*3]/scale,y:nose.y+base[1*3+1]/vertical},aspect,scale};
       // Separate captures do not have exactly the same nose-to-chin distance.
       // The bust must meet the generated face at the chin; otherwise the same
       // mathematically valid projection leaves a visible horizontal gap.
-      const portraitChin=portrait.landmarks[152],bodyFrame={nose:{x:portraitChin.x-base[152*3]/scale,y:portraitChin.y+base[152*3+1]/vertical},aspect,scale};
-      const shirt=segmentedColor(THREE,portrait,4,0x365064);
+      const portraitChin=bust.landmarks[152],bodyFrame={nose:{x:portraitChin.x-base[152*3]/scale,y:portraitChin.y+base[152*3+1]/vertical},aspect,scale};
+      const shirt=segmentedColor(THREE,bust,4,0x365064);
       const skinHex=skin.getHex(THREE.SRGBColorSpace),skinRgb=[skinHex>>16,(skinHex>>8)&255,skinHex&255];
-      const portraitTexture=new THREE.CanvasTexture(portraitAvatarTexture(portrait,skinRgb));portraitTexture.colorSpace=THREE.SRGBColorSpace;
+      const portraitTexture=new THREE.CanvasTexture(bust===front?portraitCutout(bust):portraitAvatarTexture(bust,skinRgb));portraitTexture.colorSpace=THREE.SRGBColorSpace;
       const portraitMaterial=new THREE.MeshStandardMaterial({map:portraitTexture,roughness:1,side:THREE.DoubleSide,transparent:true,alphaTest:.02});
+      const hairPhotoTexture=new THREE.CanvasTexture(portraitHairCutout(bust));hairPhotoTexture.colorSpace=THREE.SRGBColorSpace;
+      const hairPhotoMaterial=new THREE.MeshStandardMaterial({map:hairPhotoTexture,roughness:1,side:THREE.DoubleSide,transparent:true,alphaTest:.02});
       const clothMaterial=new THREE.MeshStandardMaterial({color:shirt,roughness:1,side:THREE.DoubleSide});
-      const bodyData=matteBodyGeometry(portrait.landmarks,anchors,bodyFrame,base,portrait.matte);
+      const bodyData=matteBodyGeometry(bust.landmarks,anchors,bodyFrame,base,bust.matte);
       body.add(new THREE.Mesh(geometry(THREE,bodyData),[portraitMaterial,skinMaterial,clothMaterial]));
-      const strands=document.createElement('canvas');strands.width=128;strands.height=128;const sc=strands.getContext('2d');sc.fillStyle='#'+hairSample.getHexString();sc.fillRect(0,0,128,128);
-      for(let i=0;i<150;i++){sc.strokeStyle=i%3?'rgba(255,255,255,.04)':'rgba(0,0,0,.11)';sc.beginPath();const x=(i*31.7)%128;sc.moveTo(x,-4);sc.bezierCurveTo(x-8,35,x+7,88,x-4,132);sc.stroke();}
-      const strandTexture=new THREE.CanvasTexture(strands);strandTexture.colorSpace=THREE.SRGBColorSpace;
-      const rearHair=new THREE.MeshStandardMaterial({map:strandTexture,roughness:1,side:THREE.DoubleSide});
-      const fittedHair=portraitHairGeometry(portrait.landmarks,anchors,frame,base,portrait.matte);
-      const hairLift=Math.abs(base[454*3]-base[234*3])*.018;
-      for(let row=0;row<fittedHair.frontRows;row++)for(let j=0;j<fittedHair.columns;j++)fittedHair.positions[(row*fittedHair.columns+j)*3+2]+=hairLift;
+      const fittedHair=portraitHairGeometry(bust.landmarks,anchors,frame,base,bust.matte);
+      const fittedWidth=Math.abs(base[454*3]-base[234*3]),hairLift=fittedWidth*.018;
+      // The outer photographed hair must sit above the fitted skull. A uniform
+      // tiny offset left parts of it inside the skull, so depth testing exposed
+      // separate triangular shards. Keep the hairline close and lift the crown.
+      for(let row=0;row<fittedHair.frontRows;row++)for(let j=0;j<fittedHair.columns;j++){
+        const t=row/(fittedHair.frontRows-1);
+        fittedHair.positions[(row*fittedHair.columns+j)*3+2]+=hairLift+fittedWidth*.11*t*t;
+      }
       for(const [j,{leftId,rightId,amount}] of fittedHair.seam.entries())for(let axis=0;axis<3;axis++){
         fittedHair.positions[j*3+axis]=base[leftId*3+axis]*(1-amount)+base[rightId*3+axis]*amount+(axis===2?hairLift:0);
       }
-      pivot.add(new THREE.Mesh(geometry(THREE,fittedHair),[portraitMaterial,rearHair]));
+      // Draw the photographed front and the synthetic rear as separate meshes.
+      // The fitted rear ribbons used to cross the camera silhouette and expose
+      // individual triangles. The skull-fitted cap stays behind the photo and
+      // provides clean volume when the head turns.
+      const photoGroup=fittedHair.groups.find(item=>item.materialIndex===0);
+      const photoHair={positions:fittedHair.positions,uv:fittedHair.uv,indices:fittedHair.indices.slice(photoGroup.start,photoGroup.start+photoGroup.count),groups:[]};
+      const rearCap=hairGeometry(head,'short');
+      if(rearCap.positions.length){
+        const rearMesh=new THREE.Mesh(geometry(THREE,rearCap),new THREE.MeshStandardMaterial({color:hairSample,roughness:.95,side:THREE.DoubleSide}));
+        rearMesh.position.z-=fittedWidth*.10;pivot.add(rearMesh);
+      }
+      pivot.add(new THREE.Mesh(geometry(THREE,photoHair),hairPhotoMaterial));
       for(const side of [-1,1]){
-        const earData=earGeometry(head,side),ear=geometry(THREE,earData),colors=earData.shade.flatMap(value=>[skin.r*value,skin.g*value,skin.b*value]);
-        ear.setAttribute('color',new THREE.Float32BufferAttribute(colors,3));
-        pivot.add(new THREE.Mesh(ear,new THREE.MeshStandardMaterial({vertexColors:true,roughness:1,side:THREE.DoubleSide})));
+        const earData=portraitEarGeometry(bust.landmarks,anchors,frame,base,side);
+        pivot.add(new THREE.Mesh(geometry(THREE,earData),[portraitMaterial,skinMaterial]));
       }
     }else{
       const hairData=hairGeometry(head,'short');
