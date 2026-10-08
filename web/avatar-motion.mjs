@@ -28,7 +28,7 @@ export class AvatarMotion {
       gazeX:move*(attentive?0:this.lookX*1.6),gazeY:move*(attentive?0:this.lookY*1.4),preview,
     };
     for(const key of Object.keys(this.pose)) {
-      const speed=key.startsWith('gaze')?(attentive?16:5):key==='preview'?5:attentive&&key==='yaw'?9:3.5;
+      const speed=key.startsWith('gaze')?(attentive?16:5):key==='preview'?9:attentive&&key==='yaw'?9:3.5;
       [this.pose[key],this.velocity[key]]=damp(this.pose[key],targets[key],this.velocity[key],dt,speed);
     }
     return this.pose;

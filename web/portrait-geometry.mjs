@@ -158,7 +158,10 @@ export function matteBodyGeometry(lm,a,frame,face,matte) {
   };
   const neckStart=chin.y+fh*.035,neck=boundsAt(neckStart);
   const collarY=Math.max(chin.y+fh*.16,Math.min(bottom,(a?.neckLeft?.y+a?.neckRight?.y)/2||chin.y+fh*.30));
-  const collar=boundsAt(collarY),upperCenter=(neck.left+neck.right)/2,upperWidth=Math.min(neck.right-neck.left,fw*.52);
+  // Keep the measured neck width from the unified frontal photograph. The old
+  // .52 face-width cap made a normal neck look pinched even when the matte had
+  // already found both real edges.
+  const collar=boundsAt(collarY),upperCenter=(neck.left+neck.right)/2,upperWidth=Math.min(neck.right-neck.left,fw*.70);
   const collarCenter=(collar.left+collar.right)/2,collarWidth=collar.right-collar.left;
   const ys=new Set(Array.from({length:65},(_,i)=>top+(bottom-top)*i/64));
   for(const y of [chin.y,neckStart,chin.y+fh*.08,a?.neckLeft?.y,a?.neckRight?.y,a?.shoulderLeft?.y,a?.shoulderRight?.y]){
@@ -208,12 +211,16 @@ export function photoHairPatchGeometry(lm,a,frame,face,columns=49,rows=33) {
   const top=Math.max(.005,Math.min(a.crown.y,lm[10].y-faceHeight*.32));
   const bottom=Math.min(.995,Math.max(a.templeLeft.y,a.templeRight.y,lm[234].y,lm[454].y)+faceHeight*.10);
   const edgeZ=OVAL.reduce((sum,id)=>sum+face[id*3+2],0)/OVAL.length,worldWidth=faceWidth*frame.scale;
+  const foreheadZ=face[10*3+2],sideZ=(face[234*3+2]+face[454*3+2])/2;
   const positions=[],uv=[],indices=[];
   for(let row=0;row<rows;row++)for(let column=0;column<columns;column++){
     const u=column/(columns-1),v=row/(rows-1),p={x:left+(right-left)*u,y:top+(bottom-top)*v};
     const side=Math.abs((p.x-cx)/Math.max(.001,(right-left)*.5));
     const crown=1-Math.min(1,Math.hypot(side*.72,(v-.38)*.72));
-    const z=edgeZ+worldWidth*(.12*crown-.12*side*side-.015*v);
+    const scalpZ=edgeZ+worldWidth*(.12*crown-.12*side*side-.015*v);
+    const joinTarget=foreheadZ*(1-Math.min(1,side))+sideZ*Math.min(1,side);
+    const joinT=Math.max(0,Math.min(1,(v-.22)/.68)),join=joinT*joinT*(3-2*joinT);
+    const z=scalpZ*(1-join)+joinTarget*join;
     positions.push(...portraitPoint(p,frame,z));uv.push(p.x,1-p.y);
     if(row&&column){const a0=(row-1)*columns+column-1,b=a0+1,c=row*columns+column-1,d=c+1;indices.push(a0,c,b,b,c,d);}
   }

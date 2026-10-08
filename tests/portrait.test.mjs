@@ -159,7 +159,7 @@ test('visible neck forms an anatomical taper and keeps the soft matte collar',()
     return [Math.min(...xs),Math.max(...xs)];
   };
   const chinSpan=spanAt(chin.y),middleSpan=spanAt(chin.y+fh*.08),collarY=(a.neckLeft.y+a.neckRight.y)/2,collarSpan=spanAt(collarY);
-  assert.ok(chinSpan[1]-chinSpan[0]>=.103&&chinSpan[1]-chinSpan[0]<=.109);
+  assert.ok(chinSpan[1]-chinSpan[0]>=.138&&chinSpan[1]-chinSpan[0]<=.142);
   assert.ok(middleSpan[1]-middleSpan[0]>chinSpan[1]-chinSpan[0]);
   assert.ok(collarSpan[0]<=.411&&collarSpan[1]>=.589);
   // Only the root hidden well inside the face is narrower than the upper neck.
