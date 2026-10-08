@@ -1,4 +1,4 @@
-import {resampleAlpha} from './portrait-matte.mjs';
+import {openedCategoryComponent,resampleAlpha} from './portrait-matte.mjs';
 
 // Keep original RGB, coordinates and soft hair coverage. No pixel flooding,
 // category erosion or invented opaque fill outside the person.
@@ -8,7 +8,20 @@ export function portraitCutout(view){
   const ctx=canvas.getContext('2d',{willReadFrequently:true});ctx.drawImage(view.canvas,0,0);
   const image=ctx.getImageData(0,0,canvas.width,canvas.height);
   const alpha=resampleAlpha(view.matte.alpha,view.matte.width,view.matte.height,canvas.width,canvas.height);
-  for(let i=0;i<alpha.length;i++)image.data[i*4+3]=Math.round(alpha[i]*255);
+  const categories=view?.segmentation;
+  for(let y=0;y<canvas.height;y++)for(let x=0;x<canvas.width;x++){
+    const i=y*canvas.width+x;let supported=true;
+    if(categories?.data?.length){
+      const mx=Math.min(categories.width-1,Math.floor((x+.5)/canvas.width*categories.width));
+      const my=Math.min(categories.height-1,Math.floor((y+.5)/canvas.height*categories.height));supported=false;
+      // A one-cell allowance retains antialiased hair and clothing edges while
+      // rejecting MODNet haze over the room beside the neck.
+      for(let dy=-1;dy<=1&&!supported;dy++)for(let dx=-1;dx<=1;dx++){
+        const px=mx+dx,py=my+dy;if(px>=0&&py>=0&&px<categories.width&&py<categories.height&&categories.data[py*categories.width+px]!==0){supported=true;break;}
+      }
+    }
+    image.data[i*4+3]=supported?Math.round(alpha[i]*255):0;
+  }
   ctx.putImageData(image,0,0);return canvas;
 }
 
@@ -19,7 +32,8 @@ export function portraitHairCutout(view){
   const canvas=portraitCutout(view),mask=view?.segmentation;
   if(!mask?.data?.length)return canvas;
   const ctx=canvas.getContext('2d',{willReadFrequently:true}),image=ctx.getImageData(0,0,canvas.width,canvas.height);
-  const isHair=(mx,my)=>mx>=0&&my>=0&&mx<mask.width&&my<mask.height&&mask.data[my*mask.width+mx]===1;
+  const connected=openedCategoryComponent(mask.data,mask.width,mask.height,1,3);
+  const isHair=(mx,my)=>mx>=0&&my>=0&&mx<mask.width&&my<mask.height&&connected[my*mask.width+mx]===1;
   for(let y=0;y<canvas.height;y++)for(let x=0;x<canvas.width;x++){
     const mx=Math.min(mask.width-1,Math.floor((x+.5)/canvas.width*mask.width));
     const my=Math.min(mask.height-1,Math.floor((y+.5)/canvas.height*mask.height));
@@ -32,9 +46,9 @@ export function portraitHairCutout(view){
   ctx.putImageData(image,0,0);return canvas;
 }
 
-// The face and body photos are captured at different moments and exposure.
-// Gently match only the upper neck to the face tone, then fade back to the
-// original portrait before the collar. The verification cutout stays untouched.
+// Gently normalize only the upper neck to the sampled face tone, then fade
+// back to the original photograph before the collar. The verification cutout
+// stays untouched.
 export function portraitAvatarTexture(view,targetRgb){
   const canvas=portraitCutout(view),ctx=canvas.getContext('2d',{willReadFrequently:true}),image=ctx.getImageData(0,0,canvas.width,canvas.height);
   const chin=view.landmarks?.[152],crown=view.landmarks?.[10];

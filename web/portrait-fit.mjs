@@ -1,4 +1,5 @@
 import {defaultPortraitAnchors,portraitAnchorIssue} from './portrait-geometry.mjs';
+import {openedCategoryComponent} from './portrait-matte.mjs';
 
 export function combineCategoryMasks(masks,width,height) {
   if(!Array.isArray(masks)||!masks.length||masks.some(mask=>mask?.length!==width*height))throw new Error('Некорректные маски портрета');
@@ -30,7 +31,9 @@ export function fitPortraitAnchors(lm,{data,width,height}) {
   const a=defaultPortraitAnchors(lm);
   if(!Number.isInteger(width)||!Number.isInteger(height)||width<1||height<1||data?.length!==width*height)return a;
   const fw=lm[454].x-lm[234].x,fh=lm[152].y-lm[10].y,cx=lm[152].x;
+  const stableHair=openedCategoryComponent(data,width,height,1,3);
   const at=(x,y)=>data[Math.min(height-1,Math.max(0,Math.round(y*height)))*width+Math.min(width-1,Math.max(0,Math.round(x*width)))];
+  const isHair=(x,y)=>stableHair[Math.min(height-1,Math.max(0,Math.round(y*height)))*width+Math.min(width-1,Math.max(0,Math.round(x*width)))]===1;
   const run=(y,accept,limit=fw*1.8)=>{
     let l=cx,r=cx;if(!accept(at(cx,y)))return null;
     for(let x=cx;x>=Math.max(.02,cx-limit);x-=1/width){if(!accept(at(x,y)))break;l=x;}
@@ -38,12 +41,19 @@ export function fitPortraitAnchors(lm,{data,width,height}) {
     return r-l>fw*.25?{left:l,right:r,y}:null;
   };
   const hair=[];
-  for(let y=Math.max(.02,lm[10].y-fh*.65);y<lm[234].y;y+=1/height)for(let x=Math.max(.02,lm[234].x-fw*.35);x<Math.min(.98,lm[454].x+fw*.35);x+=1/width)if(at(x,y)===1)hair.push({x,y});
+  for(let y=Math.max(.02,lm[10].y-fh*.65);y<lm[234].y;y+=1/height)for(let x=Math.max(.02,lm[234].x-fw*.35);x<Math.min(.98,lm[454].x+fw*.35);x+=1/width)if(isHair(x,y))hair.push({x,y});
   if(hair.length>12){
-    const top=Math.min(...hair.map(p=>p.y)),upper=hair.filter(p=>p.y<top+3/height);
+    // Extreme pixels are usually flyaways or segmentation noise. A quantile
+    // keeps the dense hairstyle while preventing one thin strand from
+    // enlarging the whole curved hair surface.
+    const xs=hair.map(p=>p.x).sort((x,y)=>x-y),ys=hair.map(p=>p.y).sort((x,y)=>x-y);
+    const quantile=(values,q)=>values[Math.max(0,Math.min(values.length-1,Math.floor((values.length-1)*q)))];
+    const top=quantile(ys,.04),leftX=quantile(xs,.03),rightX=quantile(xs,.97);
+    const upper=hair.filter(p=>p.y<=top+Math.max(3/height,fh*.035));
     a.crown={x:upper.reduce((s,p)=>s+p.x,0)/upper.length,y:top};
-    const left=hair.reduce((p,v)=>v.x<p.x?v:p),right=hair.reduce((p,v)=>v.x>p.x?v:p);
-    a.templeLeft={...left};a.templeRight={...right};
+    const left=hair.filter(p=>p.x<=leftX+1/width).sort((p,q)=>Math.abs(p.y-lm[234].y)-Math.abs(q.y-lm[234].y))[0];
+    const right=hair.filter(p=>p.x>=rightX-1/width).sort((p,q)=>Math.abs(p.y-lm[454].y)-Math.abs(q.y-lm[454].y))[0];
+    a.templeLeft={x:leftX,y:left?.y??lm[234].y};a.templeRight={x:rightX,y:right?.y??lm[454].y};
   }
   const neckRows=[];
   for(let y=lm[152].y+fh*.04;y<Math.min(.97,lm[152].y+fh*.30);y+=1/height){

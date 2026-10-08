@@ -156,12 +156,14 @@ export function matteBodyGeometry(lm,a,frame,face,matte) {
     const t=(row-before)/(after-before);
     return {left:filtered[before].left*(1-t)+filtered[after].left*t,right:filtered[before].right*(1-t)+filtered[after].right*t};
   };
-  const neckStart=chin.y+fh*.035,neck=boundsAt(neckStart);
+  const neckStart=chin.y+fh*.035,measuredWidth=(a?.neckRight?.x??0)-(a?.neckLeft?.x??0);
   const collarY=Math.max(chin.y+fh*.16,Math.min(bottom,(a?.neckLeft?.y+a?.neckRight?.y)/2||chin.y+fh*.30));
-  // Keep the measured neck width from the unified frontal photograph. The old
-  // .52 face-width cap made a normal neck look pinched even when the matte had
-  // already found both real edges.
-  const collar=boundsAt(collarY),upperCenter=(neck.left+neck.right)/2,upperWidth=Math.min(neck.right-neck.left,fw*.70);
+  // The silhouette immediately below the chin still contains the jaw and can
+  // be almost a full face wide. Use the skin-class neck measurement instead;
+  // unlike a ratio or the outer matte it represents the real two neck edges.
+  const fallback=boundsAt(chin.y+fh*.12),upperWidth=measuredWidth>fw*.35&&measuredWidth<fw*1.05?measuredWidth:fallback.right-fallback.left;
+  const upperCenter=measuredWidth>fw*.35&&measuredWidth<fw*1.05?(a.neckLeft.x+a.neckRight.x)/2:(fallback.left+fallback.right)/2;
+  const collar=boundsAt(collarY);
   const collarCenter=(collar.left+collar.right)/2,collarWidth=collar.right-collar.left;
   const ys=new Set(Array.from({length:65},(_,i)=>top+(bottom-top)*i/64));
   for(const y of [chin.y,neckStart,chin.y+fh*.08,a?.neckLeft?.y,a?.neckRight?.y,a?.shoulderLeft?.y,a?.shoulderRight?.y]){
@@ -170,15 +172,18 @@ export function matteBodyGeometry(lm,a,frame,face,matte) {
   const sections=[...ys].sort((x,y)=>x-y).map(y=>{
     let cx,half;
     if(y<chin.y){
-      // A compact hidden root sits behind the jaw. It reaches the anatomical
-      // upper-neck width at the chin instead of ending in a flat wide cap.
+      // Tuck the hidden root inside the lower jaw, then reach almost the full
+      // measured neck width at the chin. This removes the horizontal shelf on
+      // both sides without returning to the old narrow stalk.
       const t=Math.max(0,Math.min(1,(y-top)/(chin.y-top))),e=t*t*(3-2*t);
-      cx=upperCenter;half=upperWidth*(.82+.18*e)*.5;
+      cx=upperCenter;half=upperWidth*(.78+.20*e)*.5;
     }else if(y<collarY){
-      // Human necks widen gradually toward the collar. Using the full matte
-      // span immediately below the chin produced the rectangular column.
-      const t=(y-chin.y)/(collarY-chin.y),e=t*t*(3-2*t);
-      cx=upperCenter*(1-e)+collarCenter*e;half=(upperWidth*(1-e)+collarWidth*e)*.5;
+      // Keep the measured neck parallel below the jaw, then blend into the
+      // photographed collar only near its base. This removes the hourglass
+      // pinch while retaining the real shoulder slope.
+      const progress=(y-chin.y)/(collarY-chin.y),base=.98+.02*Math.min(1,progress/.55);
+      const t=Math.max(0,Math.min(1,(progress-.72)/.28)),e=t*t*(3-2*t);
+      cx=upperCenter*(1-e)+collarCenter*e;half=(upperWidth*base*(1-e)+collarWidth*e)*.5;
     }else{
       const bounds=boundsAt(y);cx=(bounds.left+bounds.right)/2;half=(bounds.right-bounds.left)*.5;
     }
@@ -206,10 +211,12 @@ export function portraitHairContour(a,t) {
 export function photoHairPatchGeometry(lm,a,frame,face,columns=49,rows=33) {
   const faceWidth=lm[454].x-lm[234].x,faceHeight=lm[152].y-lm[10].y;
   const cx=(lm[234].x+lm[454].x)/2;
-  const left=Math.max(.005,Math.min(a.templeLeft.x,lm[234].x-faceWidth*.22));
-  const right=Math.min(.995,Math.max(a.templeRight.x,lm[454].x+faceWidth*.22));
-  const top=Math.max(.005,Math.min(a.crown.y,lm[10].y-faceHeight*.32));
-  const bottom=Math.min(.995,Math.max(a.templeLeft.y,a.templeRight.y,lm[234].y,lm[454].y)+faceHeight*.10);
+  // Trust the cleaned measured hairstyle. Large synthetic margins created
+  // empty curved panels which turned a small edge error into floating hair.
+  const left=Math.max(.005,Math.min(a.templeLeft.x-faceWidth*.025,lm[234].x-faceWidth*.04));
+  const right=Math.min(.995,Math.max(a.templeRight.x+faceWidth*.025,lm[454].x+faceWidth*.04));
+  const top=Math.max(.005,Math.min(a.crown.y-faceHeight*.05,lm[10].y-faceHeight*.08));
+  const bottom=Math.min(.995,Math.max(a.templeLeft.y,a.templeRight.y,lm[234].y,lm[454].y)+faceHeight*.02);
   const edgeZ=OVAL.reduce((sum,id)=>sum+face[id*3+2],0)/OVAL.length,worldWidth=faceWidth*frame.scale;
   const foreheadZ=face[10*3+2],sideZ=(face[234*3+2]+face[454*3+2])/2;
   const positions=[],uv=[],indices=[];

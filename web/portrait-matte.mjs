@@ -58,6 +58,42 @@ function forNeighbours(index, width, height, visit) {
   }
 }
 
+export function largestCategoryComponent(categories,width,height,category){
+  const count=pixelCount(width,height);requireLength(categories,count);
+  if(!Number.isInteger(category)||category<0||category>255)throw new RangeError('Invalid portrait category');
+  const labels=new Int32Array(count),queue=new Int32Array(count);let label=0,largest=0,largestSize=0;
+  for(let seed=0;seed<count;seed++){
+    if(categories[seed]!==category||labels[seed])continue;
+    const current=++label;let read=0,length=1;queue[0]=seed;labels[seed]=current;
+    while(read<length)forNeighbours(queue[read++],width,height,next=>{
+      if(categories[next]===category&&!labels[next]){labels[next]=current;queue[length++]=next;}
+    });
+    if(length>largestSize){largestSize=length;largest=current;}
+  }
+  const result=new Uint8Array(count);if(largest)for(let i=0;i<count;i++)if(labels[i]===largest)result[i]=1;
+  return result;
+}
+
+export function openedCategoryComponent(categories,width,height,category,radius=2){
+  const source=largestCategoryComponent(categories,width,height,category),count=pixelCount(width,height);
+  if(!Number.isInteger(radius)||radius<1)throw new RangeError('Invalid opening radius');
+  const eroded=new Uint8Array(count),opened=new Uint8Array(count);
+  for(let y=radius;y<height-radius;y++)for(let x=radius;x<width-radius;x++){
+    let keep=1;
+    for(let oy=-radius;oy<=radius&&keep;oy++)for(let ox=-radius;ox<=radius;ox++)if(!source[(y+oy)*width+x+ox]){keep=0;break;}
+    eroded[y*width+x]=keep;
+  }
+  for(let y=0;y<height;y++)for(let x=0;x<width;x++){
+    let keep=0;
+    for(let oy=-radius;oy<=radius&&!keep;oy++)for(let ox=-radius;ox<=radius;ox++){
+      const px=x+ox,py=y+oy;if(px>=0&&py>=0&&px<width&&py<height&&eroded[py*width+px]){keep=1;break;}
+    }
+    opened[y*width+x]=keep;
+  }
+  // Very small or heavily occluded hairstyles may not survive erosion.
+  return opened.some(Boolean)?opened:source;
+}
+
 export function cleanPortraitAlpha(alpha, width, height) {
   const count = pixelCount(width, height);
   requireLength(alpha, count);

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {imageToNchw, resampleAlpha, cleanPortraitAlpha, silhouetteRows} from '../web/portrait-matte.mjs';
+import {imageToNchw, resampleAlpha, cleanPortraitAlpha, largestCategoryComponent, openedCategoryComponent, silhouetteRows} from '../web/portrait-matte.mjs';
 
 const near = (actual, expected) => assert.ok(Math.abs(actual - expected) < 1e-6, `${actual} differs from ${expected}`);
 function rectangle(alpha, width, left, top, right, bottom, value = 1) {
@@ -36,6 +36,22 @@ test('matte cleanup removes detached predictions while retaining the soft hair f
   assert.equal(result[1 * width + 1], 0); assert.equal(result[1 * width + 2], 0);
   assert.equal(result[8 * width + 10], 1);
   assert.deepEqual(alpha, original);
+});
+
+test('hair category cleanup keeps only the connected hairstyle',()=>{
+  const width=9,height=7,data=new Uint8Array(width*height);
+  rectangle(data,width,2,1,7,5,1);data[0]=1;data[6*width+8]=1;
+  const result=largestCategoryComponent(data,width,height,1);
+  assert.equal(result.reduce((sum,value)=>sum+value,0),20);
+  assert.equal(result[0],0);assert.equal(result[6*width+8],0);assert.equal(result[2*width+4],1);
+});
+
+test('hair opening removes a thin connected flyaway and keeps the dense hairstyle',()=>{
+  const width=15,height=12,data=new Uint8Array(width*height);
+  rectangle(data,width,4,4,11,10,1);
+  data[3*width+6]=1;data[2*width+6]=1;data[1*width+7]=1;data[1*width+8]=1;
+  const result=openedCategoryComponent(data,width,height,1,1);
+  assert.equal(result[1*width+8],0);assert.equal(result[2*width+6],0);assert.equal(result[6*width+7],1);
 });
 
 test('matte cleanup fills small interior holes while preserving large holes and open gaps', () => {

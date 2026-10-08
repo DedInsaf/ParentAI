@@ -149,7 +149,7 @@ test('matte body preserves photographed neck, shoulder height and original proje
   assert.ok(Math.max(...body.uv.filter((_,i)=>i%2===0))<.80);
 });
 
-test('visible neck forms an anatomical taper and keeps the soft matte collar',()=>{
+test('visible neck keeps its measured width below the jaw and retains the soft matte collar',()=>{
   const lm=fixture(),a=defaultPortraitAnchors(lm),matte=bodyMatte(),face=positionsFor(lm,1000,750),frame={nose:lm[1],aspect:.75,scale:4.2};
   const chin=lm[152],fh=chin.y-lm[10].y,row=Math.round(chin.y*matte.height);
   // Soft MODNet pixels belong to the collar even when their alpha is below .5.
@@ -159,12 +159,14 @@ test('visible neck forms an anatomical taper and keeps the soft matte collar',()
     return [Math.min(...xs),Math.max(...xs)];
   };
   const chinSpan=spanAt(chin.y),middleSpan=spanAt(chin.y+fh*.08),collarY=(a.neckLeft.y+a.neckRight.y)/2,collarSpan=spanAt(collarY);
-  assert.ok(chinSpan[1]-chinSpan[0]>=.138&&chinSpan[1]-chinSpan[0]<=.142);
+  const measured=a.neckRight.x-a.neckLeft.x;
+  assert.ok(Math.abs(chinSpan[1]-chinSpan[0]-measured*.98)<1e-9);
   assert.ok(middleSpan[1]-middleSpan[0]>chinSpan[1]-chinSpan[0]);
+  assert.ok(middleSpan[1]-middleSpan[0]<=measured+1e-9);
   assert.ok(collarSpan[0]<=.411&&collarSpan[1]>=.589);
-  // Only the root hidden well inside the face is narrower than the upper neck.
+  // The root hidden inside the face must not taper into a visible stalk.
   const top=chin.y-fh*.14,topSpan=spanAt(top);
-  assert.ok(topSpan[1]-topSpan[0]<chinSpan[1]-chinSpan[0]);
+  assert.ok(Math.abs(topSpan[1]-topSpan[0]-measured*.78)<1e-9);
 });
 
 test('matte body has complete photo and closed sides/base with its top hidden by the head',()=>{

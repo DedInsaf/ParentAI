@@ -3,7 +3,7 @@ import {skullGeometry, earGeometry, neckGeometry, torsoGeometry, hairGeometry, O
 import {bakeFaceAtlas} from './face-atlas.mjs';
 import {mouthInteriorGeometry, mouthInteriorPositions} from './mouth-geometry.mjs';
 import {defaultPortraitAnchors, photoHairPatchGeometry, portraitEarGeometry, matteBodyGeometry} from './portrait-geometry.mjs';
-import {portraitAvatarTexture,portraitCutout,portraitHairCutout} from './portrait-texture.mjs';
+import {portraitAvatarTexture,portraitHairCutout} from './portrait-texture.mjs';
 
 const clamp=value=>Math.max(0,Math.min(.999999,value));
 
@@ -77,7 +77,7 @@ export class LocalAvatar {
       const color=new THREE.Color().setRGB(rgb[0]/255,rgb[1]/255,rgb[2]/255,THREE.SRGBColorSpace).lerp(skin,1-head.rim[i]);colors.push(color.r,color.g,color.b);
     }
     shellGeometry.setAttribute('color',new THREE.Float32BufferAttribute(colors,3));
-    const skinMaterial=new THREE.MeshStandardMaterial({color:skin,roughness:1,side:THREE.DoubleSide});
+    const skinMaterial=new THREE.MeshStandardMaterial({color:skin,roughness:1,side:THREE.FrontSide});
     const shell=new THREE.Mesh(shellGeometry,new THREE.MeshStandardMaterial({vertexColors:true,roughness:1,side:THREE.DoubleSide}));
     const group=new THREE.Group(),pivot=new THREE.Group(),body=new THREE.Group();pivot.add(shell);
     const hairSample=segmentedColor(THREE,bust,1,0x37261c);
@@ -91,15 +91,21 @@ export class LocalAvatar {
       // The bust must meet the generated face at the chin; otherwise the same
       // mathematically valid projection leaves a visible horizontal gap.
       const portraitChin=bust.landmarks[152],bodyFrame={nose:{x:portraitChin.x-base[152*3]/scale,y:portraitChin.y+base[152*3+1]/vertical},aspect,scale};
-      const shirt=segmentedColor(THREE,bust,4,0x365064);
       const skinHex=skin.getHex(THREE.SRGBColorSpace),skinRgb=[skinHex>>16,(skinHex>>8)&255,skinHex&255];
-      const portraitTexture=new THREE.CanvasTexture(bust===front?portraitCutout(bust):portraitAvatarTexture(bust,skinRgb));portraitTexture.colorSpace=THREE.SRGBColorSpace;
+      // Normalize the narrow upper-neck band even for the unified frontal
+      // capture. This replaces any residual room-coloured matte pixels at the
+      // neck edge with the measured skin tone while the shirt stays unchanged.
+      const portraitTexture=new THREE.CanvasTexture(portraitAvatarTexture(bust,skinRgb));portraitTexture.colorSpace=THREE.SRGBColorSpace;
       const portraitMaterial=new THREE.MeshStandardMaterial({map:portraitTexture,roughness:1,side:THREE.DoubleSide,transparent:true,alphaTest:.02});
       const hairPhotoTexture=new THREE.CanvasTexture(portraitHairCutout(bust));hairPhotoTexture.colorSpace=THREE.SRGBColorSpace;
-      const hairPhotoMaterial=new THREE.MeshStandardMaterial({map:hairPhotoTexture,roughness:1,side:THREE.DoubleSide,transparent:true,alphaTest:.02});
-      const clothMaterial=new THREE.MeshStandardMaterial({color:shirt,roughness:1,side:THREE.DoubleSide});
+      const hairPhotoMaterial=new THREE.MeshStandardMaterial({map:hairPhotoTexture,roughness:1,side:THREE.FrontSide,transparent:true,alphaTest:.02});
+      // The photographed front half already curves around the torso. Opaque
+      // inner faces used to show through its transparent room gaps as straight
+      // bars beside the neck. Keep those closure faces depth-neutral here.
+      const hiddenRearSkin=new THREE.MeshBasicMaterial({transparent:true,opacity:0,depthWrite:false,colorWrite:false});
+      const hiddenRearCloth=hiddenRearSkin.clone();
       const bodyData=matteBodyGeometry(bust.landmarks,anchors,bodyFrame,base,bust.matte);
-      body.add(new THREE.Mesh(geometry(THREE,bodyData),[portraitMaterial,skinMaterial,clothMaterial]));
+      body.add(new THREE.Mesh(geometry(THREE,bodyData),[portraitMaterial,hiddenRearSkin,hiddenRearCloth]));
       const fittedWidth=Math.abs(base[454*3]-base[234*3]);
       const photoHair=photoHairPatchGeometry(bust.landmarks,anchors,frame,base);
       const rearCap=hairGeometry(head,'short');
