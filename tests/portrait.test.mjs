@@ -135,24 +135,25 @@ test('matte body preserves photographed neck, shoulder height and original proje
   assert.ok(Math.max(...body.uv.filter((_,i)=>i%2===0))<.80);
 });
 
-test('visible neck keeps its photographed width and soft matte edge below the jaw',()=>{
+test('visible neck forms an anatomical taper and keeps the soft matte collar',()=>{
   const lm=fixture(),a=defaultPortraitAnchors(lm),matte=bodyMatte(),face=positionsFor(lm,1000,750),frame={nose:lm[1],aspect:.75,scale:4.2};
   const chin=lm[152],fh=chin.y-lm[10].y,row=Math.round(chin.y*matte.height);
-  // Soft MODNet pixels belong to the neck even when their alpha is below .5.
-  for(let y=row-2;y<row+12;y++)for(let x=82;x<=117;x++)matte.alpha[y*matte.width+x]=x<86||x>113?.18:1;
+  // Soft MODNet pixels belong to the collar even when their alpha is below .5.
+  for(let y=row-2;y<row+50;y++)for(let x=82;x<=117;x++)matte.alpha[y*matte.width+x]=x<86||x>113?.28:1;
   const body=matteBodyGeometry(lm,a,frame,face,matte),spanAt=y=>{
     const xs=[];for(let i=0;i<body.uv.length;i+=2)if(Math.abs(1-body.uv[i+1]-y)<1e-9)xs.push(body.uv[i]);
     return [Math.min(...xs),Math.max(...xs)];
   };
-  const chinSpan=spanAt(chin.y),belowSpan=spanAt(chin.y+fh*.035);
-  assert.ok(chinSpan[0]<=.411&&chinSpan[1]>=.589);
-  assert.ok(belowSpan[0]<=.411&&belowSpan[1]>=.589);
-  // Only the part hidden well inside the face may be narrower.
+  const chinSpan=spanAt(chin.y),middleSpan=spanAt(chin.y+fh*.08),collarY=(a.neckLeft.y+a.neckRight.y)/2,collarSpan=spanAt(collarY);
+  assert.ok(chinSpan[1]-chinSpan[0]>=.103&&chinSpan[1]-chinSpan[0]<=.109);
+  assert.ok(middleSpan[1]-middleSpan[0]>chinSpan[1]-chinSpan[0]);
+  assert.ok(collarSpan[0]<=.411&&collarSpan[1]>=.589);
+  // Only the root hidden well inside the face is narrower than the upper neck.
   const top=chin.y-fh*.14,topSpan=spanAt(top);
   assert.ok(topSpan[1]-topSpan[0]<chinSpan[1]-chinSpan[0]);
 });
 
-test('matte body has closed volume and complete photo, rear skin and clothing groups',()=>{
+test('matte body has complete photo and closed sides/base with its top hidden by the head',()=>{
   const lm=fixture(),a=defaultPortraitAnchors(lm),face=positionsFor(lm,1000,750),frame={nose:lm[1],aspect:.75,scale:4.2};
   a.neckLeft.y=a.neckRight.y=.52;
   const body=matteBodyGeometry(lm,a,frame,face,bodyMatte());
@@ -166,7 +167,9 @@ test('matte body has closed volume and complete photo, rear skin and clothing gr
     const a=body.indices[i+x],b=body.indices[i+y],key=a<b?`${a}:${b}`:`${b}:${a}`;
     edges.set(key,(edges.get(key)||0)+1);
   }
-  assert.ok([...edges.values()].every(count=>count===2));
+  const boundary=[...edges.values()].filter(count=>count===1).length;
+  assert.equal(boundary,48); // only the deliberately open top ring
+  assert.ok([...edges.values()].every(count=>count===1||count===2));
   const zs=body.positions.filter((_,i)=>i%3===2),jaw=Math.min(...[150,149,176,148,152,377,400,378,379,365].map(id=>face[id*3+2]));
   assert.ok(Math.max(...zs)<jaw);
   assert.ok(Math.max(...zs)-Math.min(...zs)>(lm[454].x-lm[234].x)*frame.scale*.5);

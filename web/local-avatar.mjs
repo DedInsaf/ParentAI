@@ -3,7 +3,7 @@ import {skullGeometry, earGeometry, neckGeometry, torsoGeometry, hairGeometry, O
 import {bakeFaceAtlas} from './face-atlas.mjs';
 import {mouthInteriorGeometry, mouthInteriorPositions} from './mouth-geometry.mjs';
 import {defaultPortraitAnchors, portraitHairGeometry, matteBodyGeometry} from './portrait-geometry.mjs';
-import {portraitCutout} from './portrait-texture.mjs';
+import {portraitAvatarTexture} from './portrait-texture.mjs';
 
 const clamp=value=>Math.max(0,Math.min(.999999,value));
 
@@ -82,11 +82,16 @@ export class LocalAvatar {
       const scale=Math.abs(base[454*3]-base[234*3])/portraitWidth,vertical=Math.abs(base[152*3+1]-base[10*3+1])/portraitHeight;
       const aspect=vertical/scale,nose=portrait.landmarks[1];
       const frame={nose:{x:nose.x-base[1*3]/scale,y:nose.y+base[1*3+1]/vertical},aspect,scale};
+      // Separate captures do not have exactly the same nose-to-chin distance.
+      // The bust must meet the generated face at the chin; otherwise the same
+      // mathematically valid projection leaves a visible horizontal gap.
+      const portraitChin=portrait.landmarks[152],bodyFrame={nose:{x:portraitChin.x-base[152*3]/scale,y:portraitChin.y+base[152*3+1]/vertical},aspect,scale};
       const shirt=segmentedColor(THREE,portrait,4,0x365064);
-      const portraitTexture=new THREE.CanvasTexture(portraitCutout(portrait));portraitTexture.colorSpace=THREE.SRGBColorSpace;
+      const skinHex=skin.getHex(THREE.SRGBColorSpace),skinRgb=[skinHex>>16,(skinHex>>8)&255,skinHex&255];
+      const portraitTexture=new THREE.CanvasTexture(portraitAvatarTexture(portrait,skinRgb));portraitTexture.colorSpace=THREE.SRGBColorSpace;
       const portraitMaterial=new THREE.MeshStandardMaterial({map:portraitTexture,roughness:1,side:THREE.DoubleSide,transparent:true,alphaTest:.02});
       const clothMaterial=new THREE.MeshStandardMaterial({color:shirt,roughness:1,side:THREE.DoubleSide});
-      const bodyData=matteBodyGeometry(portrait.landmarks,anchors,frame,base,portrait.matte);
+      const bodyData=matteBodyGeometry(portrait.landmarks,anchors,bodyFrame,base,portrait.matte);
       body.add(new THREE.Mesh(geometry(THREE,bodyData),[portraitMaterial,skinMaterial,clothMaterial]));
       const strands=document.createElement('canvas');strands.width=128;strands.height=128;const sc=strands.getContext('2d');sc.fillStyle='#'+hairSample.getHexString();sc.fillRect(0,0,128,128);
       for(let i=0;i<150;i++){sc.strokeStyle=i%3?'rgba(255,255,255,.04)':'rgba(0,0,0,.11)';sc.beginPath();const x=(i*31.7)%128;sc.moveTo(x,-4);sc.bezierCurveTo(x-8,35,x+7,88,x-4,132);sc.stroke();}

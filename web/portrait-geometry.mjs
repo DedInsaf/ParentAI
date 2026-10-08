@@ -110,7 +110,7 @@ export function matteBodyGeometry(lm,a,frame,face,matte) {
   const chin=lm[152],fw=lm[454].x-lm[234].x,fh=chin.y-lm[10].y;
   if(!(fw>0&&fh>0))throw new Error('Не удалось измерить пропорции лица.');
   const center=(a?.neckLeft?.x+a?.neckRight?.x)/2||chin.x;
-  const minimumWidth=fw*.2,gapLimit=Math.max(1,Math.floor(width*.003)),silhouetteThreshold=.12;
+  const minimumWidth=fw*.2,gapLimit=Math.max(1,Math.floor(width*.003)),silhouetteThreshold=.25;
   const firstRow=Math.max(0,Math.floor(chin.y*height)),lastRow=Math.min(height-1,Math.floor(.97*height));
   const rows=new Array(height).fill(null);
   // Use the span connected through the centre of the person. Tiny mask islands
@@ -157,26 +157,35 @@ export function matteBodyGeometry(lm,a,frame,face,matte) {
     return {left:filtered[before].left*(1-t)+filtered[after].left*t,right:filtered[before].right*(1-t)+filtered[after].right*t};
   };
   const neckStart=chin.y+fh*.035,neck=boundsAt(neckStart);
+  const collarY=Math.max(chin.y+fh*.16,Math.min(bottom,(a?.neckLeft?.y+a?.neckRight?.y)/2||chin.y+fh*.30));
+  const collar=boundsAt(collarY),upperCenter=(neck.left+neck.right)/2,upperWidth=Math.min(neck.right-neck.left,fw*.52);
+  const collarCenter=(collar.left+collar.right)/2,collarWidth=collar.right-collar.left;
   const ys=new Set(Array.from({length:65},(_,i)=>top+(bottom-top)*i/64));
-  for(const y of [chin.y,neckStart,a?.neckLeft?.y,a?.neckRight?.y,a?.shoulderLeft?.y,a?.shoulderRight?.y]){
+  for(const y of [chin.y,neckStart,chin.y+fh*.08,a?.neckLeft?.y,a?.neckRight?.y,a?.shoulderLeft?.y,a?.shoulderRight?.y]){
     if(Number.isFinite(y)&&y>top&&y<bottom)ys.add(y);
   }
-  const fullWidthAt=chin.y-fh*.04;
   const sections=[...ys].sort((x,y)=>x-y).map(y=>{
-    // The part above the chin is hidden inside the jaw. Extend the measured
-    // neck upwards rather than using the much wider face silhouette there.
-    const bounds=y<neckStart?neck:boundsAt(y);
-    // Finish the hidden taper before the jaw ends. Previously it continued
-    // into the visible neck and produced deep cut-outs below both jaw corners.
-    const amount=Math.max(0,Math.min(1,(y-top)/(fullWidthAt-top)));
-    const taper=y<fullWidthAt?.72+.28*amount*amount*(3-2*amount):1;
-    const cx=(bounds.left+bounds.right)/2,half=(bounds.right-bounds.left)*.5*taper;
+    let cx,half;
+    if(y<chin.y){
+      // A compact hidden root sits behind the jaw. It reaches the anatomical
+      // upper-neck width at the chin instead of ending in a flat wide cap.
+      const t=Math.max(0,Math.min(1,(y-top)/(chin.y-top))),e=t*t*(3-2*t);
+      cx=upperCenter;half=upperWidth*(.82+.18*e)*.5;
+    }else if(y<collarY){
+      // Human necks widen gradually toward the collar. Using the full matte
+      // span immediately below the chin produced the rectangular column.
+      const t=(y-chin.y)/(collarY-chin.y),e=t*t*(3-2*t);
+      cx=upperCenter*(1-e)+collarCenter*e;half=(upperWidth*(1-e)+collarWidth*e)*.5;
+    }else{
+      const bounds=boundsAt(y);cx=(bounds.left+bounds.right)/2;half=(bounds.right-bounds.left)*.5;
+    }
     return [{x:cx-half,y},{x:cx+half,y}];
   });
   const jawBack=Math.min(...[150,149,176,148,152,377,400,378,379,365].map(id=>face[id*3+2]));
-  const collarY=Math.max(chin.y+fh*.06,Math.min(bottom,(a?.neckLeft?.y+a?.neckRight?.y)/2||chin.y+fh*.18));
   return ringSurface(sections,frame,jawBack-fw*frame.scale*.02,fw*frame.scale*.38,{
-    capTop:true,
+    // The head covers this opening. A triangulated top cap faced the camera
+    // and looked like a flat horizontal slice through the neck.
+    capTop:false,
     rearMaterial:row=>sections[row][0].y<=collarY?1:2,
     depthForRow:(_,section)=>fw*frame.scale*(.38+Math.min(.20,Math.max(0,(section[1].x-section[0].x)/fw-.65)*.10)),
   });
