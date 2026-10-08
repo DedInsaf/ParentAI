@@ -48,25 +48,35 @@ function surface(positions,uv,indices,groups) {
   }
   return {positions,uv,indices:ordered,groups:packed};
 }
-function ringSurface(sections,frame,frontZ,depth) {
+function ringSurface(sections,frame,frontZ,depth,options={}) {
   const positions=[],uv=[],indices=[],groups=[],segments=48;
   sections.forEach(([left,right],row)=>{
+    const rowDepth=options.depthForRow?.(row,sections[row])??depth;
     for(let j=0;j<segments;j++) {
       const angle=j/segments*Math.PI*2,s=Math.cos(angle),t=(s+1)/2;
       const p={x:left.x*(1-t)+right.x*t,y:left.y*(1-t)+right.y*t};
       // Front is gently curved; the back is closed and deeper, never a photo plane.
-      const z=frontZ-depth*.5+depth*.5*Math.sin(angle);
+      const z=frontZ-rowDepth*.5+rowDepth*.5*Math.sin(angle);
       positions.push(...portraitPoint(p,frame,z));uv.push(p.x,1-p.y);
       if(row){const b=(row-1)*segments+j,c=(row-1)*segments+(j+1)%segments,d=row*segments+j,e=row*segments+(j+1)%segments;
         const start=indices.length;indices.push(b,d,c,c,d,e);
-        groups.push({start,count:6,materialIndex:j<segments/2?0:row<=16?1:2});
+        groups.push({start,count:6,materialIndex:j<segments/2?0:(options.rearMaterial?.(row)??(row<=16?1:2))});
       }
     }
   });
   const [left,right]=sections.at(-1),center=positions.length/3,p={x:(left.x+right.x)/2,y:(left.y+right.y)/2};
-  positions.push(...portraitPoint(p,frame,frontZ-depth*.5));uv.push(p.x,1-p.y);
+  const lastDepth=options.depthForRow?.(sections.length-1,sections.at(-1))??depth;
+  positions.push(...portraitPoint(p,frame,frontZ-lastDepth*.5));uv.push(p.x,1-p.y);
   for(let j=0;j<segments;j++)indices.push((sections.length-1)*segments+j,(sections.length-1)*segments+(j+1)%segments,center);
   groups.push({start:indices.length-segments*3,count:segments*3,materialIndex:2});
+  if(options.capTop){
+    const [topLeft,topRight]=sections[0],topCenter=positions.length/3,top={x:(topLeft.x+topRight.x)/2,y:(topLeft.y+topRight.y)/2};
+    const topDepth=options.depthForRow?.(0,sections[0])??depth;
+    positions.push(...portraitPoint(top,frame,frontZ-topDepth*.5));uv.push(top.x,1-top.y);
+    const start=indices.length;
+    for(let j=0;j<segments;j++)indices.push(j,topCenter,(j+1)%segments);
+    groups.push({start,count:indices.length-start,materialIndex:1});
+  }
   return surface(positions,uv,indices,groups);
 }
 const mix=(a,b,t)=>({x:a.x*(1-t)+b.x*t,y:a.y*(1-t)+b.y*t});
@@ -89,14 +99,138 @@ export function portraitBodyGeometry(lm,a,frame,face) {
   return ringSurface(sections,frame,jawBack-fw*frame.scale*.02,fw*frame.scale*.38);
 }
 
+// Keep the photographed neck, collar and shoulders in their original image
+// coordinates. The matte defines the outline; anchors only identify the collar
+// on the unphotographed rear surface and preserve useful sampling heights.
+export function matteBodyGeometry(lm,a,frame,face,matte) {
+  const {alpha,width,height}=matte||{};
+  if(!Number.isInteger(width)||!Number.isInteger(height)||width<2||height<2||alpha?.length!==width*height){
+    throw new Error('Не удалось прочитать контур шеи и плеч.');
+  }
+  const chin=lm[152],fw=lm[454].x-lm[234].x,fh=chin.y-lm[10].y;
+  if(!(fw>0&&fh>0))throw new Error('Не удалось измерить пропорции лица.');
+  const center=(a?.neckLeft?.x+a?.neckRight?.x)/2||chin.x;
+  const minimumWidth=fw*.2,gapLimit=Math.max(1,Math.floor(width*.003));
+  const firstRow=Math.max(0,Math.floor(chin.y*height)),lastRow=Math.min(height-1,Math.floor(.97*height));
+  const rows=new Array(height).fill(null);
+  // Use the span connected through the centre of the person. Tiny mask islands
+  // beside a shoulder must not pull the silhouette out into the room.
+  for(let y=firstRow;y<=lastRow;y++){
+    const spans=[];let start=-1,end=-1;
+    for(let x=0;x<width;x++){
+      if(alpha[y*width+x]>.5){
+        if(start<0)start=x;
+        else if(x-end-1>gapLimit){spans.push([start,end]);start=x;}
+        end=x;
+      }
+    }
+    if(start>=0)spans.push([start,end]);
+    let best=null,distance=Infinity;
+    for(const [left,right] of spans){
+      const l=left/width,r=(right+1)/width;
+      if(r-l<minimumWidth)continue;
+      const d=Math.max(l-center,center-r,0);
+      if(d<distance){distance=d;best={left:l,right:r};}
+    }
+    if(best&&distance<fw*.15)rows[y]=best;
+  }
+  const visible=[];for(let y=firstRow;y<=lastRow;y++)if(rows[y])visible.push(y);
+  if(visible.length<4)throw new Error('На снимке не удалось выделить шею и плечи.');
+  const bottom=Math.min(.97,(visible.at(-1)+1)/height,chin.y+fh*1.25),top=chin.y-fh*.14;
+  if(bottom<chin.y+fh*.25)throw new Error('На снимке должно быть видно больше шеи и футболки.');
+  const filtered=rows.map((row,y)=>{
+    if(!row||!rows[y-1]||!rows[y+1])return row;
+    return {left:rows[y-1].left*.125+row.left*.75+rows[y+1].left*.125,right:rows[y-1].right*.125+row.right*.75+rows[y+1].right*.125};
+  });
+  const boundsAt=y=>{
+    const row=Math.max(firstRow,Math.min(lastRow,Math.round(y*height-.5)));
+    if(filtered[row])return filtered[row];
+    let before=row,after=row;
+    while(before>=firstRow&&!filtered[before])before--;
+    while(after<=lastRow&&!filtered[after])after++;
+    if(before<firstRow)return filtered[after];
+    if(after>lastRow)return filtered[before];
+    const t=(row-before)/(after-before);
+    return {left:filtered[before].left*(1-t)+filtered[after].left*t,right:filtered[before].right*(1-t)+filtered[after].right*t};
+  };
+  const neckStart=chin.y+fh*.035,neck=boundsAt(neckStart);
+  const ys=new Set(Array.from({length:65},(_,i)=>top+(bottom-top)*i/64));
+  for(const y of [chin.y,neckStart,a?.neckLeft?.y,a?.neckRight?.y,a?.shoulderLeft?.y,a?.shoulderRight?.y]){
+    if(Number.isFinite(y)&&y>top&&y<bottom)ys.add(y);
+  }
+  const sections=[...ys].sort((x,y)=>x-y).map(y=>{
+    // The part above the chin is hidden inside the jaw. Extend the measured
+    // neck upwards rather than using the much wider face silhouette there.
+    const bounds=y<neckStart?neck:boundsAt(y);
+    const amount=Math.max(0,Math.min(1,(y-top)/(neckStart-top)));
+    const taper=y<neckStart?.70+.30*amount*amount*(3-2*amount):1;
+    const cx=(bounds.left+bounds.right)/2,half=(bounds.right-bounds.left)*.5*taper;
+    return [{x:cx-half,y},{x:cx+half,y}];
+  });
+  const jawBack=Math.min(...[150,149,176,148,152,377,400,378,379,365].map(id=>face[id*3+2]));
+  const collarY=Math.max(chin.y+fh*.06,Math.min(bottom,(a?.neckLeft?.y+a?.neckRight?.y)/2||chin.y+fh*.18));
+  return ringSurface(sections,frame,jawBack-fw*frame.scale*.02,fw*frame.scale*.38,{
+    capTop:true,
+    rearMaterial:row=>sections[row][0].y<=collarY?1:2,
+    depthForRow:(_,section)=>fw*frame.scale*(.38+Math.min(.20,Math.max(0,(section[1].x-section[0].x)/fw-.65)*.10)),
+  });
+}
+
 export function portraitHairContour(a,t) {
   const side=t<.5?a.templeLeft:a.templeRight,angle=Math.abs(t-.5)*Math.PI;
   return {x:a.crown.x+(side.x-a.crown.x)*Math.sin(angle),y:a.crown.y+(side.y-a.crown.y)*(1-Math.cos(angle))};
 }
-export function portraitHairGeometry(lm,a,frame,face) {
+export function portraitHairGeometry(lm,a,frame,face,matte) {
   const contour=[28,29,30,31,32,33,34,35,0,1,2,3,4,5,6,7,8];
-  const positions=[],uv=[],indices=[],groups=[],fw=(lm[454].x-lm[234].x)*frame.scale,columns=contour.length;
-  const edgeZ=contour.reduce((sum,i)=>sum+face[OVAL[i]*3+2],0)/columns;
+  const usableMatte=Number.isInteger(matte?.width)&&Number.isInteger(matte?.height)&&matte.width>1&&matte.height>1&&matte.alpha?.length===matte.width*matte.height;
+  const positions=[],uv=[],indices=[],groups=[],fw=(lm[454].x-lm[234].x)*frame.scale,columns=usableMatte?97:contour.length;
+  const ids=contour.map(index=>OVAL[index]),arc=[0];
+  for(let j=1;j<ids.length;j++){
+    const p=lm[ids[j-1]],q=lm[ids[j]];
+    arc.push(arc.at(-1)+Math.hypot((q.x-p.x)*(matte?.width||1),(q.y-p.y)*(matte?.height||frame.aspect)));
+  }
+  const seam=Array.from({length:columns},(_,j)=>{
+    if(!usableMatte)return {leftId:ids[j],rightId:ids[j],amount:0};
+    const distance=arc.at(-1)*j/(columns-1);let segment=0;
+    while(segment<ids.length-2&&arc[segment+1]<distance)segment++;
+    const amount=(distance-arc[segment])/Math.max(.000001,arc[segment+1]-arc[segment]);
+    return {leftId:ids[segment],rightId:ids[segment+1],amount};
+  });
+  const seamPoints=seam.map(({leftId,rightId,amount})=>mix(lm[leftId],lm[rightId],amount));
+  const seamDepth=seam.map(({leftId,rightId,amount})=>face[leftId*3+2]*(1-amount)+face[rightId*3+2]*amount);
+  const headCenter={x:(lm[234].x+lm[454].x)/2,y:(lm[10].y+lm[152].y)/2};
+  const alphaAt=(p)=>{
+    if(p.x<0||p.x>1||p.y<0||p.y>1)return 0;
+    const x=Math.min(matte.width-1,Math.floor(p.x*matte.width)),y=Math.min(matte.height-1,Math.floor(p.y*matte.height));
+    return matte.alpha[y*matte.width+x];
+  };
+  const edges=seamPoints.map((point,j)=>{
+    if(!usableMatte){const outer=portraitHairContour(a,j/(columns-1));return {outer,inner:outer};}
+    const dx=(point.x-headCenter.x)*matte.width;
+    // Low temple rays must travel slightly upwards. A horizontal ray would
+    // select the ear outline and turn it into an invented lock of hair.
+    const rawDy=(point.y-headCenter.y)*matte.height,t=j/(columns-1);
+    const dy=t<.12||t>.88?Math.min(rawDy,-Math.abs(dx)*.35):rawDy,length=Math.hypot(dx,dy);
+    if(length<.001)return {outer:{x:point.x,y:point.y},inner:{x:point.x,y:point.y}};
+    const stepX=dx/length/matte.width*.5,stepY=dy/length/matte.height*.5;
+    const steps=Math.ceil(Math.hypot(matte.width,matte.height)*2),fringe=Math.max(3,Math.min(matte.width,matte.height)*.02);
+    const pixelCenter=p=>({x:(Math.min(matte.width-1,Math.floor(p.x*matte.width))+.5)/matte.width,y:(Math.min(matte.height-1,Math.floor(p.y*matte.height))+.5)/matte.height});
+    let outer={x:point.x,y:point.y},inner={...outer},lastStrong=-Infinity,background=0;
+    for(let i=0;i<=steps;i++){
+      const p={x:point.x+stepX*i,y:point.y+stepY*i},alpha=alphaAt(p);
+      if(alpha>=.5){lastStrong=i*.5;inner=pixelCenter(p);}
+      if(alpha>=.02&&i*.5-lastStrong<=fringe){
+        // Use the accepted pixel's centre, so UV rounding cannot move the
+        // outer vertex back across a sharp background boundary.
+        outer=pixelCenter(p);background=0;
+      }
+      else if(alpha<.02&&++background>=4)break;
+    }
+    return {outer,inner};
+  });
+  const outerPoints=edges.map(edge=>edge.outer),innerPoints=edges.map(edge=>edge.inner);
+  const crown=usableMatte?outerPoints.reduce((best,p)=>p.y<best.y?p:best):a.crown;
+  const edgeZ=seamDepth.reduce((sum,z)=>sum+z,0)/columns;
   const connect=(row,materialIndex)=>{
     const start=indices.length;
     for(let j=1;j<columns;j++){const b=(row-1)*columns+j-1,c=b+1,d=row*columns+j-1,e=d+1;indices.push(b,d,c,c,d,e);}
@@ -104,9 +238,9 @@ export function portraitHairGeometry(lm,a,frame,face) {
   };
   // Front texture is projected once onto a curved scalp, in the same photo scale.
   for(let row=0;row<=10;row++)for(let j=0;j<columns;j++) {
-    const id=OVAL[contour[j]],t=j/(columns-1),outer=portraitHairContour(a,t),amount=row/10,p=mix(lm[id],outer,amount);
+    const t=j/(columns-1),outer=outerPoints[j],amount=row/10,p=mix(seamPoints[j],outer,amount);
     const arch=Math.sin(t*Math.PI),outerZ=edgeZ-fw*.18*arch;
-    const z=face[id*3+2]*(1-amount)+outerZ*amount+fw*.08*Math.sin(amount*Math.PI)*arch;
+    const z=seamDepth[j]*(1-amount)+outerZ*amount+fw*.08*Math.sin(amount*Math.PI)*arch;
     positions.push(...portraitPoint(p,frame,z));uv.push(p.x,1-p.y);
     if(j===columns-1&&row)connect(row,0);
   }
@@ -114,14 +248,20 @@ export function portraitHairGeometry(lm,a,frame,face) {
   // A real rear volume, with small clumps following the head contour. The photo
   // does not wrap around the back or get stretched into an invented side view.
   for(let ring=1;ring<=12;ring++)for(let j=0;j<columns;j++) {
-    const t=j/(columns-1),outer=portraitHairContour(a,t),u=ring/12,k=Math.cos(u*Math.PI/2);
-    const p={x:a.crown.x+(outer.x-a.crown.x)*k,y:centerY+(outer.y-centerY)*k};
+    const t=j/(columns-1),photoTransition=usableMatte&&ring<=2;
+    const u=photoTransition?ring/2:usableMatte?(ring-2)/10:ring/12,k=Math.cos(u*Math.PI/2);
+    const edge=usableMatte?innerPoints[j]:outerPoints[j];
+    const p=photoTransition?mix(outerPoints[j],edge,u):{x:crown.x+(edge.x-crown.x)*k,y:centerY+(edge.y-centerY)*k};
     const arch=Math.sin(t*Math.PI),rib=(.5+.5*Math.sin(j*3.7+u*4))*fw*.006*Math.sin(u*Math.PI);
-    const z=edgeZ-fw*.18*arch-fw*.66*Math.sin(u*Math.PI/2)+rib;
-    positions.push(...portraitPoint(p,frame,z));uv.push(t,u);
-    if(j===columns-1)connect(10+ring,1);
+    const rearDrop=photoTransition?fw*.10*u:usableMatte?fw*.10+fw*.56*Math.sin(u*Math.PI/2):fw*.66*Math.sin(u*Math.PI/2);
+    const z=edgeZ-fw*.18*arch-rearDrop+rib;
+    positions.push(...portraitPoint(p,frame,z));
+    if(photoTransition)uv.push(p.x,1-p.y);else uv.push(t,u);
+    // The soft fringe keeps the photo alpha on both sides. Opaque rear hair
+    // starts only after the ray has returned inside its dense >= .5 contour.
+    if(j===columns-1)connect(10+ring,photoTransition?0:1);
   }
-  return surface(positions,uv,indices,groups);
+  return {...surface(positions,uv,indices,groups),columns,frontRows:11,photoRearRows:usableMatte?2:0,seam};
 }
 
 export function portraitEarGeometry(lm,a,frame,face,side) {

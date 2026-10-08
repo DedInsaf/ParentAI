@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {positionsFor} from '../web/core.mjs';
-import {defaultPortraitAnchors,portraitAnchorIssue,portraitBodyGeometry,portraitHairGeometry,portraitEarGeometry} from '../web/portrait-geometry.mjs';
+import {defaultPortraitAnchors,portraitAnchorIssue,portraitBodyGeometry,matteBodyGeometry,portraitHairGeometry,portraitEarGeometry} from '../web/portrait-geometry.mjs';
 import {fitPortraitAnchors,fitStablePortraitAnchors,combineCategoryMasks} from '../web/portrait-fit.mjs';
 import {OVAL} from '../web/head-geometry.mjs';
 
@@ -95,4 +95,115 @@ test('stable portrait fit tolerates a one-pixel segmentation shift',()=>{
   assert.equal(portraitAnchorIssue(stable,lm),'');
   assert.ok(Math.abs(stable.neckLeft.x-direct.neckLeft.x)<=1/width);
   assert.ok(Math.abs(stable.shoulderRight.x-direct.shoulderRight.x)<=1/width);
+});
+
+function bodyMatte(width=200,height=200){
+  const alpha=new Float32Array(width*height);
+  for(let y=0;y<height;y++){
+    const py=(y+.5)/height;if(py<.46||py>=.76)continue;
+    const t=Math.max(0,Math.min(1,(py-.52)/.06)),left=.43-.20*t,right=.57+.20*t;
+    for(let x=0;x<width;x++)if((x+.5)/width>=left&&(x+.5)/width<=right)alpha[y*width+x]=1;
+  }
+  // A disconnected false positive in the room cannot become a shoulder.
+  for(let y=116;y<152;y++)for(let x=183;x<190;x++)alpha[y*width+x]=1;
+  return {alpha,width,height};
+}
+
+test('matte body preserves photographed neck, shoulder height and original projection',()=>{
+  const lm=fixture(),a=defaultPortraitAnchors(lm),matte=bodyMatte();
+  a.neckLeft={x:.43,y:.51};a.neckRight={x:.57,y:.51};
+  // Deliberately inaccurate width: the matte, not an average-body estimate,
+  // must control the shoulders while these heights remain useful samples.
+  a.shoulderLeft={x:.18,y:.60};a.shoulderRight={x:.82,y:.60};
+  const face=positionsFor(lm,1000,750),frame={nose:lm[1],aspect:.75,scale:4.2};
+  const body=matteBodyGeometry(lm,a,frame,face,matte);
+  const span=y=>{
+    const xs=[];
+    for(let i=0;i<body.uv.length;i+=2)if(Math.abs(1-body.uv[i+1]-y)<1e-9)xs.push(body.uv[i]);
+    assert.ok(xs.length>0);return [Math.min(...xs),Math.max(...xs)];
+  };
+  for(const [actual,expected] of [[span(.51),[.43,.57]],[span(.60),[.23,.77]]]){
+    assert.ok(actual.every((value,i)=>Math.abs(value-expected[i])<1e-9));
+  }
+  const ys=body.uv.filter((_,i)=>i%2===1).map(v=>1-v);
+  assert.ok(Math.abs(Math.max(...ys)-.76)<1e-9);
+  assert.ok(Math.abs(Math.min(...ys)-(lm[152].y-(lm[152].y-lm[10].y)*.14))<1e-9);
+  for(let i=0;i<body.positions.length/3;i++){
+    assert.ok(Math.abs(body.positions[i*3]-(body.uv[i*2]-frame.nose.x)*frame.scale)<1e-9);
+    assert.ok(Math.abs(body.positions[i*3+1]+(1-body.uv[i*2+1]-frame.nose.y)*frame.aspect*frame.scale)<1e-9);
+  }
+  assert.ok(Math.max(...body.uv.filter((_,i)=>i%2===0))<.80);
+});
+
+test('matte body has closed volume and complete photo, rear skin and clothing groups',()=>{
+  const lm=fixture(),a=defaultPortraitAnchors(lm),face=positionsFor(lm,1000,750),frame={nose:lm[1],aspect:.75,scale:4.2};
+  a.neckLeft.y=a.neckRight.y=.52;
+  const body=matteBodyGeometry(lm,a,frame,face,bodyMatte());
+  assert.ok(body.positions.every(Number.isFinite));
+  assert.equal(body.uv.length,body.positions.length/3*2);
+  assert.ok(body.indices.every(id=>id>=0&&id<body.positions.length/3));
+  assert.deepEqual(body.groups.map(g=>g.materialIndex),[0,1,2]);
+  assert.equal(body.groups.reduce((sum,g)=>sum+g.count,0),body.indices.length);
+  const edges=new Map();
+  for(let i=0;i<body.indices.length;i+=3)for(const [x,y] of [[0,1],[1,2],[2,0]]){
+    const a=body.indices[i+x],b=body.indices[i+y],key=a<b?`${a}:${b}`:`${b}:${a}`;
+    edges.set(key,(edges.get(key)||0)+1);
+  }
+  assert.ok([...edges.values()].every(count=>count===2));
+  const zs=body.positions.filter((_,i)=>i%3===2),jaw=Math.min(...[150,149,176,148,152,377,400,378,379,365].map(id=>face[id*3+2]));
+  assert.ok(Math.max(...zs)<jaw);
+  assert.ok(Math.max(...zs)-Math.min(...zs)>(lm[454].x-lm[234].x)*frame.scale*.5);
+});
+
+test('matte body interpolates a missing contour row and rejects absent body data',()=>{
+  const lm=fixture(),a=defaultPortraitAnchors(lm),face=positionsFor(lm,1000,750),frame={nose:lm[1],aspect:.75,scale:4.2},matte=bodyMatte();
+  matte.alpha.fill(0,120*matte.width,121*matte.width);
+  a.shoulderLeft.y=a.shoulderRight.y=.6025;
+  const body=matteBodyGeometry(lm,a,frame,face,matte);
+  const rowXs=[];for(let i=0;i<body.uv.length;i+=2)if(Math.abs(1-body.uv[i+1]-.6025)<1e-9)rowXs.push(body.uv[i]);
+  assert.ok(Math.abs(Math.min(...rowXs)-.23)<1e-9);assert.ok(Math.abs(Math.max(...rowXs)-.77)<1e-9);
+  assert.throws(()=>matteBodyGeometry(lm,a,frame,face,{alpha:new Float32Array(10),width:10,height:10}),/контур/);
+  assert.throws(()=>matteBodyGeometry(lm,a,frame,face,{alpha:new Float32Array(40000),width:200,height:200}),/выделить/);
+});
+
+test('matte hair follows asymmetric photographed silhouette and stays inside its foreground',()=>{
+  const lm=fixture(),a=defaultPortraitAnchors(lm),width=400,height=400,alpha=new Float32Array(width*height);
+  for(let y=0;y<height;y++)for(let x=0;x<width;x++){
+    const px=(x+.5)/width,py=(y+.5)/height,d=(px-.5)/.14,top=.09+.08*d*d+.035*Math.max(0,d);
+    if(px>=.36&&px<=.64&&py>=top-.012&&py<top)alpha[y*width+x]=.08;
+    if(px>=.36&&px<=.64&&py>=top&&py<=.46)alpha[y*width+x]=1;
+    // An ear-sized extension must not become a lower-temple hair lock.
+    if(px>.64&&px<.69&&py>.29&&py<.36)alpha[y*width+x]=1;
+  }
+  const matte={alpha,width,height},frame={nose:lm[1],aspect:.75,scale:4.2},face=positionsFor(lm,1000,750);
+  const fitted=portraitHairGeometry(lm,a,frame,face,matte),estimated=portraitHairGeometry(lm,a,frame,face),outer=j=>({x:fitted.uv[(10*fitted.columns+j)*2],y:1-fitted.uv[(10*fitted.columns+j)*2+1]});
+  assert.equal(fitted.columns,97);assert.equal(fitted.frontRows,11);assert.equal(fitted.photoRearRows,2);assert.equal(fitted.seam.length,97);
+  assert.ok(outer(24).y<outer(72).y-.01);
+  assert.ok(Math.abs(outer(72).y-(1-estimated.uv[(10*17+12)*2+1]))>.01);
+  let longestEdge=0,softVertices=0;
+  for(let j=0;j<fitted.columns;j++){
+    const p=outer(j),x=Math.max(0,Math.min(width-1,Math.floor(p.x*width))),y=Math.max(0,Math.min(height-1,Math.floor(p.y*height)));
+    assert.ok(alpha[y*width+x]>=.02);if(alpha[y*width+x]<.2)softVertices++;
+    const {leftId,rightId,amount}=fitted.seam[j];
+    for(let axis=0;axis<3;axis++)assert.ok(Math.abs(fitted.positions[j*3+axis]-(face[leftId*3+axis]*(1-amount)+face[rightId*3+axis]*amount))<1e-9);
+    if(j){const before=outer(j-1);longestEdge=Math.max(longestEdge,Math.hypot(p.x-before.x,p.y-before.y));}
+  }
+  assert.ok(longestEdge<(lm[454].x-lm[234].x)*.10);
+  assert.ok(softVertices>fitted.columns/4);
+  assert.ok(outer(95).x<.65);assert.ok(outer(96).x<.65);
+  assert.ok(fitted.groups.some(g=>g.materialIndex===1));
+  const photo=fitted.groups.find(g=>g.materialIndex===0),photoIds=new Set(fitted.indices.slice(photo.start,photo.start+photo.count));
+  for(let row=11;row<=12;row++)for(let j=0;j<fitted.columns;j++){
+    const id=row*fitted.columns+j;
+    assert.ok(photoIds.has(id));
+    assert.ok(Math.abs(fitted.positions[id*3]-(fitted.uv[id*2]-frame.nose.x)*frame.scale)<1e-9);
+    assert.ok(Math.abs(fitted.positions[id*3+1]+(1-fitted.uv[id*2+1]-frame.nose.y)*frame.aspect*frame.scale)<1e-9);
+  }
+  const rear=fitted.groups.find(g=>g.materialIndex===1),rearIds=new Set(fitted.indices.slice(rear.start,rear.start+rear.count));
+  for(const id of rearIds){
+    const px=fitted.positions[id*3]/frame.scale+frame.nose.x,py=frame.nose.y-fitted.positions[id*3+1]/frame.aspect/frame.scale;
+    const x=Math.max(0,Math.min(width-1,Math.floor(px*width))),y=Math.max(0,Math.min(height-1,Math.floor(py*height)));
+    assert.ok(alpha[y*width+x]>=.5);
+  }
+  assert.ok(Math.max(...fitted.positions.filter((_,i)=>i%3===2))-Math.min(...fitted.positions.filter((_,i)=>i%3===2))>(lm[454].x-lm[234].x)*frame.scale*.6);
 });

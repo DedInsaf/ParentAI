@@ -5,7 +5,7 @@ import {AvatarMotion} from './avatar-motion.mjs';
 import {ModelAvatar} from './avatar-model.mjs';
 import {LocalAvatar} from './local-avatar.mjs';
 import {fitStablePortraitAnchors} from './portrait-fit.mjs';
-import {defaultPortraitAnchors} from './portrait-geometry.mjs';
+import {portraitCutout} from './portrait-texture.mjs';
 const $ = id => document.getElementById(id);
 const video = $('camera');
 const fail = e => { $('error').hidden = false; $('error').textContent = e.message || String(e); };
@@ -25,7 +25,7 @@ let activeCues=[], audioStarted=0, dialogId=null, helpEpoch=0;
 let questionRecording=false, questionStop=false, questionCancel=false, questionAbort, questionStream;
 let currentJob=null;
 let previewYaw=0,showWireframe=false,scanEpoch=0;
-let scannerAbort=null;
+let scannerAbort=null,restoringAbort=null;
 let listener=null,listenEpoch=0,echoUntil=0,followupUntil=0,listenerPending=false,cameraEpoch=0,cameraAbort;
 const audioSources=new Set();let audioNext=0;
 const avatarMotion=new AvatarMotion();let childSpeakingUntil=0;
@@ -197,7 +197,7 @@ function detectVideo(now) {
 
 async function scan() {
   if(!$('avatarConsent').checked){$('avatarConsent').focus();throw new Error('Разрешите ParentAI создать аватар из снимков на этом устройстве.');}
-  stopAudio();scanning=true;const epoch=++scanEpoch,abort=new AbortController();scannerAbort=abort;
+  stopAudio();scanning=true;const epoch=++scanEpoch,abort=new AbortController();scannerAbort=abort;restoringAbort?.abort();
   $('scannerDialog').showModal();$('scannerCamera').appendChild(video.closest('.camera-frame'));controls();
   try {
     scanInstruction('Подключаем камеру. Сядьте лицом к свету, чтобы волосы и уши были видны.');
@@ -242,12 +242,14 @@ async function scan() {
     if(epoch!==scanEpoch)return;
     stopCamera();scanInstruction('Все снимки готовы. Находим волосы, шею и плечи.',true);
     $('captureStep').textContent='Анализ снимков';$('captureCountdown').textContent='';
-    const portrait=views.find(view=>view.role==='portrait');portrait.anchors=await fitPortrait(portrait,message=>scanInstruction(message),9500);
+    const portrait=views.find(view=>view.role==='portrait');portrait.anchors=await fitPortrait(portrait,message=>scanInstruction(message),abort.signal);
+    if(epoch!==scanEpoch)return;
     scanInstruction('Создаём объёмную модель прямо на устройстве.',true);
     const model=LocalAvatar.create(THREE,views,avatarTopology);
-    await api('avatar',JSON.stringify({version:7,views:views.map(({role,yaw,landmarks,photo})=>({role,yaw,landmarks,photo})),anchors:portrait.anchors}),true,60000,abort.signal);
+    try {await api('avatar',JSON.stringify({version:7,views:views.map(({role,yaw,landmarks,photo})=>({role,yaw,landmarks,photo})),anchors:portrait.anchors}),true,60000,abort.signal);}
+    catch(error){model.dispose();throw error;}
     if(epoch!==scanEpoch){model.dispose();return;}
-    installModel(model);cancelScan();
+    installModel(model);showPortraitCutout(portrait);cancelScan();
     $('faceStatus').textContent='Локальный 3D-аватар готов';$('cameraHint').textContent='Аватар создан на этом устройстве. Проверьте поворот и запишите голос.';
     scanInstruction('Ваш аватар готов. Фотографии никуда не отправлялись.',true);
   } catch(error){if(epoch===scanEpoch){cancelScan();throw error;}}
@@ -267,23 +269,29 @@ function scanInstruction(text,force=false) {
   const utterance=new SpeechSynthesisUtterance(text);utterance.lang='ru-RU';utterance.rate=.92;
   const voice=speechSynthesis.getVoices().find(v=>v.lang.startsWith('ru')&&v.localService);if(voice)utterance.voice=voice;speechSynthesis.speak(utterance);
 }
-async function fitPortrait(view,onProgress=()=>{},minimumMs=0) {
-  const began=performance.now();
+async function fitPortrait(view,onProgress=()=>{},signal) {
   let worker,bitmap;
   try {
     bitmap=await createImageBitmap(view.canvas);
     const mask=await new Promise((resolve,reject)=>{
-      worker=new Worker('/portrait-worker.js');const timer=setTimeout(()=>reject(new Error('Контур не найден')),45000);
-      worker.onmessage=({data})=>{if(data.progress){onProgress(data.message);return;}clearTimeout(timer);data.error?reject(new Error(data.error)):resolve(data);};
-      worker.onerror=event=>{clearTimeout(timer);reject(new Error(event.message||'Контур не найден'));};
-      worker.postMessage(bitmap,[bitmap]);
+      if(signal?.aborted){reject(new DOMException('Сканирование отменено','AbortError'));return;}
+      worker=new Worker('/portrait-worker.js');
+      const cleanup=()=>{clearTimeout(timer);signal?.removeEventListener('abort',cancel);};
+      const cancel=()=>{cleanup();worker.terminate();reject(new DOMException('Сканирование отменено','AbortError'));};
+      const timer=setTimeout(()=>{cleanup();reject(new Error('Обработка снимка заняла слишком долго. Попробуйте ещё раз.'));},90000);
+      signal?.addEventListener('abort',cancel,{once:true});
+      worker.onmessage=({data})=>{if(data.progress){onProgress(data.message);return;}cleanup();data.error?reject(new Error(data.error)):resolve(data);};
+      worker.onerror=event=>{cleanup();reject(new Error(event.message||'Контур не найден'));};
+      try {worker.postMessage(bitmap,[bitmap]);} catch(error){cleanup();reject(error);}
     });
     view.segmentation=mask;
-    const anchors=fitStablePortraitAnchors(view.landmarks,mask),remaining=minimumMs-(performance.now()-began);
-    if(remaining>0){onProgress('Финально проверяем пропорции головы, шеи и плеч…');await sleep(remaining);}
-    return anchors;
-  } catch { return defaultPortraitAnchors(view.landmarks); }
+    view.matte=mask.matte;
+    return fitStablePortraitAnchors(view.landmarks,mask);
+  }
   finally {worker?.terminate();bitmap?.close();}
+}
+function showPortraitCutout(view){
+  $('cutoutImage').src=portraitCutout(view).toDataURL('image/png');$('cutoutPreview').hidden=false;
 }
 async function renderDependencies() {
   THREE ||= await import('./vendor/three.module.js');if(!renderer)initScene();
@@ -669,15 +677,18 @@ $('cancelHelpBtn').addEventListener('click', cancelTutor);
 $('clearHelpBtn').addEventListener('click', () => { cancelTutor(); dialogId=null;followupUntil=0; $('tutorMessages').replaceChildren(); $('assignment').value = ''; });
 window.addEventListener('popstate', () => { if (running) stop(); });
 document.addEventListener('visibilitychange', () => { if (document.hidden) { recordCancelled = true; recordingAbort?.abort(); stopTracks(recordingStream);if(scanning)cancelScan();window.speechSynthesis?.cancel();stopHandsFree();stopCamera(); } if (document.hidden && running && !paused) { pause(); $('monitorStatus').textContent = 'Перерыв · окно скрыто'; } });
-window.addEventListener('beforeunload', () => { stopHandsFree();stopTracks(questionStream);stopTracks(recordingStream);stopAudio(); stopCamera(); scannerAbort?.abort();modelAvatar?.dispose();detector?.close(); audioContext?.close(); });
+window.addEventListener('beforeunload', () => { stopHandsFree();stopTracks(questionStream);stopTracks(recordingStream);stopAudio(); stopCamera(); scannerAbort?.abort();restoringAbort?.abort();modelAvatar?.dispose();detector?.close(); audioContext?.close(); });
 async function restoreAvatar() {
+  const restoringEpoch=scanEpoch,abort=new AbortController();restoringAbort=abort;
   try {
-    const saved=await api('avatar');if(!saved)return;
+    const saved=await api('avatar');if(!saved||restoringEpoch!==scanEpoch)return;
     if(saved.version===7){
       $('faceStatus').textContent='Восстанавливаем локальный аватар…';await dependencies();
       const views=await Promise.all(saved.views.map(async view=>{const image=new Image();image.src=view.photo;await image.decode();const canvas=document.createElement('canvas');canvas.width=image.width;canvas.height=image.height;canvas.getContext('2d').drawImage(image,0,0);return {...view,canvas,anchors:view.role==='portrait'?saved.anchors:undefined};}));
-      const portrait=views.find(view=>view.role==='portrait');if(portrait)await fitPortrait(portrait);
+      const portrait=views.find(view=>view.role==='portrait');if(portrait){portrait.anchors=await fitPortrait(portrait,message=>{if(restoringEpoch===scanEpoch)$('faceStatus').textContent=message;},abort.signal);}
+      if(restoringEpoch!==scanEpoch)return;
       installModel(LocalAvatar.create(THREE,views,avatarTopology));
+      showPortraitCutout(portrait);
       $('faceStatus').textContent='Локальный 3D-аватар загружен';$('cameraHint').textContent='Аватар хранится на этом устройстве.';return;
     }
     if(saved.version!==6){
@@ -688,11 +699,13 @@ async function restoreAvatar() {
     $('faceStatus').textContent='Восстанавливаем ваш аватар…';await renderDependencies();
     const response=await fetch('/api/avatar-model',{headers:{'X-App-Token':token}});
     if(!response.ok)throw new Error('Не удалось загрузить сохранённый аватар. Повторите сканирование.');
-    installModel(await ModelAvatar.create(THREE,await response.arrayBuffer()));
+    const model=await ModelAvatar.create(THREE,await response.arrayBuffer());
+    if(restoringEpoch!==scanEpoch){model.dispose();return;}
+    installModel(model);
     $('faceStatus').textContent='Ваш 3D-аватар загружен';
     $('cameraHint').textContent='Аватар сохранён. Сканировать заново не нужно.';
-  } catch(error){$('faceStatus').textContent='Не удалось восстановить аватар';fail(error);}
-  finally{controls();}
+  } catch(error){if(restoringEpoch===scanEpoch){$('faceStatus').textContent='Не удалось восстановить аватар';fail(error);}}
+  finally{if(restoringAbort===abort)restoringAbort=null;controls();}
 }
 async function refreshMicrophones() {
   try {
