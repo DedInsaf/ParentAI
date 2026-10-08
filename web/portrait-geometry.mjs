@@ -110,7 +110,7 @@ export function matteBodyGeometry(lm,a,frame,face,matte) {
   const chin=lm[152],fw=lm[454].x-lm[234].x,fh=chin.y-lm[10].y;
   if(!(fw>0&&fh>0))throw new Error('Не удалось измерить пропорции лица.');
   const center=(a?.neckLeft?.x+a?.neckRight?.x)/2||chin.x;
-  const minimumWidth=fw*.2,gapLimit=Math.max(1,Math.floor(width*.003));
+  const minimumWidth=fw*.2,gapLimit=Math.max(1,Math.floor(width*.003)),silhouetteThreshold=.12;
   const firstRow=Math.max(0,Math.floor(chin.y*height)),lastRow=Math.min(height-1,Math.floor(.97*height));
   const rows=new Array(height).fill(null);
   // Use the span connected through the centre of the person. Tiny mask islands
@@ -118,7 +118,10 @@ export function matteBodyGeometry(lm,a,frame,face,matte) {
   for(let y=firstRow;y<=lastRow;y++){
     const spans=[];let start=-1,end=-1;
     for(let x=0;x<width;x++){
-      if(alpha[y*width+x]>.5){
+      // MODNet's soft boundary is part of the photographed neck and clothing.
+      // A hard .5 cut removed several real edge pixels on each side after the
+      // texture itself had already been cut out correctly.
+      if(alpha[y*width+x]>=silhouetteThreshold){
         if(start<0)start=x;
         else if(x-end-1>gapLimit){spans.push([start,end]);start=x;}
         end=x;
@@ -158,12 +161,15 @@ export function matteBodyGeometry(lm,a,frame,face,matte) {
   for(const y of [chin.y,neckStart,a?.neckLeft?.y,a?.neckRight?.y,a?.shoulderLeft?.y,a?.shoulderRight?.y]){
     if(Number.isFinite(y)&&y>top&&y<bottom)ys.add(y);
   }
+  const fullWidthAt=chin.y-fh*.04;
   const sections=[...ys].sort((x,y)=>x-y).map(y=>{
     // The part above the chin is hidden inside the jaw. Extend the measured
     // neck upwards rather than using the much wider face silhouette there.
     const bounds=y<neckStart?neck:boundsAt(y);
-    const amount=Math.max(0,Math.min(1,(y-top)/(neckStart-top)));
-    const taper=y<neckStart?.70+.30*amount*amount*(3-2*amount):1;
+    // Finish the hidden taper before the jaw ends. Previously it continued
+    // into the visible neck and produced deep cut-outs below both jaw corners.
+    const amount=Math.max(0,Math.min(1,(y-top)/(fullWidthAt-top)));
+    const taper=y<fullWidthAt?.72+.28*amount*amount*(3-2*amount):1;
     const cx=(bounds.left+bounds.right)/2,half=(bounds.right-bounds.left)*.5*taper;
     return [{x:cx-half,y},{x:cx+half,y}];
   });
