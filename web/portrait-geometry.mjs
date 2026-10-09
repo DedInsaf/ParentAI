@@ -195,9 +195,12 @@ export function photoHairPatchGeometry(lm,a,frame,face,columns=49,rows=33) {
   const cx=(lm[234].x+lm[454].x)/2;
   // Trust the cleaned measured hairstyle. Large synthetic margins created
   // empty curved panels which turned a small edge error into floating hair.
-  const left=Math.max(.005,Math.min(a.templeLeft.x-faceWidth*.025,lm[234].x-faceWidth*.04));
-  const right=Math.min(.995,Math.max(a.templeRight.x+faceWidth*.025,lm[454].x+faceWidth*.04));
-  const top=Math.max(.005,Math.min(a.crown.y-faceHeight*.05,lm[10].y-faceHeight*.08));
+  // The left edge is intentionally tighter: a fixed wide rectangle there can
+  // include an opaque patch of room that both matting models attach to backlit
+  // hair. The measured temple still preserves the real asymmetric hairstyle.
+  const left=Math.max(.005,Math.min(a.templeLeft.x-faceWidth*.045,lm[234].x-faceWidth*.085));
+  const right=Math.min(.995,Math.max(a.templeRight.x+faceWidth*.10,lm[454].x+faceWidth*.18));
+  const top=Math.max(.005,Math.min(a.crown.y-faceHeight*.08,lm[10].y-faceHeight*.12));
   const bottom=Math.min(.995,Math.max(a.templeLeft.y,a.templeRight.y,lm[234].y,lm[454].y)+faceHeight*.02);
   const edgeZ=OVAL.reduce((sum,id)=>sum+face[id*3+2],0)/OVAL.length,worldWidth=faceWidth*frame.scale;
   const foreheadZ=face[10*3+2],sideZ=(face[234*3+2]+face[454*3+2])/2;

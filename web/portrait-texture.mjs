@@ -34,15 +34,28 @@ export function portraitHeadCutout(view){
   const canvas=document.createElement('canvas');canvas.width=view.canvas.width;canvas.height=view.canvas.height;
   const ctx=canvas.getContext('2d',{willReadFrequently:true});ctx.drawImage(view.canvas,0,0);
   const image=ctx.getImageData(0,0,canvas.width,canvas.height);
-  const alpha=resampleAlpha(view.matte.alpha,view.matte.width,view.matte.height,canvas.width,canvas.height);
-  for(let i=0;i<alpha.length;i++)image.data[i*4+3]=Math.round(alpha[i]*255);
+  const alpha=resampleAlpha(view.matte.alpha,view.matte.width,view.matte.height,canvas.width,canvas.height),categories=view?.segmentation;
+  for(let y=0;y<canvas.height;y++)for(let x=0;x<canvas.width;x++){
+    const i=y*canvas.width+x;let supported=!categories?.data?.length;
+    if(!supported){
+      const mx=Math.min(categories.width-1,Math.floor((x+.5)/canvas.width*categories.width));
+      const my=Math.min(categories.height-1,Math.floor((y+.5)/canvas.height*categories.height));
+      // A wider semantic guard retains soft flyaway hair while removing the
+      // large low-alpha room rectangle that MODNet can leave around the head.
+      for(let dy=-3;dy<=3&&!supported;dy++)for(let dx=-3;dx<=3;dx++){
+        const px=mx+dx,py=my+dy;
+        if(px>=0&&py>=0&&px<categories.width&&py<categories.height&&categories.data[py*categories.width+px]!==0){supported=true;break;}
+      }
+    }
+    image.data[i*4+3]=supported?Math.round(alpha[i]*255):0;
+  }
   ctx.putImageData(image,0,0);return canvas;
 }
 
 // A scalp mesh may cover forehead and ear UVs while curving around the head.
 // Give it a hair-only alpha mask so those opaque skin pixels cannot become
 // floating photo triangles. A one-cell neighbourhood retains thin edge hairs.
-export function portraitHairCutout(view){
+export function portraitHairCutout(view,minimumCoverage=.16){
   const canvas=portraitCutout(view),mask=view?.segmentation;
   if(!mask?.data?.length)return canvas;
   const ctx=canvas.getContext('2d',{willReadFrequently:true}),image=ctx.getImageData(0,0,canvas.width,canvas.height);
@@ -55,7 +68,16 @@ export function portraitHairCutout(view){
     for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++)if(isHair(mx+dx,my+dy))neighbours++;
     // A stable local majority removes isolated flyaway predictions which would
     // otherwise be magnified into a long triangle by the curved scalp mesh.
-    if(neighbours<4)image.data[(y*canvas.width+x)*4+3]=0;
+    const alphaIndex=(y*canvas.width+x)*4+3,coverage=image.data[alphaIndex]/255;
+    const cutoff=Math.max(0,Math.min(.9,minimumCoverage));
+    if(neighbours<4||coverage<cutoff)image.data[alphaIndex]=0;
+    else {
+      // MODNet sometimes leaves a broad 5–15% haze around backlit hair. It is
+      // invisible in the cutout preview but becomes a rectangular veil when
+      // curved in 3D. Remap only that low-confidence range to transparency.
+      const t=Math.max(0,Math.min(1,(coverage-cutoff)/Math.max(.08,1-cutoff))),smooth=t*t*(3-2*t);
+      image.data[alphaIndex]=Math.round(255*(coverage*(1-smooth)+smooth));
+    }
   }
   ctx.putImageData(image,0,0);return canvas;
 }
