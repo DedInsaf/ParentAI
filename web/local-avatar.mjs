@@ -2,7 +2,7 @@ import {closeFaceOpenings, FACE_OPENINGS, mouthRig, neutralFacePositions} from '
 import {skullGeometry, earGeometry, neckGeometry, torsoGeometry, hairGeometry, OVAL} from './head-geometry.mjs';
 import {bakeFaceAtlas} from './face-atlas.mjs';
 import {mouthInteriorGeometry, mouthInteriorPositions} from './mouth-geometry.mjs';
-import {defaultPortraitAnchors, portraitHairGeometry, portraitEarGeometry, matteBodyGeometry} from './portrait-geometry.mjs';
+import {defaultPortraitAnchors, photoHairPatchGeometry, portraitHairGeometry, portraitEarGeometry, matteBodyGeometry} from './portrait-geometry.mjs';
 import {portraitCutout,portraitHeadCutout} from './portrait-texture.mjs';
 
 const clamp=value=>Math.max(0,Math.min(.999999,value));
@@ -116,6 +116,12 @@ export class LocalAvatar {
       // A hair-only alpha mask exposed the brown fallback skull as a solid band.
       const hairMesh=new THREE.Mesh(geometry(THREE,hairData),[headMaterial,hairVolumeMaterial]);hairMesh.renderOrder=1;
       pivot.add(hairMesh);
+      // A dense photo-aligned front layer preserves the true width and top
+      // silhouette of the hairstyle. The connected mesh underneath supplies
+      // volume during a turn; this layer supplies the exact frontal pixels.
+      const photoHair=photoHairPatchGeometry(bust.landmarks,anchors,frame,base,65,41);
+      const photoHairMesh=new THREE.Mesh(geometry(THREE,photoHair),headMaterial);photoHairMesh.renderOrder=2;
+      pivot.add(photoHairMesh);
       for(const side of [-1,1]){
         const earData=portraitEarGeometry(bust.landmarks,anchors,frame,base,side);
         pivot.add(new THREE.Mesh(geometry(THREE,earData),[headMaterial,skinMaterial]));
