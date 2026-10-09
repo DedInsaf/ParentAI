@@ -3,7 +3,7 @@ import {skullGeometry, earGeometry, neckGeometry, torsoGeometry, hairGeometry, O
 import {bakeFaceAtlas} from './face-atlas.mjs';
 import {mouthInteriorGeometry, mouthInteriorPositions} from './mouth-geometry.mjs';
 import {defaultPortraitAnchors, portraitHairGeometry, portraitEarGeometry, matteBodyGeometry} from './portrait-geometry.mjs';
-import {portraitCutout} from './portrait-texture.mjs';
+import {portraitCutout,portraitHeadCutout} from './portrait-texture.mjs';
 
 const clamp=value=>Math.max(0,Math.min(.999999,value));
 
@@ -96,7 +96,7 @@ export class LocalAvatar {
       const bodyFrame={nose:{x:bodyChin.x-base[152*3]/bodyScale,y:bodyChin.y+base[152*3+1]/bodyVertical},aspect:bodyVertical/bodyScale,scale:bodyScale};
       // Keep the exact photographed colour through the jaw, neck and shirt.
       // Repainting the upper neck produced a horizontal band under the chin.
-      const headTexture=new THREE.CanvasTexture(portraitCutout(bust));headTexture.colorSpace=THREE.SRGBColorSpace;
+      const headTexture=new THREE.CanvasTexture(portraitHeadCutout(bust));headTexture.colorSpace=THREE.SRGBColorSpace;
       const headMaterial=new THREE.MeshStandardMaterial({map:headTexture,roughness:1,side:THREE.DoubleSide,transparent:true,alphaTest:.02});
       const bodyTexture=new THREE.CanvasTexture(portraitCutout(bodyView));bodyTexture.colorSpace=THREE.SRGBColorSpace;
       const bodyMaterial=new THREE.MeshStandardMaterial({map:bodyTexture,roughness:1,side:THREE.DoubleSide,transparent:true,alphaTest:.02});
@@ -137,6 +137,9 @@ export class LocalAvatar {
   constructor(THREE,data){Object.assign(this,data);this.THREE=THREE;this.object=this.group;this.rest=this.group.position.clone();this.restUv=this.face.geometry.getAttribute('uv').array.slice();this.box=new THREE.Box3().setFromObject(this.group);}
   fit(camera,aspect){
     this.box.setFromObject(this.group);const center=this.box.getCenter(new this.THREE.Vector3()),h=this.box.max.y-this.box.min.y,w=this.box.max.x-this.box.min.x,half=Math.max(h/2,w/(2*aspect))*1.12;
+    // A bust should continue below the frame like a camera portrait. Showing
+    // the mesh base creates an artificial horizontal cut through the shirt.
+    center.y+=h*.07;
     camera.left=-half*aspect;camera.right=half*aspect;camera.top=half;camera.bottom=-half;camera.position.set(center.x,center.y,5);camera.lookAt(center.x,center.y,0);camera.updateProjectionMatrix();
   }
   update(pose,opening,cue,blink){

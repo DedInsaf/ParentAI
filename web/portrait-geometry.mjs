@@ -335,9 +335,9 @@ export function portraitHairGeometry(lm,a,frame,face,matte) {
       const t=j/(columns-1),arch=Math.sin(Math.PI*t);
       const x=t<=.5?leftX+(cx-leftX)*arch:rightX+(cx-rightX)*arch;
       const envelope={x,y:topY+(bottomY-topY)*(1-arch)};
-      // A broad cap contains the whole photographed hair mask. Clipping that
-      // mask with narrow radial estimates was the source of the sharp shards.
-      return mix(seamPoints[j],mix(envelope,p,.10),edgeFade(j));
+      // The envelope guards against isolated shards, while the smoothed matte
+      // contour keeps the person's real fringe and asymmetric hairstyle.
+      return mix(seamPoints[j],mix(envelope,p,.65),edgeFade(j));
     });
   }
   const innerPoints=edges.map((edge,j)=>mix(seamPoints[j],edge.inner,edgeFade(j)));

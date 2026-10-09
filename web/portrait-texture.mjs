@@ -25,6 +25,20 @@ export function portraitCutout(view){
   ctx.putImageData(image,0,0);return canvas;
 }
 
+// The semantic mask is deliberately conservative and often removes fine hair
+// that MODNet still identifies correctly. Hair geometry already limits where
+// this texture can appear, so keep the soft high-resolution matte for the head
+// instead of clipping it again to the coarse category cells.
+export function portraitHeadCutout(view){
+  if(!view?.matte?.alpha)throw new Error('Сначала нужно отделить человека от фона.');
+  const canvas=document.createElement('canvas');canvas.width=view.canvas.width;canvas.height=view.canvas.height;
+  const ctx=canvas.getContext('2d',{willReadFrequently:true});ctx.drawImage(view.canvas,0,0);
+  const image=ctx.getImageData(0,0,canvas.width,canvas.height);
+  const alpha=resampleAlpha(view.matte.alpha,view.matte.width,view.matte.height,canvas.width,canvas.height);
+  for(let i=0;i<alpha.length;i++)image.data[i*4+3]=Math.round(alpha[i]*255);
+  ctx.putImageData(image,0,0);return canvas;
+}
+
 // A scalp mesh may cover forehead and ear UVs while curving around the head.
 // Give it a hair-only alpha mask so those opaque skin pixels cannot become
 // floating photo triangles. A one-cell neighbourhood retains thin edge hairs.
