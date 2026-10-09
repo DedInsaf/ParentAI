@@ -2,7 +2,7 @@ import {closeFaceOpenings, FACE_OPENINGS, mouthRig, neutralFacePositions} from '
 import {skullGeometry, earGeometry, neckGeometry, torsoGeometry, hairGeometry, OVAL} from './head-geometry.mjs';
 import {bakeFaceAtlas} from './face-atlas.mjs';
 import {mouthInteriorGeometry, mouthInteriorPositions} from './mouth-geometry.mjs';
-import {defaultPortraitAnchors, foreheadScalpGeometry, photoHairPatchGeometry, portraitEarGeometry, matteBodyGeometry} from './portrait-geometry.mjs';
+import {defaultPortraitAnchors, portraitHairGeometry, portraitEarGeometry, matteBodyGeometry} from './portrait-geometry.mjs';
 import {portraitAvatarTexture,portraitHairCutout} from './portrait-texture.mjs';
 
 const clamp=value=>Math.max(0,Math.min(.999999,value));
@@ -97,10 +97,9 @@ export class LocalAvatar {
       // neck edge with the measured skin tone while the shirt stays unchanged.
       const portraitTexture=new THREE.CanvasTexture(portraitAvatarTexture(bust,skinRgb));portraitTexture.colorSpace=THREE.SRGBColorSpace;
       const portraitMaterial=new THREE.MeshStandardMaterial({map:portraitTexture,roughness:1,side:THREE.DoubleSide,transparent:true,alphaTest:.02});
-      const scalpTexture=new THREE.CanvasTexture(bust.canvas);scalpTexture.colorSpace=THREE.SRGBColorSpace;
-      const scalpMaterial=new THREE.MeshStandardMaterial({map:scalpTexture,roughness:1,side:THREE.DoubleSide});
       const hairPhotoTexture=new THREE.CanvasTexture(portraitHairCutout(bust));hairPhotoTexture.colorSpace=THREE.SRGBColorSpace;
-      const hairPhotoMaterial=new THREE.MeshStandardMaterial({map:hairPhotoTexture,roughness:1,side:THREE.FrontSide,transparent:true,alphaTest:.02});
+      const hairPhotoMaterial=new THREE.MeshStandardMaterial({map:hairPhotoTexture,roughness:1,side:THREE.DoubleSide,transparent:true,alphaTest:.02});
+      const hairVolumeMaterial=new THREE.MeshStandardMaterial({color:hairSample,roughness:.95,side:THREE.DoubleSide});
       // The photographed front half already curves around the torso. Opaque
       // inner faces used to show through its transparent room gaps as straight
       // bars beside the neck. Keep those closure faces depth-neutral here.
@@ -108,17 +107,12 @@ export class LocalAvatar {
       const hiddenRearCloth=hiddenRearSkin.clone();
       const bodyData=matteBodyGeometry(bust.landmarks,anchors,bodyFrame,base,bust.matte);
       body.add(new THREE.Mesh(geometry(THREE,bodyData),[portraitMaterial,hiddenRearSkin,hiddenRearCloth]));
-      const fittedWidth=Math.abs(base[454*3]-base[234*3]);
-      const photoHair=photoHairPatchGeometry(bust.landmarks,anchors,frame,base);
-      const rearCap=hairGeometry(head,'short');
-      if(rearCap.positions.length){
-        const rearMesh=new THREE.Mesh(geometry(THREE,rearCap),new THREE.MeshStandardMaterial({color:hairSample,roughness:.95,side:THREE.DoubleSide}));
-        rearMesh.position.z-=fittedWidth*.10;pivot.add(rearMesh);
-      }
-      const foreheadScalp=new THREE.Mesh(geometry(THREE,foreheadScalpGeometry(bust.landmarks,frame,base,bust.segmentation)),scalpMaterial);
-      foreheadScalp.renderOrder=1;pivot.add(foreheadScalp);
-      const photoHairMesh=new THREE.Mesh(geometry(THREE,photoHair),hairPhotoMaterial);photoHairMesh.renderOrder=2;
-      pivot.add(photoHairMesh);
+      // Photo hair and rear hair volume share the exact upper face seam.  A
+      // single connected mesh prevents the forehead crack that appeared when
+      // two independently projected surfaces rotated by different depths.
+      const hairData=portraitHairGeometry(bust.landmarks,anchors,frame,base,bust.matte);
+      const hairMesh=new THREE.Mesh(geometry(THREE,hairData),[hairPhotoMaterial,hairVolumeMaterial]);hairMesh.renderOrder=1;
+      pivot.add(hairMesh);
       for(const side of [-1,1]){
         const earData=portraitEarGeometry(bust.landmarks,anchors,frame,base,side);
         pivot.add(new THREE.Mesh(geometry(THREE,earData),[portraitMaterial,skinMaterial]));

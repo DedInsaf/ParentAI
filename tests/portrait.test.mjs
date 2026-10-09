@@ -63,6 +63,13 @@ test('hair has rear volume and reserves the portrait texture for the front',()=>
   // Front rows keep the forehead seam depth fixed when adding volume behind it.
   for(let j=0;j<17;j++){const id=OVAL[[28,29,30,31,32,33,34,35,0,1,2,3,4,5,6,7,8][j]];assert.equal(hair.positions[j*3+2],face[id*3+2]);}
 });
+test('portrait ears overlap the face edge instead of touching it at one point',()=>{
+  const lm=fixture(),a=defaultPortraitAnchors(lm),frame={nose:lm[1],aspect:.75,scale:4.2},face=positionsFor(lm,1000,750);
+  const left=portraitEarGeometry(lm,a,frame,face,-1),right=portraitEarGeometry(lm,a,frame,face,1);
+  const leftXs=left.uv.filter((_,i)=>i%2===0),rightXs=right.uv.filter((_,i)=>i%2===0);
+  assert.ok(Math.max(...leftXs)>lm[234].x);
+  assert.ok(Math.min(...rightXs)<lm[454].x);
+});
 test('dense photo hair patch preserves frontal pixels and bends only in depth',()=>{
   const lm=fixture(),a=defaultPortraitAnchors(lm),frame={nose:lm[1],aspect:.75,scale:4.2},face=positionsFor(lm,1000,750);
   const hair=photoHairPatchGeometry(lm,a,frame,face);

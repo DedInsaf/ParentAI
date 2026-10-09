@@ -400,7 +400,12 @@ export function portraitHairGeometry(lm,a,frame,face,matte) {
 
 export function portraitEarGeometry(lm,a,frame,face,side) {
   const id=side<0?234:454,tip=side<0?a.earLeft:a.earRight;
-  const root=lm[id],cx=(root.x+tip.x)/2,cy=tip.y,rx=Math.abs(tip.x-root.x)/2,ry=(lm[152].y-lm[10].y)*.135;
+  const root=lm[id],faceWidth=lm[454].x-lm[234].x;
+  // An ellipse ending exactly at the face landmark only touches the cheek at
+  // one vertex. Even a small head turn then exposes background around the ear.
+  // Put the hidden edge a little inside the head so the photographed ear has a
+  // broad, continuous root while its measured outer tip stays unchanged.
+  const innerX=root.x-side*faceWidth*.045,cx=(innerX+tip.x)/2,cy=tip.y,rx=Math.abs(tip.x-innerX)/2,ry=(lm[152].y-lm[10].y)*.135;
   const positions=[],uv=[],indices=[],groups=[],segments=32,fw=(lm[454].x-lm[234].x)*frame.scale;
   const rimZ=face[id*3+2]-rx*frame.scale*.2;
   for(let row=0;row<=12;row++)for(let j=0;j<segments;j++) {
