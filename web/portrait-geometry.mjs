@@ -156,38 +156,20 @@ export function matteBodyGeometry(lm,a,frame,face,matte) {
     const t=(row-before)/(after-before);
     return {left:filtered[before].left*(1-t)+filtered[after].left*t,right:filtered[before].right*(1-t)+filtered[after].right*t};
   };
-  const neckStart=chin.y+fh*.035,measuredWidth=(a?.neckRight?.x??0)-(a?.neckLeft?.x??0);
+  const neckStart=chin.y+fh*.035;
   const collarY=Math.max(chin.y+fh*.16,Math.min(bottom,(a?.neckLeft?.y+a?.neckRight?.y)/2||chin.y+fh*.30));
-  // The silhouette immediately below the chin still contains the jaw and can
-  // be almost a full face wide. Use the skin-class neck measurement instead;
-  // unlike a ratio or the outer matte it represents the real two neck edges.
-  const fallback=boundsAt(chin.y+fh*.12),upperWidth=measuredWidth>fw*.35&&measuredWidth<fw*1.05?measuredWidth:fallback.right-fallback.left;
-  const upperCenter=measuredWidth>fw*.35&&measuredWidth<fw*1.05?(a.neckLeft.x+a.neckRight.x)/2:(fallback.left+fallback.right)/2;
-  const collar=boundsAt(collarY);
-  const collarCenter=(collar.left+collar.right)/2,collarWidth=collar.right-collar.left;
   const ys=new Set(Array.from({length:65},(_,i)=>top+(bottom-top)*i/64));
   for(const y of [chin.y,neckStart,chin.y+fh*.08,a?.neckLeft?.y,a?.neckRight?.y,a?.shoulderLeft?.y,a?.shoulderRight?.y]){
     if(Number.isFinite(y)&&y>top&&y<bottom)ys.add(y);
   }
+  // The cleaned matte already contains the person's real neck and clothing
+  // outline. Building a synthetic neck inside it cropped the photo into a
+  // rectangle. Make the mesh a slightly padded carrier for that exact alpha
+  // silhouette; transparent pixels outside the person remain invisible.
+  const pad=Math.max(1.5/width,fw*.008);
   const sections=[...ys].sort((x,y)=>x-y).map(y=>{
-    let cx,half;
-    if(y<chin.y){
-      // Tuck the hidden root inside the lower jaw, then reach almost the full
-      // measured neck width at the chin. This removes the horizontal shelf on
-      // both sides without returning to the old narrow stalk.
-      const t=Math.max(0,Math.min(1,(y-top)/(chin.y-top))),e=t*t*(3-2*t);
-      cx=upperCenter;half=upperWidth*(.78+.20*e)*.5;
-    }else if(y<collarY){
-      // Keep the measured neck parallel below the jaw, then blend into the
-      // photographed collar only near its base. This removes the hourglass
-      // pinch while retaining the real shoulder slope.
-      const progress=(y-chin.y)/(collarY-chin.y),base=.98+.02*Math.min(1,progress/.55);
-      const t=Math.max(0,Math.min(1,(progress-.72)/.28)),e=t*t*(3-2*t);
-      cx=upperCenter*(1-e)+collarCenter*e;half=(upperWidth*base*(1-e)+collarWidth*e)*.5;
-    }else{
-      const bounds=boundsAt(y);cx=(bounds.left+bounds.right)/2;half=(bounds.right-bounds.left)*.5;
-    }
-    return [{x:cx-half,y},{x:cx+half,y}];
+    const bounds=boundsAt(y);
+    return [{x:Math.max(0,bounds.left-pad),y},{x:Math.min(1,bounds.right+pad),y}];
   });
   const jawBack=Math.min(...[150,149,176,148,152,377,400,378,379,365].map(id=>face[id*3+2]));
   return ringSurface(sections,frame,jawBack-fw*frame.scale*.02,fw*frame.scale*.38,{

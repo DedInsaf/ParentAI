@@ -3,7 +3,7 @@ import {skullGeometry, earGeometry, neckGeometry, torsoGeometry, hairGeometry, O
 import {bakeFaceAtlas} from './face-atlas.mjs';
 import {mouthInteriorGeometry, mouthInteriorPositions} from './mouth-geometry.mjs';
 import {defaultPortraitAnchors, portraitHairGeometry, portraitEarGeometry, matteBodyGeometry} from './portrait-geometry.mjs';
-import {portraitAvatarTexture,portraitHairCutout} from './portrait-texture.mjs';
+import {portraitCutout} from './portrait-texture.mjs';
 
 const clamp=value=>Math.max(0,Math.min(.999999,value));
 
@@ -91,14 +91,10 @@ export class LocalAvatar {
       // The bust must meet the generated face at the chin; otherwise the same
       // mathematically valid projection leaves a visible horizontal gap.
       const portraitChin=bust.landmarks[152],bodyFrame={nose:{x:portraitChin.x-base[152*3]/scale,y:portraitChin.y+base[152*3+1]/vertical},aspect,scale};
-      const skinHex=skin.getHex(THREE.SRGBColorSpace),skinRgb=[skinHex>>16,(skinHex>>8)&255,skinHex&255];
-      // Normalize the narrow upper-neck band even for the unified frontal
-      // capture. This replaces any residual room-coloured matte pixels at the
-      // neck edge with the measured skin tone while the shirt stays unchanged.
-      const portraitTexture=new THREE.CanvasTexture(portraitAvatarTexture(bust,skinRgb));portraitTexture.colorSpace=THREE.SRGBColorSpace;
+      // Keep the exact photographed colour through the jaw, neck and shirt.
+      // Repainting the upper neck produced a horizontal band under the chin.
+      const portraitTexture=new THREE.CanvasTexture(portraitCutout(bust));portraitTexture.colorSpace=THREE.SRGBColorSpace;
       const portraitMaterial=new THREE.MeshStandardMaterial({map:portraitTexture,roughness:1,side:THREE.DoubleSide,transparent:true,alphaTest:.02});
-      const hairPhotoTexture=new THREE.CanvasTexture(portraitHairCutout(bust));hairPhotoTexture.colorSpace=THREE.SRGBColorSpace;
-      const hairPhotoMaterial=new THREE.MeshStandardMaterial({map:hairPhotoTexture,roughness:1,side:THREE.DoubleSide,transparent:true,alphaTest:.02});
       const hairVolumeMaterial=new THREE.MeshStandardMaterial({color:hairSample,roughness:.95,side:THREE.DoubleSide});
       // The photographed front half already curves around the torso. Opaque
       // inner faces used to show through its transparent room gaps as straight
@@ -111,7 +107,9 @@ export class LocalAvatar {
       // single connected mesh prevents the forehead crack that appeared when
       // two independently projected surfaces rotated by different depths.
       const hairData=portraitHairGeometry(bust.landmarks,anchors,frame,base,bust.matte);
-      const hairMesh=new THREE.Mesh(geometry(THREE,hairData),[hairPhotoMaterial,hairVolumeMaterial]);hairMesh.renderOrder=1;
+      // The first rows include both forehead skin and hair from the same photo.
+      // A hair-only alpha mask exposed the brown fallback skull as a solid band.
+      const hairMesh=new THREE.Mesh(geometry(THREE,hairData),[portraitMaterial,hairVolumeMaterial]);hairMesh.renderOrder=1;
       pivot.add(hairMesh);
       for(const side of [-1,1]){
         const earData=portraitEarGeometry(bust.landmarks,anchors,frame,base,side);

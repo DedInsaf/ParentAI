@@ -153,7 +153,8 @@ test('matte body preserves photographed neck, shoulder height and original proje
     for(let i=0;i<body.uv.length;i+=2)if(Math.abs(1-body.uv[i+1]-y)<1e-9)xs.push(body.uv[i]);
     assert.ok(xs.length>0);return [Math.min(...xs),Math.max(...xs)];
   };
-  for(const [actual,expected] of [[span(.51),[.43,.57]],[span(.60),[.23,.77]]]){
+  const pad=1.5/matte.width;
+  for(const [actual,expected] of [[span(.51),[.43-pad,.57+pad]],[span(.60),[.23-pad,.77+pad]]]){
     assert.ok(actual.every((value,i)=>Math.abs(value-expected[i])<1e-9));
   }
   const ys=body.uv.filter((_,i)=>i%2===1).map(v=>1-v);
@@ -166,7 +167,7 @@ test('matte body preserves photographed neck, shoulder height and original proje
   assert.ok(Math.max(...body.uv.filter((_,i)=>i%2===0))<.80);
 });
 
-test('visible neck keeps its measured width below the jaw and retains the soft matte collar',()=>{
+test('visible neck follows the soft photographed matte without synthetic narrowing',()=>{
   const lm=fixture(),a=defaultPortraitAnchors(lm),matte=bodyMatte(),face=positionsFor(lm,1000,750),frame={nose:lm[1],aspect:.75,scale:4.2};
   const chin=lm[152],fh=chin.y-lm[10].y,row=Math.round(chin.y*matte.height);
   // Soft MODNet pixels belong to the collar even when their alpha is below .5.
@@ -176,14 +177,15 @@ test('visible neck keeps its measured width below the jaw and retains the soft m
     return [Math.min(...xs),Math.max(...xs)];
   };
   const chinSpan=spanAt(chin.y),middleSpan=spanAt(chin.y+fh*.08),collarY=(a.neckLeft.y+a.neckRight.y)/2,collarSpan=spanAt(collarY);
-  const measured=a.neckRight.x-a.neckLeft.x;
-  assert.ok(Math.abs(chinSpan[1]-chinSpan[0]-measured*.98)<1e-9);
-  assert.ok(middleSpan[1]-middleSpan[0]>chinSpan[1]-chinSpan[0]);
-  assert.ok(middleSpan[1]-middleSpan[0]<=measured+1e-9);
-  assert.ok(collarSpan[0]<=.411&&collarSpan[1]>=.589);
-  // The root hidden inside the face must not taper into a visible stalk.
+  const expectedLeft=82/matte.width-1.5/matte.width,expectedRight=118/matte.width+1.5/matte.width;
+  for(const span of [chinSpan,middleSpan,collarSpan]){
+    assert.ok(Math.abs(span[0]-expectedLeft)<1e-9);
+    assert.ok(Math.abs(span[1]-expectedRight)<1e-9);
+  }
+  // The root hidden inside the face uses the same carrier width, so no shelf
+  // or horizontal cut can appear under the animated jaw.
   const top=chin.y-fh*.14,topSpan=spanAt(top);
-  assert.ok(Math.abs(topSpan[1]-topSpan[0]-measured*.78)<1e-9);
+  assert.deepEqual(topSpan,chinSpan);
 });
 
 test('matte body has complete photo and closed sides/base with its top hidden by the head',()=>{
@@ -214,7 +216,8 @@ test('matte body interpolates a missing contour row and rejects absent body data
   a.shoulderLeft.y=a.shoulderRight.y=.6025;
   const body=matteBodyGeometry(lm,a,frame,face,matte);
   const rowXs=[];for(let i=0;i<body.uv.length;i+=2)if(Math.abs(1-body.uv[i+1]-.6025)<1e-9)rowXs.push(body.uv[i]);
-  assert.ok(Math.abs(Math.min(...rowXs)-.23)<1e-9);assert.ok(Math.abs(Math.max(...rowXs)-.77)<1e-9);
+  const pad=1.5/matte.width;
+  assert.ok(Math.abs(Math.min(...rowXs)-(.23-pad))<1e-9);assert.ok(Math.abs(Math.max(...rowXs)-(.77+pad))<1e-9);
   assert.throws(()=>matteBodyGeometry(lm,a,frame,face,{alpha:new Float32Array(10),width:10,height:10}),/контур/);
   assert.throws(()=>matteBodyGeometry(lm,a,frame,face,{alpha:new Float32Array(40000),width:200,height:200}),/выделить/);
 });
