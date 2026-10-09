@@ -2,7 +2,7 @@ import {closeFaceOpenings, FACE_OPENINGS, mouthRig, neutralFacePositions} from '
 import {skullGeometry, earGeometry, neckGeometry, torsoGeometry, hairGeometry, OVAL} from './head-geometry.mjs';
 import {bakeFaceAtlas} from './face-atlas.mjs';
 import {mouthInteriorGeometry, mouthInteriorPositions} from './mouth-geometry.mjs';
-import {defaultPortraitAnchors, hairlineBridgeGeometry, photoHairPatchGeometry, portraitEarGeometry, matteBodyGeometry} from './portrait-geometry.mjs';
+import {defaultPortraitAnchors, photoHairPatchGeometry, portraitEarGeometry, matteBodyGeometry} from './portrait-geometry.mjs';
 import {portraitAvatarTexture,portraitHairCutout} from './portrait-texture.mjs';
 
 const clamp=value=>Math.max(0,Math.min(.999999,value));
@@ -113,15 +113,6 @@ export class LocalAvatar {
         const rearMesh=new THREE.Mesh(geometry(THREE,rearCap),new THREE.MeshStandardMaterial({color:hairSample,roughness:.95,side:THREE.DoubleSide}));
         rearMesh.position.z-=fittedWidth*.10;pivot.add(rearMesh);
       }
-      const bridgeGeometry=geometry(THREE,hairlineBridgeGeometry(bust.landmarks,frame,base));
-      // The source photo can contain a real patch of room between a lifted
-      // lock and the forehead. Keep the photograph on top, but put a recessed
-      // hair-shadow surface underneath so that transparent pixels cannot open
-      // a hole through the head.
-      const bridgeUnderlay=new THREE.Mesh(bridgeGeometry,new THREE.MeshStandardMaterial({color:hairSample.clone().lerp(skin,.18),roughness:1,side:THREE.DoubleSide}));
-      bridgeUnderlay.position.z-=fittedWidth*.004;bridgeUnderlay.renderOrder=0;pivot.add(bridgeUnderlay);
-      const hairlineBridge=new THREE.Mesh(bridgeGeometry,portraitMaterial);
-      hairlineBridge.renderOrder=1;pivot.add(hairlineBridge);
       const photoHairMesh=new THREE.Mesh(geometry(THREE,photoHair),hairPhotoMaterial);photoHairMesh.renderOrder=2;
       pivot.add(photoHairMesh);
       for(const side of [-1,1]){

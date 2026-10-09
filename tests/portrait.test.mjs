@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {positionsFor} from '../web/core.mjs';
-import {defaultPortraitAnchors,portraitAnchorIssue,portraitBodyGeometry,matteBodyGeometry,hairlineBridgeGeometry,photoHairPatchGeometry,portraitHairGeometry,portraitEarGeometry} from '../web/portrait-geometry.mjs';
+import {defaultPortraitAnchors,portraitAnchorIssue,portraitBodyGeometry,matteBodyGeometry,photoHairPatchGeometry,portraitHairGeometry,portraitEarGeometry} from '../web/portrait-geometry.mjs';
 import {fitPortraitAnchors,fitStablePortraitAnchors,combineCategoryMasks} from '../web/portrait-fit.mjs';
 import {OVAL} from '../web/head-geometry.mjs';
 
@@ -76,19 +76,6 @@ test('dense photo hair patch preserves frontal pixels and bends only in depth',(
   }
   const zs=hair.positions.filter((_,i)=>i%3===2);
   assert.ok(Math.max(...zs)-Math.min(...zs)>(lm[454].x-lm[234].x)*frame.scale*.08);
-});
-
-test('photographed hairline bridge shares the face seam and overlaps the scalp',()=>{
-  const lm=fixture(),face=positionsFor(lm,1000,750),frame={nose:lm[1],aspect:.75,scale:4.2};
-  const bridge=hairlineBridgeGeometry(lm,frame,face),rows=bridge.rows;
-  assert.equal(bridge.columns,49);assert.equal(rows,5);
-  assert.equal(bridge.positions.length,bridge.columns*rows*3);
-  for(let column=0;column<bridge.columns;column++){
-    const inner=column*rows*3,outer=(column*rows+rows-1)*3;
-    const reach=Math.hypot(bridge.positions[outer]-bridge.positions[inner],bridge.positions[outer+1]-bridge.positions[inner+1]);
-    if(column===0||column===bridge.columns-1)assert.ok(reach<1e-9);else assert.ok(reach>0);
-    assert.ok(bridge.positions[outer+2]<bridge.positions[inner+2]);
-  }
 });
 test('measured skin and clothing preserve a broad neck despite an open V-neck shirt',()=>{
   const lm=fixture(),width=200,height=200,data=new Uint8Array(width*height);

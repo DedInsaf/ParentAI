@@ -233,39 +233,6 @@ export function photoHairPatchGeometry(lm,a,frame,face,columns=49,rows=33) {
   }
   return {positions,uv,indices,left,right,top,bottom,columns,rows};
 }
-
-// A narrow photographed scalp band joins the MediaPipe face oval to the hair
-// surface. MediaPipe stops at the forehead, while a hair-only texture starts at
-// the first classified hair pixel; without this band the skin between them is
-// transparent and looks like the face has detached from the hairstyle.
-export function hairlineBridgeGeometry(lm,frame,face,columns=49,rows=5) {
-  const contour=[28,29,30,31,32,33,34,35,0,1,2,3,4,5,6,7,8],ids=contour.map(index=>OVAL[index]);
-  const arc=[0];
-  for(let i=1;i<ids.length;i++){
-    const p=lm[ids[i-1]],q=lm[ids[i]];arc.push(arc.at(-1)+Math.hypot(q.x-p.x,(q.y-p.y)*frame.aspect));
-  }
-  const cx=(lm[234].x+lm[454].x)/2,cy=(lm[10].y+lm[152].y)/2,faceWidth=lm[454].x-lm[234].x,worldWidth=faceWidth*frame.scale;
-  const positions=[],uv=[],indices=[];
-  for(let column=0;column<columns;column++){
-    const distance=arc.at(-1)*column/(columns-1);let segment=0;
-    while(segment<ids.length-2&&arc[segment+1]<distance)segment++;
-    const amount=(distance-arc[segment])/Math.max(.000001,arc[segment+1]-arc[segment]);
-    const left=lm[ids[segment]],right=lm[ids[segment+1]],seam=mix(left,right,amount);
-    const seamZ=face[ids[segment]*3+2]*(1-amount)+face[ids[segment+1]*3+2]*amount;
-    const dx=seam.x-cx,dy=(seam.y-cy)*frame.aspect,length=Math.max(.000001,Math.hypot(dx,dy));
-    // Reach well underneath overhanging locks. The source may contain a fairly
-    // large patch of visible room there, not merely a one-pixel matte seam.
-    // Fade to zero at the temples so the underlay cannot become side panels.
-    const arch=Math.pow(Math.sin(Math.PI*column/(columns-1)),.65),reach=faceWidth*.24*arch;
-    const outer={x:seam.x+dx/length*reach,y:seam.y+dy/length/frame.aspect*reach};
-    for(let row=0;row<rows;row++){
-      const t=row/(rows-1),e=t*t*(3-2*t),p=mix(seam,outer,e);
-      positions.push(...portraitPoint(p,frame,seamZ-worldWidth*(.002+.012*e)));uv.push(p.x,1-p.y);
-      if(column&&row){const a=(column-1)*rows+row-1,b=a+1,c=column*rows+row-1,d=c+1;indices.push(a,c,b,b,c,d);}
-    }
-  }
-  return {positions,uv,indices,columns,rows};
-}
 export function portraitHairGeometry(lm,a,frame,face,matte) {
   const contour=[28,29,30,31,32,33,34,35,0,1,2,3,4,5,6,7,8];
   const usableMatte=Number.isInteger(matte?.width)&&Number.isInteger(matte?.height)&&matte.width>1&&matte.height>1&&matte.alpha?.length===matte.width*matte.height;
