@@ -242,17 +242,19 @@ async function scan() {
     if(epoch!==scanEpoch)return;
     stopCamera();scanInstruction('Все снимки готовы. Несколько раз проверяем волосы, шею и одежду. Это может занять до 30 секунд.',true);
     $('captureStep').textContent='Анализ снимков';$('captureCountdown').textContent='';
-    // Segment the same frontal frame that drives the face mesh.  A separate
-    // portrait frame often has a different head tilt and can never join the
-    // animated chin without a visible seam.
-    const front=views.find(view=>view.role==='front');front.anchors=await fitPortrait(front,message=>scanInstruction(message),abort.signal);
+    const front=views.find(view=>view.role==='front'),portrait=views.find(view=>view.role==='portrait');
+    front.anchors=await fitPortrait(front,message=>scanInstruction(message),abort.signal);
+    if(portrait){
+      scanInstruction('Отдельно уточняем шею, футболку и края плеч.',true);
+      portrait.anchors=await fitPortrait(portrait,message=>scanInstruction(message),abort.signal);
+    }
     if(epoch!==scanEpoch)return;
     scanInstruction('Создаём объёмную модель прямо на устройстве.',true);
     const model=LocalAvatar.create(THREE,views,avatarTopology);
-    try {await api('avatar',JSON.stringify({version:7,views:views.map(({role,yaw,landmarks,photo})=>({role,yaw,landmarks,photo})),anchors:front.anchors}),true,60000,abort.signal);}
+    try {await api('avatar',JSON.stringify({version:7,views:views.map(({role,yaw,landmarks,photo})=>({role,yaw,landmarks,photo})),anchors:(portrait||front).anchors}),true,60000,abort.signal);}
     catch(error){model.dispose();throw error;}
     if(epoch!==scanEpoch){model.dispose();return;}
-    installModel(model);showPortraitCutout(front);cancelScan();
+    installModel(model);showPortraitCutout(portrait||front);cancelScan();
     $('faceStatus').textContent='Локальный 3D-аватар готов';$('cameraHint').textContent='Аватар создан на этом устройстве. Проверьте поворот и запишите голос.';
     scanInstruction('Ваш аватар готов. Фотографии никуда не отправлялись.',true);
   } catch(error){if(epoch===scanEpoch){cancelScan();throw error;}}
@@ -687,11 +689,13 @@ async function restoreAvatar() {
     const saved=await api('avatar');if(!saved||restoringEpoch!==scanEpoch)return;
     if(saved.version===7){
       $('faceStatus').textContent='Восстанавливаем локальный аватар…';await dependencies();
-      const views=await Promise.all(saved.views.map(async view=>{const image=new Image();image.src=view.photo;await image.decode();const canvas=document.createElement('canvas');canvas.width=image.width;canvas.height=image.height;canvas.getContext('2d').drawImage(image,0,0);return {...view,canvas,anchors:view.role==='front'?saved.anchors:undefined};}));
-      const front=views.find(view=>view.role==='front');if(front){front.anchors=await fitPortrait(front,message=>{if(restoringEpoch===scanEpoch)$('faceStatus').textContent=message;},abort.signal);}
+      const views=await Promise.all(saved.views.map(async view=>{const image=new Image();image.src=view.photo;await image.decode();const canvas=document.createElement('canvas');canvas.width=image.width;canvas.height=image.height;canvas.getContext('2d').drawImage(image,0,0);return {...view,canvas,anchors:view.role==='portrait'?saved.anchors:undefined};}));
+      const front=views.find(view=>view.role==='front'),portrait=views.find(view=>view.role==='portrait');
+      if(front)front.anchors=await fitPortrait(front,message=>{if(restoringEpoch===scanEpoch)$('faceStatus').textContent=message;},abort.signal);
+      if(portrait)portrait.anchors=await fitPortrait(portrait,message=>{if(restoringEpoch===scanEpoch)$('faceStatus').textContent='Проверяем шею и плечи: '+message.toLowerCase();},abort.signal);
       if(restoringEpoch!==scanEpoch)return;
       installModel(LocalAvatar.create(THREE,views,avatarTopology));
-      showPortraitCutout(front);
+      showPortraitCutout(portrait||front);
       $('faceStatus').textContent='Локальный 3D-аватар загружен';$('cameraHint').textContent='Аватар хранится на этом устройстве.';return;
     }
     if(saved.version!==6){

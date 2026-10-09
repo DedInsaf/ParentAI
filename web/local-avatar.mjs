@@ -54,6 +54,7 @@ export class LocalAvatar {
     // pitch and exposure, which created the visible cut below the chin.
     const bust=front.matte&&front.anchors?front:portrait;
     if(!bust?.matte)throw new Error('Не удалось выделить волосы, шею и одежду.');
+    const bodyView=portrait?.matte&&portrait.anchors?portrait:bust;
     const indices=[];
     for(let i=0;i<topology.length;i+=3){const tri=[topology[i].start,topology[i].end,topology[i+1].end];if(tri.every(n=>n<468))indices.push(...tri);}
     const filled=closeFaceOpenings(front.landmarks,indices,false),points=filled.points;
@@ -87,33 +88,37 @@ export class LocalAvatar {
       const scale=Math.abs(base[454*3]-base[234*3])/portraitWidth,vertical=Math.abs(base[152*3+1]-base[10*3+1])/portraitHeight;
       const aspect=vertical/scale,nose=bust.landmarks[1];
       const frame={nose:{x:nose.x-base[1*3]/scale,y:nose.y+base[1*3+1]/vertical},aspect,scale};
-      // Separate captures do not have exactly the same nose-to-chin distance.
-      // The bust must meet the generated face at the chin; otherwise the same
-      // mathematically valid projection leaves a visible horizontal gap.
-      const portraitChin=bust.landmarks[152],bodyFrame={nose:{x:portraitChin.x-base[152*3]/scale,y:portraitChin.y+base[152*3+1]/vertical},aspect,scale};
+      // Fit the wide portrait independently and pin its chin to the animated
+      // head. This preserves the full captured shoulders even though the
+      // portrait was taken farther from the camera.
+      const bodyWidth=Math.max(.01,Math.abs(bodyView.landmarks[454].x-bodyView.landmarks[234].x)),bodyHeight=Math.max(.01,Math.abs(bodyView.landmarks[152].y-bodyView.landmarks[10].y));
+      const bodyScale=Math.abs(base[454*3]-base[234*3])/bodyWidth,bodyVertical=Math.abs(base[152*3+1]-base[10*3+1])/bodyHeight,bodyChin=bodyView.landmarks[152];
+      const bodyFrame={nose:{x:bodyChin.x-base[152*3]/bodyScale,y:bodyChin.y+base[152*3+1]/bodyVertical},aspect:bodyVertical/bodyScale,scale:bodyScale};
       // Keep the exact photographed colour through the jaw, neck and shirt.
       // Repainting the upper neck produced a horizontal band under the chin.
-      const portraitTexture=new THREE.CanvasTexture(portraitCutout(bust));portraitTexture.colorSpace=THREE.SRGBColorSpace;
-      const portraitMaterial=new THREE.MeshStandardMaterial({map:portraitTexture,roughness:1,side:THREE.DoubleSide,transparent:true,alphaTest:.02});
+      const headTexture=new THREE.CanvasTexture(portraitCutout(bust));headTexture.colorSpace=THREE.SRGBColorSpace;
+      const headMaterial=new THREE.MeshStandardMaterial({map:headTexture,roughness:1,side:THREE.DoubleSide,transparent:true,alphaTest:.02});
+      const bodyTexture=new THREE.CanvasTexture(portraitCutout(bodyView));bodyTexture.colorSpace=THREE.SRGBColorSpace;
+      const bodyMaterial=new THREE.MeshStandardMaterial({map:bodyTexture,roughness:1,side:THREE.DoubleSide,transparent:true,alphaTest:.02});
       const hairVolumeMaterial=new THREE.MeshStandardMaterial({color:hairSample,roughness:.95,side:THREE.DoubleSide});
       // The photographed front half already curves around the torso. Opaque
       // inner faces used to show through its transparent room gaps as straight
       // bars beside the neck. Keep those closure faces depth-neutral here.
       const hiddenRearSkin=new THREE.MeshBasicMaterial({transparent:true,opacity:0,depthWrite:false,colorWrite:false});
       const hiddenRearCloth=hiddenRearSkin.clone();
-      const bodyData=matteBodyGeometry(bust.landmarks,anchors,bodyFrame,base,bust.matte);
-      body.add(new THREE.Mesh(geometry(THREE,bodyData),[portraitMaterial,hiddenRearSkin,hiddenRearCloth]));
+      const bodyData=matteBodyGeometry(bodyView.landmarks,bodyView.anchors,bodyFrame,base,bodyView.matte);
+      body.add(new THREE.Mesh(geometry(THREE,bodyData),[bodyMaterial,hiddenRearSkin,hiddenRearCloth]));
       // Photo hair and rear hair volume share the exact upper face seam.  A
       // single connected mesh prevents the forehead crack that appeared when
       // two independently projected surfaces rotated by different depths.
       const hairData=portraitHairGeometry(bust.landmarks,anchors,frame,base,bust.matte);
       // The first rows include both forehead skin and hair from the same photo.
       // A hair-only alpha mask exposed the brown fallback skull as a solid band.
-      const hairMesh=new THREE.Mesh(geometry(THREE,hairData),[portraitMaterial,hairVolumeMaterial]);hairMesh.renderOrder=1;
+      const hairMesh=new THREE.Mesh(geometry(THREE,hairData),[headMaterial,hairVolumeMaterial]);hairMesh.renderOrder=1;
       pivot.add(hairMesh);
       for(const side of [-1,1]){
         const earData=portraitEarGeometry(bust.landmarks,anchors,frame,base,side);
-        pivot.add(new THREE.Mesh(geometry(THREE,earData),[portraitMaterial,skinMaterial]));
+        pivot.add(new THREE.Mesh(geometry(THREE,earData),[headMaterial,skinMaterial]));
       }
     }else{
       const hairData=hairGeometry(head,'short');
