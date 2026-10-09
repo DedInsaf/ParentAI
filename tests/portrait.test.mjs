@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {positionsFor} from '../web/core.mjs';
-import {defaultPortraitAnchors,portraitAnchorIssue,portraitBodyGeometry,matteBodyGeometry,photoHairPatchGeometry,portraitHairGeometry,portraitEarGeometry} from '../web/portrait-geometry.mjs';
+import {defaultPortraitAnchors,portraitAnchorIssue,portraitBodyGeometry,matteBodyGeometry,foreheadScalpGeometry,photoHairPatchGeometry,portraitHairGeometry,portraitEarGeometry} from '../web/portrait-geometry.mjs';
 import {fitPortraitAnchors,fitStablePortraitAnchors,combineCategoryMasks} from '../web/portrait-fit.mjs';
 import {OVAL} from '../web/head-geometry.mjs';
 
@@ -76,6 +76,16 @@ test('dense photo hair patch preserves frontal pixels and bends only in depth',(
   }
   const zs=hair.positions.filter((_,i)=>i%3===2);
   assert.ok(Math.max(...zs)-Math.min(...zs)>(lm[454].x-lm[234].x)*frame.scale*.08);
+});
+
+test('forehead scalp closes the central gap and tapers away at both temples',()=>{
+  const lm=fixture(),face=positionsFor(lm,1000,750),frame={nose:lm[1],aspect:.75,scale:4.2};
+  const width=200,height=200,data=new Uint8Array(width*height);
+  for(let y=5;y<Math.floor((lm[10].y-.02)*height);y++)for(let x=70;x<130;x++)data[y*width+x]=1;
+  const scalp=foreheadScalpGeometry(lm,frame,face,{data,width,height}),rows=scalp.rows;
+  assert.equal(scalp.columns,49);assert.equal(rows,5);
+  const reach=column=>{const a=column*rows*3,b=(column*rows+rows-1)*3;return Math.hypot(scalp.positions[b]-scalp.positions[a],scalp.positions[b+1]-scalp.positions[a+1]);};
+  assert.ok(reach(0)<1e-9);assert.ok(reach(scalp.columns-1)<1e-9);assert.ok(reach(Math.floor(scalp.columns/2))>0);
 });
 test('measured skin and clothing preserve a broad neck despite an open V-neck shirt',()=>{
   const lm=fixture(),width=200,height=200,data=new Uint8Array(width*height);

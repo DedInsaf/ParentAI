@@ -233,6 +233,52 @@ export function photoHairPatchGeometry(lm,a,frame,face,columns=49,rows=33) {
   }
   return {positions,uv,indices,left,right,top,bottom,columns,rows};
 }
+
+export function foreheadScalpGeometry(lm,frame,face,mask,columns=49,rows=5) {
+  const contour=[28,29,30,31,32,33,34,35,0,1,2,3,4,5,6,7,8],ids=contour.map(index=>OVAL[index]),arc=[0];
+  for(let i=1;i<ids.length;i++){
+    const p=lm[ids[i-1]],q=lm[ids[i]];arc.push(arc.at(-1)+Math.hypot(q.x-p.x,(q.y-p.y)*frame.aspect));
+  }
+  const validMask=Number.isInteger(mask?.width)&&Number.isInteger(mask?.height)&&mask.data?.length===mask.width*mask.height;
+  const cx=(lm[234].x+lm[454].x)/2,cy=(lm[10].y+lm[152].y)/2,fw=lm[454].x-lm[234].x,fh=lm[152].y-lm[10].y;
+  const seams=[],depths=[],rawReach=[];
+  for(let column=0;column<columns;column++){
+    const distance=arc.at(-1)*column/(columns-1);let segment=0;
+    while(segment<ids.length-2&&arc[segment+1]<distance)segment++;
+    const amount=(distance-arc[segment])/Math.max(.000001,arc[segment+1]-arc[segment]),p=mix(lm[ids[segment]],lm[ids[segment+1]],amount);
+    seams.push(p);depths.push(face[ids[segment]*3+2]*(1-amount)+face[ids[segment+1]*3+2]*amount);
+    if(!validMask){rawReach.push(0);continue;}
+    const dx=(p.x-cx)*mask.width,dy=(p.y-cy)*mask.height,length=Math.max(.000001,Math.hypot(dx,dy));
+    const sx=dx/length/mask.width,sy=dy/length/mask.height,maxSteps=Math.ceil(fw*mask.width*.26);let found=0;
+    for(let step=1;step<=maxSteps;step++){
+      const x=p.x+sx*step,y=p.y+sy*step,mx=Math.max(0,Math.min(mask.width-1,Math.floor(x*mask.width))),my=Math.max(0,Math.min(mask.height-1,Math.floor(y*mask.height)));
+      if(mask.data[my*mask.width+mx]===1){found=Math.min(maxSteps,step+3);break;}
+    }
+    rawReach.push(found);
+  }
+  // A sharp one-column reach change becomes a triangular hole when the curved
+  // head turns. Spread only a short, decaying overlap around detected hair.
+  const reaches=rawReach.map((value,i)=>{
+    let reach=value;
+    for(let offset=1;offset<=8;offset++){
+      const weight=Math.exp(-offset*.28);
+      reach=Math.max(reach,(rawReach[i-offset]||0)*weight,(rawReach[i+offset]||0)*weight);
+    }
+    return i===0||i===columns-1?0:reach;
+  });
+  const positions=[],uv=[],indices=[];
+  for(let column=0;column<columns;column++){
+    const p=seams[column],z=depths[column],dx=(p.x-cx)*(mask?.width||1),dy=(p.y-cy)*(mask?.height||1),length=Math.max(.000001,Math.hypot(dx,dy));
+    const reach=reaches[column],outer={x:p.x+dx/length/(mask?.width||1)*reach,y:p.y+dy/length/(mask?.height||1)*reach};
+    const sample={x:p.x*.82+cx*.18,y:p.y*.64+(lm[10].y+fh*.14)*.36};
+    for(let row=0;row<rows;row++){
+      const t=row/(rows-1),e=t*t*(3-2*t),point=mix(p,outer,e);
+      positions.push(...portraitPoint(point,frame,z+fw*frame.scale*(.003+.010*e)));uv.push(sample.x,1-sample.y);
+      if(column&&row){const a=(column-1)*rows+row-1,b=a+1,c=column*rows+row-1,d=c+1;indices.push(a,c,b,b,c,d);}
+    }
+  }
+  return {positions,uv,indices,columns,rows,reaches};
+}
 export function portraitHairGeometry(lm,a,frame,face,matte) {
   const contour=[28,29,30,31,32,33,34,35,0,1,2,3,4,5,6,7,8];
   const usableMatte=Number.isInteger(matte?.width)&&Number.isInteger(matte?.height)&&matte.width>1&&matte.height>1&&matte.alpha?.length===matte.width*matte.height;

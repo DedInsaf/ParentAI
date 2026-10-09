@@ -2,7 +2,7 @@ import {closeFaceOpenings, FACE_OPENINGS, mouthRig, neutralFacePositions} from '
 import {skullGeometry, earGeometry, neckGeometry, torsoGeometry, hairGeometry, OVAL} from './head-geometry.mjs';
 import {bakeFaceAtlas} from './face-atlas.mjs';
 import {mouthInteriorGeometry, mouthInteriorPositions} from './mouth-geometry.mjs';
-import {defaultPortraitAnchors, photoHairPatchGeometry, portraitEarGeometry, matteBodyGeometry} from './portrait-geometry.mjs';
+import {defaultPortraitAnchors, foreheadScalpGeometry, photoHairPatchGeometry, portraitEarGeometry, matteBodyGeometry} from './portrait-geometry.mjs';
 import {portraitAvatarTexture,portraitHairCutout} from './portrait-texture.mjs';
 
 const clamp=value=>Math.max(0,Math.min(.999999,value));
@@ -97,6 +97,8 @@ export class LocalAvatar {
       // neck edge with the measured skin tone while the shirt stays unchanged.
       const portraitTexture=new THREE.CanvasTexture(portraitAvatarTexture(bust,skinRgb));portraitTexture.colorSpace=THREE.SRGBColorSpace;
       const portraitMaterial=new THREE.MeshStandardMaterial({map:portraitTexture,roughness:1,side:THREE.DoubleSide,transparent:true,alphaTest:.02});
+      const scalpTexture=new THREE.CanvasTexture(bust.canvas);scalpTexture.colorSpace=THREE.SRGBColorSpace;
+      const scalpMaterial=new THREE.MeshStandardMaterial({map:scalpTexture,roughness:1,side:THREE.DoubleSide});
       const hairPhotoTexture=new THREE.CanvasTexture(portraitHairCutout(bust));hairPhotoTexture.colorSpace=THREE.SRGBColorSpace;
       const hairPhotoMaterial=new THREE.MeshStandardMaterial({map:hairPhotoTexture,roughness:1,side:THREE.FrontSide,transparent:true,alphaTest:.02});
       // The photographed front half already curves around the torso. Opaque
@@ -113,6 +115,8 @@ export class LocalAvatar {
         const rearMesh=new THREE.Mesh(geometry(THREE,rearCap),new THREE.MeshStandardMaterial({color:hairSample,roughness:.95,side:THREE.DoubleSide}));
         rearMesh.position.z-=fittedWidth*.10;pivot.add(rearMesh);
       }
+      const foreheadScalp=new THREE.Mesh(geometry(THREE,foreheadScalpGeometry(bust.landmarks,frame,base,bust.segmentation)),scalpMaterial);
+      foreheadScalp.renderOrder=1;pivot.add(foreheadScalp);
       const photoHairMesh=new THREE.Mesh(geometry(THREE,photoHair),hairPhotoMaterial);photoHairMesh.renderOrder=2;
       pivot.add(photoHairMesh);
       for(const side of [-1,1]){
