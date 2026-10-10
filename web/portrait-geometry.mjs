@@ -283,10 +283,9 @@ export function foreheadScalpGeometry(lm,frame,face,mask,columns=49,rows=5) {
   for(let column=0;column<columns;column++){
     const p=seams[column],z=depths[column],dx=(p.x-cx)*(mask?.width||1),dy=(p.y-cy)*(mask?.height||1),length=Math.max(.000001,Math.hypot(dx,dy));
     const reach=reaches[column],outer={x:p.x+dx/length/(mask?.width||1)*reach,y:p.y+dy/length/(mask?.height||1)*reach};
-    const sample={x:p.x*.82+cx*.18,y:p.y*.64+(lm[10].y+fh*.14)*.36};
     for(let row=0;row<rows;row++){
       const t=row/(rows-1),e=t*t*(3-2*t),point=mix(p,outer,e);
-      positions.push(...portraitPoint(point,frame,z+fw*frame.scale*(.003+.010*e)));uv.push(sample.x,1-sample.y);
+      positions.push(...portraitPoint(point,frame,z+fw*frame.scale*(.003+.010*e)));uv.push(point.x,1-point.y);
       if(column&&row){const a=(column-1)*rows+row-1,b=a+1,c=column*rows+row-1,d=c+1;indices.push(a,c,b,b,c,d);}
     }
   }

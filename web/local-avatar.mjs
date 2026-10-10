@@ -1,8 +1,8 @@
-import {closeFaceOpenings, FACE_OPENINGS, mouthRig, neutralFacePositions} from './core.mjs';
+import {closeFaceOpenings, FACE_OPENINGS, mouthRig, positionsFor} from './core.mjs';
 import {skullGeometry, earGeometry, neckGeometry, torsoGeometry, hairGeometry, OVAL} from './head-geometry.mjs';
 import {bakePortraitFaceAtlas} from './face-atlas.mjs';
 import {mouthInteriorGeometry, mouthInteriorPositions} from './mouth-geometry.mjs';
-import {defaultPortraitAnchors, photoHairPatchGeometry, portraitHairGeometry, portraitEarGeometry, matteBodyGeometry} from './portrait-geometry.mjs';
+import {defaultPortraitAnchors, foreheadScalpGeometry, photoHairPatchGeometry, portraitHairGeometry, portraitEarGeometry, matteBodyGeometry} from './portrait-geometry.mjs';
 import {portraitCutout,portraitHairCutout,portraitHeadCutout} from './portrait-texture.mjs';
 
 const clamp=value=>Math.max(0,Math.min(.999999,value));
@@ -58,9 +58,10 @@ export class LocalAvatar {
     const indices=[];
     for(let i=0;i<topology.length;i+=3){const tri=[topology[i].start,topology[i].end,topology[i+1].end];if(tri.every(n=>n<468))indices.push(...tri);}
     const filled=closeFaceOpenings(bust.landmarks,indices,false),points=filled.points;
-    // Remove the tiny yaw/roll left in a real capture before fitting the skull.
-    // This prevents a slightly off-centre scan from becoming a permanently skewed head.
-    const base=new Float32Array(neutralFacePositions(points,bust.canvas.width,bust.canvas.height));
+    // The portrait scan already enforces a frontal, level pose. Keeping its
+    // original projection makes the face share exact pixels with the photographed
+    // hair, jaw and neck instead of opening seams during a second neutralisation.
+    const base=new Float32Array(positionsFor(points,bust.canvas.width,bust.canvas.height));
     const faceGeometry=new THREE.BufferGeometry();
     faceGeometry.setAttribute('position',new THREE.BufferAttribute(base.slice(),3));
     faceGeometry.setAttribute('uv',new THREE.BufferAttribute(new Float32Array(points.flatMap(p=>[p.x,1-p.y])),2));
@@ -93,31 +94,33 @@ export class LocalAvatar {
       const bodyFrame=frame;
       const headTexture=new THREE.CanvasTexture(portraitHeadCutout(bust));headTexture.colorSpace=THREE.SRGBColorSpace;
       const headMaterial=new THREE.MeshStandardMaterial({map:headTexture,roughness:1,side:THREE.DoubleSide,transparent:true,alphaTest:.06});
+      const foreheadBridge=foreheadScalpGeometry(bust.landmarks,frame,base,bust.segmentation);
       const photoHair=photoHairPatchGeometry(bust.landmarks,anchors,frame,base,65,41,{segmentation:bust.segmentation,matte:bust.matte});
-      const denseHairTexture=new THREE.CanvasTexture(portraitHairCutout(bust,.72,null,true));denseHairTexture.colorSpace=THREE.SRGBColorSpace;denseHairTexture.generateMipmaps=false;denseHairTexture.minFilter=THREE.LinearFilter;
-      const denseHairMaterial=new THREE.MeshBasicMaterial({map:denseHairTexture,side:THREE.FrontSide,transparent:true,alphaTest:.12,depthWrite:false});
+      const hairTexture=new THREE.CanvasTexture(portraitHairCutout(bust,.18));hairTexture.colorSpace=THREE.SRGBColorSpace;hairTexture.generateMipmaps=false;hairTexture.minFilter=THREE.LinearFilter;
+      const hairPhotoMaterial=new THREE.MeshStandardMaterial({map:hairTexture,roughness:1,side:THREE.DoubleSide,transparent:true,alphaTest:.01});
+      const denseHairTexture=new THREE.CanvasTexture(portraitHairCutout(bust,.50));denseHairTexture.colorSpace=THREE.SRGBColorSpace;denseHairTexture.generateMipmaps=false;denseHairTexture.minFilter=THREE.LinearFilter;
+      const denseHairMaterial=new THREE.MeshBasicMaterial({map:denseHairTexture,side:THREE.FrontSide,transparent:true,alphaTest:.01,depthWrite:false});
       const bodyTexture=new THREE.CanvasTexture(portraitCutout(bodyView));bodyTexture.colorSpace=THREE.SRGBColorSpace;
       const bodyMaterial=new THREE.MeshStandardMaterial({map:bodyTexture,roughness:1,side:THREE.DoubleSide,transparent:true,alphaTest:.02});
-      const hairVolumeMaterial=new THREE.MeshStandardMaterial({color:hairSample,roughness:.95,side:THREE.DoubleSide});
+      // The rear cap is visible around the side of a turned head. Rendering its
+      // inward/front-facing triangles made a dark polygon show through the
+      // transparent photo hair across the forehead.
+      const hairVolumeMaterial=new THREE.MeshStandardMaterial({color:hairSample,roughness:.95,side:THREE.BackSide});
       // The photographed front half already curves around the torso. Opaque
       // inner faces used to show through its transparent room gaps as straight
       // bars beside the neck. Keep those closure faces depth-neutral here.
       const hiddenRearSkin=new THREE.MeshBasicMaterial({transparent:true,opacity:0,depthWrite:false,colorWrite:false});
       const hiddenRearCloth=hiddenRearSkin.clone();
-      // A recessed fitted neck is visible only through sub-pixel gaps opened by
-      // idle head motion. The photographed neck remains in front and preserves
-      // the real width, lighting and collar.
-      const seamNeckMaterial=skinMaterial.clone();seamNeckMaterial.side=THREE.DoubleSide;
-      body.add(new THREE.Mesh(geometry(THREE,neckGeometry(head)),seamNeckMaterial));
       const bodyData=matteBodyGeometry(bodyView.landmarks,bodyView.anchors,bodyFrame,base,bodyView.matte);
       body.add(new THREE.Mesh(geometry(THREE,bodyData),[bodyMaterial,hiddenRearSkin,hiddenRearCloth]));
+      pivot.add(new THREE.Mesh(geometry(THREE,foreheadBridge),headMaterial));
       // Photo hair and rear hair volume share the exact upper face seam.  A
       // single connected mesh prevents the forehead crack that appeared when
       // two independently projected surfaces rotated by different depths.
       const hairData=portraitHairGeometry(bust.landmarks,anchors,frame,base,bust.matte);
       // Both visible hair layers use the semantic hair matte. A full-person
       // alpha left a pale rectangular sheet beside the real hairstyle.
-      const hairMesh=new THREE.Mesh(geometry(THREE,hairData),[headMaterial,hairVolumeMaterial]);hairMesh.renderOrder=1;
+      const hairMesh=new THREE.Mesh(geometry(THREE,hairData),[hairPhotoMaterial,hairVolumeMaterial]);hairMesh.renderOrder=1;
       pivot.add(hairMesh);
       // A dense photo-aligned front layer preserves the true width and top
       // silhouette of the hairstyle. The connected mesh underneath supplies

@@ -110,6 +110,12 @@ test('forehead scalp closes the central gap and tapers away at both temples',()=
   assert.equal(scalp.columns,49);assert.equal(rows,5);
   const reach=column=>{const a=column*rows*3,b=(column*rows+rows-1)*3;return Math.hypot(scalp.positions[b]-scalp.positions[a],scalp.positions[b+1]-scalp.positions[a+1]);};
   assert.ok(reach(0)<1e-9);assert.ok(reach(scalp.columns-1)<1e-9);assert.ok(reach(Math.floor(scalp.columns/2))>0);
+  // The bridge must sample the exact photographed point it occupies. Sampling
+  // one repeated forehead colour creates a visible triangular sticker.
+  for(let i=0;i<scalp.positions.length/3;i++){
+    assert.ok(Math.abs(scalp.positions[i*3]-(scalp.uv[i*2]-frame.nose.x)*frame.scale)<1e-9);
+    assert.ok(Math.abs(scalp.positions[i*3+1]+(1-scalp.uv[i*2+1]-frame.nose.y)*frame.aspect*frame.scale)<1e-9);
+  }
 });
 test('measured skin and clothing preserve a broad neck despite an open V-neck shirt',()=>{
   const lm=fixture(),width=200,height=200,data=new Uint8Array(width*height);
