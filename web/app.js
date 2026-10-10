@@ -6,6 +6,7 @@ import {ModelAvatar} from './avatar-model.mjs';
 import {LocalAvatar} from './local-avatar.mjs';
 import {fitStablePortraitAnchors} from './portrait-fit.mjs';
 import {portraitCutout} from './portrait-texture.mjs';
+import {packPortraitAnalysis,unpackPortraitAnalysis} from './avatar-persistence.mjs';
 const $ = id => document.getElementById(id);
 const video = $('camera');
 const fail = e => { $('error').hidden = false; $('error').textContent = e.message || String(e); };
@@ -15,7 +16,7 @@ let token, status = {}, stream, detector, avatarTopology, THREE, renderer, scene
 let audioContext, analyser, audioSource, pcm, playing = false, recording = false, scanning = false;
 let running = false, paused = false, lastFrame = -1, lastDetect = 0, lastResult = null, lastSeenFrame = 0;
 let lastMediaTimestamp = -1;
-let dependenciesPromise, detectError = false, connecting = false, playbackId = 0, audioKind = '';
+let avatarDependenciesPromise,dependenciesPromise, detectError = false, connecting = false, playbackId = 0, audioKind = '';
 const presence = new Presence();
 const pendingActions = new Set();
 let online = false, recordCancelled = false, recordingStream, recordingAbort, referenceRejected = false, previewUrl, renderTime = 0;
@@ -116,20 +117,25 @@ async function poll() {
 }
 async function pollLoop() { await poll(); setTimeout(pollLoop, 2000); }
 
-async function dependencies() {
-  if (!dependenciesPromise) dependenciesPromise = (async () => {
-    $('cameraHint').textContent = 'Загрузка распознавания лица…';
+async function avatarDependencies(){
+  if(!avatarDependenciesPromise)avatarDependenciesPromise=(async()=>{
     const [three, vision] = await Promise.all([
       import('./vendor/three.module.js'),
       import('./vendor/vision/vision_bundle.mjs'),
     ]);
-    THREE = three;
+    THREE=three;avatarTopology=vision.FaceLandmarker.FACE_LANDMARKS_TESSELATION;
+    if(!renderer)initScene();return vision;
+  })().catch(error=>{avatarDependenciesPromise=null;throw error;});
+  return avatarDependenciesPromise;
+}
+async function dependencies() {
+  if (!dependenciesPromise) dependenciesPromise = (async () => {
+    $('cameraHint').textContent = 'Загрузка распознавания лица…';
+    const vision=await avatarDependencies();
     const files = await vision.FilesetResolver.forVisionTasks('/vendor/vision/wasm');
     const options = {baseOptions: {modelAssetPath: '/vendor/vision/face_landmarker.task', delegate: 'GPU'}, runningMode: 'VIDEO', numFaces: 2};
     try { detector = await vision.FaceLandmarker.createFromOptions(files, options); }
     catch { options.baseOptions.delegate = 'CPU'; detector = await vision.FaceLandmarker.createFromOptions(files, options); }
-    avatarTopology=vision.FaceLandmarker.FACE_LANDMARKS_TESSELATION;
-    if (!renderer) initScene();
     return vision;
   })().catch(e => { dependenciesPromise = null; throw new Error('Не удалось загрузить 3D/распознавание. Проверьте загрузку ресурсов в разделе «Состояние» и повторите. ' + e.message); });
   return dependenciesPromise;
@@ -251,12 +257,12 @@ async function scan() {
     if(epoch!==scanEpoch)return;
     scanInstruction('Создаём объёмную модель прямо на устройстве.',true);
     const model=LocalAvatar.create(THREE,views,avatarTopology);
-    try {await api('avatar',JSON.stringify({version:7,views:views.map(({role,yaw,landmarks,photo})=>({role,yaw,landmarks,photo})),anchors:(portrait||front).anchors}),true,60000,abort.signal);}
+    try {await api('avatar',JSON.stringify({version:7,views:views.map(({role,yaw,landmarks,photo})=>({role,yaw,landmarks,photo})),anchors:(portrait||front).anchors,portraitAnalysis:packPortraitAnalysis(portrait||front)}),true,60000,abort.signal);}
     catch(error){model.dispose();throw error;}
     if(epoch!==scanEpoch){model.dispose();return;}
     installModel(model);showPortraitCutout(portrait||front);cancelScan();
-    $('faceStatus').textContent='Локальный 3D-аватар готов';$('cameraHint').textContent='Аватар создан на этом устройстве. Проверьте поворот и запишите голос.';
-    scanInstruction('Ваш аватар готов. Фотографии никуда не отправлялись.',true);
+    $('faceStatus').textContent='Черновик 3D-аватара создан';$('cameraHint').textContent='Черновик сохранён на этом устройстве. Проверьте лицо, волосы, шею и поворот.';
+    scanInstruction('Черновик аватара создан и сохранён. Фотографии никуда не отправлялись.',true);
   } catch(error){if(epoch===scanEpoch){cancelScan();throw error;}}
 }
 function cancelScan() {
@@ -688,15 +694,20 @@ async function restoreAvatar() {
   try {
     const saved=await api('avatar');if(!saved||restoringEpoch!==scanEpoch)return;
     if(saved.version===7){
-      $('faceStatus').textContent='Восстанавливаем локальный аватар…';await dependencies();
+      $('faceStatus').textContent='Восстанавливаем локальный аватар…';await avatarDependencies();
       const views=await Promise.all(saved.views.map(async view=>{const image=new Image();image.src=view.photo;await image.decode();const canvas=document.createElement('canvas');canvas.width=image.width;canvas.height=image.height;canvas.getContext('2d').drawImage(image,0,0);return {...view,canvas,anchors:view.role==='portrait'?saved.anchors:undefined};}));
       const front=views.find(view=>view.role==='front'),portrait=views.find(view=>view.role==='portrait');
-      if(front)front.anchors=await fitPortrait(front,message=>{if(restoringEpoch===scanEpoch)$('faceStatus').textContent=message;},abort.signal);
-      if(portrait)portrait.anchors=await fitPortrait(portrait,message=>{if(restoringEpoch===scanEpoch)$('faceStatus').textContent='Проверяем шею и плечи: '+message.toLowerCase();},abort.signal);
+      const bust=portrait||front;
+      if(saved.portraitAnalysis){const analysis=unpackPortraitAnalysis(saved.portraitAnalysis);bust.segmentation=analysis.segmentation;bust.matte=analysis.matte;}
+      else {
+        await dependencies();bust.anchors=await fitPortrait(bust,message=>{if(restoringEpoch===scanEpoch)$('faceStatus').textContent='Проверяем сохранённый силуэт: '+message.toLowerCase();},abort.signal);
+        saved.anchors=bust.anchors;saved.portraitAnalysis=packPortraitAnalysis(bust);
+        await api('avatar',JSON.stringify(saved),true,60000,abort.signal);
+      }
       if(restoringEpoch!==scanEpoch)return;
       installModel(LocalAvatar.create(THREE,views,avatarTopology));
       showPortraitCutout(portrait||front);
-      $('faceStatus').textContent='Локальный 3D-аватар загружен';$('cameraHint').textContent='Аватар хранится на этом устройстве.';return;
+      $('faceStatus').textContent='Черновик 3D-аватара загружен';$('cameraHint').textContent='Черновик хранится на этом устройстве и доступен после перезапуска.';return;
     }
     if(saved.version!==6){
       $('faceStatus').textContent='Нужен новый скан';

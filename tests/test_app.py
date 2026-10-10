@@ -120,6 +120,21 @@ class RuntimeTests(unittest.TestCase):
         with self.assertRaises(ValueError): self.r.avatar(wrong)
         self.assertEqual(self.r.avatar(),saved)
 
+    def test_local_avatar_preserves_compact_portrait_analysis(self):
+        import base64
+        value=self.frontal_profile();points=value['views'][0]['landmarks'];photo=value['views'][0]['photo']
+        poses=[('front',0),('left',.16),('right',-.16),('left_outer',.30),('right_outer',-.30),('portrait',0)]
+        raw=bytes([0,1,3,4,2,1]);alpha=bytes([0,32,128,192,254,255])
+        profile={'version':7,'views':[{'role':role,'yaw':yaw,'landmarks':points,'photo':photo} for role,yaw in poses],
+                 'anchors':value['anchors'],'portraitAnalysis':{
+                     'segmentation':{'width':3,'height':2,'data':base64.b64encode(raw).decode()},
+                     'matte':{'width':2,'height':3,'alpha':base64.b64encode(alpha).decode()}}}
+        self.r.avatar(profile)
+        self.assertEqual(self.r.avatar()['portraitAnalysis'],profile['portraitAnalysis'])
+        broken=__import__('copy').deepcopy(profile);broken['portraitAnalysis']['matte']['alpha']=base64.b64encode(alpha[:-1]).decode()
+        with self.assertRaises(ValueError):self.r.avatar(broken)
+        self.assertEqual(self.r.avatar()['portraitAnalysis'],profile['portraitAnalysis'])
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)

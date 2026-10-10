@@ -190,7 +190,7 @@ export function portraitHairContour(a,t) {
 // system, so an orthographic frontal render reproduces the captured hairstyle
 // instead of stretching it between a few radial strips. Depth bends only the
 // surface away from the camera and therefore appears when the head turns.
-export function photoHairPatchGeometry(lm,a,frame,face,columns=49,rows=33) {
+export function photoHairPatchGeometry(lm,a,frame,face,columns=49,rows=33,support=null) {
   const faceWidth=lm[454].x-lm[234].x,faceHeight=lm[152].y-lm[10].y;
   const cx=(lm[234].x+lm[454].x)/2;
   // Trust the cleaned measured hairstyle. Large synthetic margins created
@@ -204,9 +204,33 @@ export function photoHairPatchGeometry(lm,a,frame,face,columns=49,rows=33) {
   const bottom=Math.min(.995,Math.max(a.templeLeft.y,a.templeRight.y,lm[234].y,lm[454].y)+faceHeight*.02);
   const edgeZ=OVAL.reduce((sum,id)=>sum+face[id*3+2],0)/OVAL.length,worldWidth=faceWidth*frame.scale;
   const foreheadZ=face[10*3+2],sideZ=(face[234*3+2]+face[454*3+2])/2;
+  const segmentation=support?.segmentation,matte=support?.matte;
+  const validSegmentation=Number.isInteger(segmentation?.width)&&Number.isInteger(segmentation?.height)&&segmentation.data?.length===segmentation.width*segmentation.height;
+  const validMatte=Number.isInteger(matte?.width)&&Number.isInteger(matte?.height)&&matte.alpha?.length===matte.width*matte.height;
+  // A rectangular carrier turns a dark side lock into a straight hanging
+  // card. Measure the photographed hair span independently at every row so the
+  // mesh boundary itself follows the hairstyle before alpha blending begins.
+  const rowBounds=Array.from({length:rows},(_,row)=>{
+    if(!validSegmentation)return {left,right};
+    const y=top+(bottom-top)*row/(rows-1),my=Math.min(segmentation.height-1,Math.floor(y*segmentation.height));
+    const from=Math.max(0,Math.floor(left*segmentation.width)),to=Math.min(segmentation.width-1,Math.ceil(right*segmentation.width));let first=-1,last=-1;
+    for(let x=from;x<=to;x++){
+      if(segmentation.data[my*segmentation.width+x]!==1)continue;
+      if(validMatte){const ax=Math.min(matte.width-1,Math.floor((x+.5)/segmentation.width*matte.width)),ay=Math.min(matte.height-1,Math.floor(y*matte.height));if(matte.alpha[ay*matte.width+ax]<.72)continue;}
+      if(first<0)first=x;last=x;
+    }
+    if(first<0)return {left:cx,right:cx};
+    return {left:Math.max(left,(first-.35)/segmentation.width),right:Math.min(right,(last+1.35)/segmentation.width)};
+  });
+  for(let pass=0;pass<2;pass++)for(let row=1;row<rows-1;row++){
+    const current=rowBounds[row],before=rowBounds[row-1],after=rowBounds[row+1];
+    if(current.right-current.left<.001)continue;
+    current.left=before.right-before.left<.001?current.left:current.left*.6+(before.left+after.left)*.2;
+    current.right=before.right-before.left<.001?current.right:current.right*.6+(before.right+after.right)*.2;
+  }
   const positions=[],uv=[],indices=[];
   for(let row=0;row<rows;row++)for(let column=0;column<columns;column++){
-    const u=column/(columns-1),v=row/(rows-1),p={x:left+(right-left)*u,y:top+(bottom-top)*v};
+    const u=column/(columns-1),v=row/(rows-1),bounds=rowBounds[row],p={x:bounds.left+(bounds.right-bounds.left)*u,y:top+(bottom-top)*v};
     const side=Math.abs((p.x-cx)/Math.max(.001,(right-left)*.5));
     const crown=1-Math.min(1,Math.hypot(side*.72,(v-.38)*.72));
     const scalpZ=edgeZ+worldWidth*(.12*crown-.12*side*side-.015*v);
@@ -214,7 +238,11 @@ export function photoHairPatchGeometry(lm,a,frame,face,columns=49,rows=33) {
     const joinT=Math.max(0,Math.min(1,(v-.22)/.68)),join=joinT*joinT*(3-2*joinT);
     const z=scalpZ*(1-join)+joinTarget*join;
     positions.push(...portraitPoint(p,frame,z));uv.push(p.x,1-p.y);
-    if(row&&column){const a0=(row-1)*columns+column-1,b=a0+1,c=row*columns+column-1,d=c+1;indices.push(a0,c,b,b,c,d);}
+    if(row&&column){
+      const a0=(row-1)*columns+column-1,b=a0+1,c=row*columns+column-1,d=c+1;
+      const carrier=!support||(rowBounds[row-1].right-rowBounds[row-1].left>.001&&rowBounds[row].right-rowBounds[row].left>.001);
+      if(carrier)indices.push(a0,c,b,b,c,d);
+    }
   }
   return {positions,uv,indices,left,right,top,bottom,columns,rows};
 }

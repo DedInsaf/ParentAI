@@ -162,6 +162,25 @@ class Runtime:
                     raise ValueError('Некорректные углы локального сканирования.')
                 anchors=validate_anchors(value.get('anchors'),saved_views[-1]['landmarks'])
                 saved={'version':7,'engine':'mediapipe-local','views':saved_views,'anchors':anchors}
+                analysis=value.get('portraitAnalysis')
+                if analysis is not None:
+                    if not isinstance(analysis,dict):
+                        raise ValueError('Некорректный сохранённый анализ портрета.')
+                    clean={}
+                    for name,field in (('segmentation','data'),('matte','alpha')):
+                        plane=analysis.get(name)
+                        if not isinstance(plane,dict):
+                            raise ValueError('Некорректный сохранённый анализ портрета.')
+                        width,height,encoded=plane.get('width'),plane.get('height'),plane.get(field)
+                        if (not isinstance(width,int) or not isinstance(height,int) or width<1 or height<1
+                                or width*height>2_100_000 or not isinstance(encoded,str) or len(encoded)>3_000_004):
+                            raise ValueError('Некорректный сохранённый анализ портрета.')
+                        try: raw=base64.b64decode(encoded,validate=True)
+                        except (ValueError,TypeError): raise ValueError('Некорректный сохранённый анализ портрета.') from None
+                        if len(raw)!=width*height:
+                            raise ValueError('Некорректный сохранённый анализ портрета.')
+                        clean[name]={'width':width,'height':height,field:encoded}
+                    saved['portraitAnalysis']=clean
             atomic_json(path, saved)
             return {'ok': True}
 

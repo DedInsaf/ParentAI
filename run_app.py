@@ -11,7 +11,7 @@ def main():
     parser.add_argument('--desktop', action='store_true', help='Окно pywebview (доступ к камере зависит от ОС)')
     parser.add_argument('--no-browser', action='store_true')
     parser.add_argument('--no-models', action='store_true', help='Диагностика интерфейса без загрузки моделей')
-    parser.add_argument('--port', type=int, default=8766)
+    parser.add_argument('--port', type=int, default=8767)
     args = parser.parse_args()
     runtime = Runtime()
     try:

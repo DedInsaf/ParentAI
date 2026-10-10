@@ -49,9 +49,9 @@ export class LocalAvatar {
   static create(THREE,views,topology){
     const front=views.find(v=>v.role==='front'),portrait=views.find(v=>v.role==='portrait');
     if(!front)throw new Error('Не хватает фронтального снимка.');
-    // One portrait coordinate system owns the whole visible person. The close
-    // scan only contributes sharper pixels to the face atlas; it never defines
-    // a second jaw/neck projection that could split the avatar at the chin.
+    // One portrait coordinate system and one photograph own the whole visible
+    // person. Warping the close first frame onto the final portrait created
+    // seams whenever distance, light, expression or hairstyle changed.
     const bust=portrait?.matte&&portrait.anchors?portrait:front;
     if(!bust?.matte)throw new Error('Не удалось выделить волосы, шею и одежду.');
     const bodyView=bust;
@@ -65,7 +65,7 @@ export class LocalAvatar {
     faceGeometry.setAttribute('position',new THREE.BufferAttribute(base.slice(),3));
     faceGeometry.setAttribute('uv',new THREE.BufferAttribute(new Float32Array(points.flatMap(p=>[p.x,1-p.y])),2));
     faceGeometry.setIndex(filled.indices);faceGeometry.computeVertexNormals();
-    const atlas=bakePortraitFaceAtlas(bust,front,filled.indices);
+    const atlas=bakePortraitFaceAtlas(bust,null,filled.indices);
     const texture=new THREE.CanvasTexture(atlas);texture.colorSpace=THREE.SRGBColorSpace;
     const face=new THREE.Mesh(faceGeometry,new THREE.MeshStandardMaterial({map:texture,roughness:1,metalness:0,side:THREE.DoubleSide}));
     const rig=mouthRig(points),mouthWidth=Math.abs(base[308*3]-base[78*3]),cavityIds=FACE_OPENINGS[2];
@@ -93,10 +93,9 @@ export class LocalAvatar {
       const bodyFrame=frame;
       const headTexture=new THREE.CanvasTexture(portraitHeadCutout(bust));headTexture.colorSpace=THREE.SRGBColorSpace;
       const headMaterial=new THREE.MeshStandardMaterial({map:headTexture,roughness:1,side:THREE.DoubleSide,transparent:true,alphaTest:.06});
-      const hairTexture=new THREE.CanvasTexture(portraitHairCutout(bust));hairTexture.colorSpace=THREE.SRGBColorSpace;hairTexture.generateMipmaps=false;hairTexture.minFilter=THREE.LinearFilter;
-      const hairPhotoMaterial=new THREE.MeshStandardMaterial({map:hairTexture,roughness:1,side:THREE.DoubleSide,transparent:true,alphaTest:.025});
-      const denseHairTexture=new THREE.CanvasTexture(portraitHairCutout(bust,.78));denseHairTexture.colorSpace=THREE.SRGBColorSpace;denseHairTexture.generateMipmaps=false;denseHairTexture.minFilter=THREE.LinearFilter;
-      const denseHairMaterial=new THREE.MeshStandardMaterial({map:denseHairTexture,roughness:1,side:THREE.DoubleSide,transparent:true,alphaTest:.08,depthWrite:false});
+      const photoHair=photoHairPatchGeometry(bust.landmarks,anchors,frame,base,65,41,{segmentation:bust.segmentation,matte:bust.matte});
+      const denseHairTexture=new THREE.CanvasTexture(portraitHairCutout(bust,.72,null,true));denseHairTexture.colorSpace=THREE.SRGBColorSpace;denseHairTexture.generateMipmaps=false;denseHairTexture.minFilter=THREE.LinearFilter;
+      const denseHairMaterial=new THREE.MeshBasicMaterial({map:denseHairTexture,side:THREE.FrontSide,transparent:true,alphaTest:.12,depthWrite:false});
       const bodyTexture=new THREE.CanvasTexture(portraitCutout(bodyView));bodyTexture.colorSpace=THREE.SRGBColorSpace;
       const bodyMaterial=new THREE.MeshStandardMaterial({map:bodyTexture,roughness:1,side:THREE.DoubleSide,transparent:true,alphaTest:.02});
       const hairVolumeMaterial=new THREE.MeshStandardMaterial({color:hairSample,roughness:.95,side:THREE.DoubleSide});
@@ -105,6 +104,11 @@ export class LocalAvatar {
       // bars beside the neck. Keep those closure faces depth-neutral here.
       const hiddenRearSkin=new THREE.MeshBasicMaterial({transparent:true,opacity:0,depthWrite:false,colorWrite:false});
       const hiddenRearCloth=hiddenRearSkin.clone();
+      // A recessed fitted neck is visible only through sub-pixel gaps opened by
+      // idle head motion. The photographed neck remains in front and preserves
+      // the real width, lighting and collar.
+      const seamNeckMaterial=skinMaterial.clone();seamNeckMaterial.side=THREE.DoubleSide;
+      body.add(new THREE.Mesh(geometry(THREE,neckGeometry(head)),seamNeckMaterial));
       const bodyData=matteBodyGeometry(bodyView.landmarks,bodyView.anchors,bodyFrame,base,bodyView.matte);
       body.add(new THREE.Mesh(geometry(THREE,bodyData),[bodyMaterial,hiddenRearSkin,hiddenRearCloth]));
       // Photo hair and rear hair volume share the exact upper face seam.  A
@@ -113,12 +117,11 @@ export class LocalAvatar {
       const hairData=portraitHairGeometry(bust.landmarks,anchors,frame,base,bust.matte);
       // Both visible hair layers use the semantic hair matte. A full-person
       // alpha left a pale rectangular sheet beside the real hairstyle.
-      const hairMesh=new THREE.Mesh(geometry(THREE,hairData),[hairPhotoMaterial,hairVolumeMaterial]);hairMesh.renderOrder=1;
+      const hairMesh=new THREE.Mesh(geometry(THREE,hairData),[headMaterial,hairVolumeMaterial]);hairMesh.renderOrder=1;
       pivot.add(hairMesh);
       // A dense photo-aligned front layer preserves the true width and top
       // silhouette of the hairstyle. The connected mesh underneath supplies
       // volume during a turn; this layer supplies the exact frontal pixels.
-      const photoHair=photoHairPatchGeometry(bust.landmarks,anchors,frame,base,65,41);
       const photoHairMesh=new THREE.Mesh(geometry(THREE,photoHair),denseHairMaterial);photoHairMesh.renderOrder=2;
       pivot.add(photoHairMesh);
       for(const side of [-1,1]){

@@ -85,6 +85,23 @@ test('dense photo hair patch preserves frontal pixels and bends only in depth',(
   assert.ok(Math.max(...zs)-Math.min(...zs)>(lm[454].x-lm[234].x)*frame.scale*.08);
 });
 
+test('dense photo hair carrier follows the measured hairstyle instead of forming a side card',()=>{
+  const lm=fixture(),a=defaultPortraitAnchors(lm),frame={nose:lm[1],aspect:.75,scale:4.2},face=positionsFor(lm,1000,750);
+  const width=200,height=200,data=new Uint8Array(width*height),alpha=new Float32Array(width*height);
+  // A hairstyle whose left edge recedes sharply below the crown used to leave
+  // a tall rectangular sheet beside the ear even though its texture was clear.
+  for(let y=10;y<72;y++){
+    const left=y<38?62:82,right=y<38?140:126;
+    for(let x=left;x<right;x++){data[y*width+x]=1;alpha[y*width+x]=1;}
+  }
+  const hair=photoHairPatchGeometry(lm,a,frame,face,49,33,{segmentation:{data,width,height},matte:{alpha,width,height}});
+  const xs=row=>Array.from({length:hair.columns},(_,column)=>hair.uv[(row*hair.columns+column)*2]);
+  const crown=xs(4),temple=xs(29);
+  assert.ok(Math.min(...temple)>Math.min(...crown)+.03);
+  assert.ok(Math.max(...temple)<Math.max(...crown)-.008);
+  assert.equal(hair.indices.length,(hair.columns-1)*(hair.rows-1)*6);
+});
+
 test('forehead scalp closes the central gap and tapers away at both temples',()=>{
   const lm=fixture(),face=positionsFor(lm,1000,750),frame={nose:lm[1],aspect:.75,scale:4.2};
   const width=200,height=200,data=new Uint8Array(width*height);
