@@ -1,5 +1,25 @@
 import {openedCategoryComponent,resampleAlpha} from './portrait-matte.mjs';
 
+// Transparent edge pixels still contain the colour of the photographed room.
+// When WebGL blends them over the avatar background that colour becomes a pale
+// halo. Borrow RGB from the nearest opaque hair pixel while preserving the
+// original soft alpha, so strands remain antialiased without carrying the wall.
+export function defringeHairEdges(rgba,width,height,radius=6){
+  if(!(rgba instanceof Uint8ClampedArray)||rgba.length!==width*height*4||width<1||height<1)return rgba;
+  const source=rgba.slice(),limit=Math.max(1,Math.min(12,Math.round(radius)));
+  for(let y=0;y<height;y++)for(let x=0;x<width;x++){
+    const i=(y*width+x)*4,alpha=source[i+3];if(alpha===0||alpha>=250)continue;
+    let match=-1;
+    for(let r=1;r<=limit&&match<0;r++){
+      const left=Math.max(0,x-r),right=Math.min(width-1,x+r),top=Math.max(0,y-r),bottom=Math.min(height-1,y+r);
+      for(let px=left;px<=right&&match<0;px++)for(const py of [top,bottom]){const j=(py*width+px)*4;if(source[j+3]>=250){match=j;break;}}
+      for(let py=top+1;py<bottom&&match<0;py++)for(const px of [left,right]){const j=(py*width+px)*4;if(source[j+3]>=250){match=j;break;}}
+    }
+    if(match>=0){rgba[i]=source[match];rgba[i+1]=source[match+1];rgba[i+2]=source[match+2];}
+  }
+  return rgba;
+}
+
 // Keep original RGB, coordinates and soft hair coverage. No pixel flooding,
 // category erosion or invented opaque fill outside the person.
 export function portraitCutout(view){
@@ -80,10 +100,12 @@ export function portraitHairCutout(view,minimumCoverage=.16){
       // semantic edge looked like a pasted-on strip even when its shape was
       // correct; blending the one-pixel neighbourhood reveals the matching
       // photographed forehead underneath.
-      const edgeT=Math.max(0,Math.min(1,(neighbours-3)/5)),edge=edgeT*edgeT*(3-2*edgeT);
+      const edgeT=Math.max(0,Math.min(1,(neighbours-3)/6)),edge=edgeT*edgeT*(3-2*edgeT);
       image.data[alphaIndex]=Math.round(255*(coverage*(1-smooth)+smooth)*edge);
     }
   }
+  const pixelScale=Math.max(canvas.width/mask.width,canvas.height/mask.height);
+  defringeHairEdges(image.data,canvas.width,canvas.height,pixelScale*2);
   ctx.putImageData(image,0,0);return canvas;
 }
 

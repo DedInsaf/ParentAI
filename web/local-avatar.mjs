@@ -1,6 +1,6 @@
 import {closeFaceOpenings, FACE_OPENINGS, mouthRig, positionsFor} from './core.mjs';
 import {skullGeometry, earGeometry, neckGeometry, torsoGeometry, hairGeometry, OVAL} from './head-geometry.mjs';
-import {bakePortraitFaceAtlas} from './face-atlas.mjs';
+import {bakeFaceAtlas} from './face-atlas.mjs';
 import {mouthInteriorGeometry, mouthInteriorPositions} from './mouth-geometry.mjs';
 import {defaultPortraitAnchors, foreheadScalpGeometry, photoHairPatchGeometry, portraitHairGeometry, portraitEarGeometry, matteBodyGeometry} from './portrait-geometry.mjs';
 import {portraitCutout,portraitHairCutout,portraitHeadCutout} from './portrait-texture.mjs';
@@ -66,7 +66,7 @@ export class LocalAvatar {
     faceGeometry.setAttribute('position',new THREE.BufferAttribute(base.slice(),3));
     faceGeometry.setAttribute('uv',new THREE.BufferAttribute(new Float32Array(points.flatMap(p=>[p.x,1-p.y])),2));
     faceGeometry.setIndex(filled.indices);faceGeometry.computeVertexNormals();
-    const atlas=bakePortraitFaceAtlas(bust,null,filled.indices);
+    const atlas=bakeFaceAtlas(bust,views,filled.indices);
     const texture=new THREE.CanvasTexture(atlas);texture.colorSpace=THREE.SRGBColorSpace;
     const face=new THREE.Mesh(faceGeometry,new THREE.MeshStandardMaterial({map:texture,roughness:1,metalness:0,side:THREE.DoubleSide}));
     const rig=mouthRig(points),mouthWidth=Math.abs(base[308*3]-base[78*3]),cavityIds=FACE_OPENINGS[2];
