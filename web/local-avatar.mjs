@@ -3,7 +3,7 @@ import {skullGeometry, earGeometry, neckGeometry, torsoGeometry, hairGeometry, O
 import {bakeFaceAtlas} from './face-atlas.mjs';
 import {mouthInteriorGeometry, mouthInteriorPositions} from './mouth-geometry.mjs';
 import {defaultPortraitAnchors, foreheadScalpGeometry, photoHairPatchGeometry, portraitHairGeometry, portraitEarGeometry, matteBodyGeometry} from './portrait-geometry.mjs';
-import {portraitCutout,portraitHairCutout,portraitHeadCutout} from './portrait-texture.mjs';
+import {portraitCutout,portraitHairCutout,portraitHairUnderlay,portraitHeadCutout} from './portrait-texture.mjs';
 
 const clamp=value=>Math.max(0,Math.min(.999999,value));
 
@@ -11,6 +11,7 @@ function geometry(THREE,data){
   const result=new THREE.BufferGeometry();
   result.setAttribute('position',new THREE.Float32BufferAttribute(data.positions,3));
   if(data.uv)result.setAttribute('uv',new THREE.Float32BufferAttribute(data.uv,2));
+  if(data.colors)result.setAttribute('color',new THREE.Float32BufferAttribute(data.colors,3));
   result.setIndex(data.indices);
   for(const group of data.groups||[])result.addGroup(group.start,group.count,group.materialIndex);
   result.computeVertexNormals();return result;
@@ -84,10 +85,10 @@ export class LocalAvatar {
     faceGeometry.setIndex(filled.indices);faceGeometry.computeVertexNormals();
     const atlas=bakeFaceAtlas(bust,views,filled.indices);
     const texture=new THREE.CanvasTexture(atlas);texture.colorSpace=THREE.SRGBColorSpace;
-    const face=new THREE.Mesh(faceGeometry,new THREE.MeshStandardMaterial({map:texture,roughness:1,metalness:0,side:THREE.DoubleSide}));
+    const face=new THREE.Mesh(faceGeometry,new THREE.MeshBasicMaterial({map:texture,side:THREE.DoubleSide}));
     const rig=mouthRig(points),mouthWidth=Math.abs(base[308*3]-base[78*3]),cavityIds=FACE_OPENINGS[2];
     const cavityData=mouthInteriorGeometry(base,cavityIds,mouthWidth),cavityGeometry=geometry(THREE,cavityData);
-    const cavity=new THREE.Mesh(cavityGeometry,new THREE.MeshBasicMaterial({color:0x241218,side:THREE.DoubleSide}));
+    const cavity=new THREE.Mesh(cavityGeometry,new THREE.MeshBasicMaterial({vertexColors:true,side:THREE.DoubleSide}));
     const head=skullGeometry(base),skin=faceSkinColor(THREE,bust,0xc58f78);
     const shellGeometry=geometry(THREE,head),colors=[],ctx=bust.canvas.getContext('2d',{willReadFrequently:true});
     for(let i=0;i<head.positions.length/3;i++){
@@ -95,8 +96,8 @@ export class LocalAvatar {
       const color=new THREE.Color().setRGB(rgb[0]/255,rgb[1]/255,rgb[2]/255,THREE.SRGBColorSpace).lerp(skin,1-head.rim[i]);colors.push(color.r,color.g,color.b);
     }
     shellGeometry.setAttribute('color',new THREE.Float32BufferAttribute(colors,3));
-    const skinMaterial=new THREE.MeshStandardMaterial({color:skin,roughness:1,side:THREE.FrontSide});
-    const shell=new THREE.Mesh(shellGeometry,new THREE.MeshStandardMaterial({vertexColors:true,roughness:1,side:THREE.DoubleSide}));
+    const skinMaterial=new THREE.MeshBasicMaterial({color:skin,side:THREE.FrontSide});
+    const shell=new THREE.Mesh(shellGeometry,new THREE.MeshBasicMaterial({vertexColors:true,side:THREE.DoubleSide}));
     const group=new THREE.Group(),pivot=new THREE.Group(),body=new THREE.Group();pivot.add(shell);
     const hairSample=segmentedColor(THREE,bust,1,0x37261c);
     const anchors=bust.anchors||defaultPortraitAnchors(bust.landmarks);
@@ -109,7 +110,7 @@ export class LocalAvatar {
       // centre and exposure preserves the continuous photographed silhouette.
       const bodyFrame=frame;
       const headTexture=new THREE.CanvasTexture(portraitHeadCutout(bust));headTexture.colorSpace=THREE.SRGBColorSpace;
-      const headMaterial=new THREE.MeshStandardMaterial({map:headTexture,roughness:1,side:THREE.DoubleSide,transparent:true,alphaTest:.06});
+      const headMaterial=new THREE.MeshBasicMaterial({map:headTexture,side:THREE.DoubleSide,transparent:true,alphaTest:.06});
       const foreheadBridge=foreheadScalpGeometry(bust.landmarks,frame,base,bust.segmentation);
       const photoHair=photoHairPatchGeometry(bust.landmarks,anchors,frame,base,65,41,{segmentation:bust.segmentation,matte:bust.matte});
       const hairTexture=new THREE.CanvasTexture(portraitHairCutout(bust,.18));hairTexture.colorSpace=THREE.SRGBColorSpace;hairTexture.generateMipmaps=false;hairTexture.minFilter=THREE.LinearFilter;
@@ -117,7 +118,7 @@ export class LocalAvatar {
       const denseHairTexture=new THREE.CanvasTexture(portraitHairCutout(bust,.50));denseHairTexture.colorSpace=THREE.SRGBColorSpace;denseHairTexture.generateMipmaps=false;denseHairTexture.minFilter=THREE.LinearFilter;
       const denseHairMaterial=new THREE.MeshBasicMaterial({map:denseHairTexture,side:THREE.FrontSide,transparent:true,alphaTest:.01,depthWrite:false});
       const bodyTexture=new THREE.CanvasTexture(portraitCutout(bodyView));bodyTexture.colorSpace=THREE.SRGBColorSpace;
-      const bodyMaterial=new THREE.MeshStandardMaterial({map:bodyTexture,roughness:1,side:THREE.DoubleSide,transparent:true,alphaTest:.02});
+      const bodyMaterial=new THREE.MeshBasicMaterial({map:bodyTexture,side:THREE.DoubleSide,transparent:true,alphaTest:.02});
       // The photographed front half already curves around the torso. Opaque
       // inner faces used to show through its transparent room gaps as straight
       // bars beside the neck. Keep those closure faces depth-neutral here.
@@ -134,6 +135,11 @@ export class LocalAvatar {
       // The rear cap is visible around the side of a turned head. It now keeps
       // the captured colour variation instead of becoming a smooth solid cap.
       const hairVolumeMaterial=new THREE.MeshStandardMaterial({map:volumeTexture,roughness:.95,side:THREE.BackSide});
+      const hairUnderlayTexture=new THREE.CanvasTexture(portraitHairUnderlay(bust));hairUnderlayTexture.colorSpace=THREE.SRGBColorSpace;hairUnderlayTexture.generateMipmaps=false;hairUnderlayTexture.minFilter=THREE.LinearFilter;
+      const hairUnderlayMaterial=new THREE.MeshBasicMaterial({map:hairUnderlayTexture,side:THREE.DoubleSide,transparent:true,alphaTest:.01,polygonOffset:true,polygonOffsetFactor:1,polygonOffsetUnits:1});
+      const invisibleHairRear=new THREE.MeshBasicMaterial({transparent:true,opacity:0,depthWrite:false,colorWrite:false});
+      const hairUnderlayMesh=new THREE.Mesh(geometry(THREE,hairData),[hairUnderlayMaterial,invisibleHairRear]);hairUnderlayMesh.renderOrder=0;
+      pivot.add(hairUnderlayMesh);
       // Both visible hair layers use the semantic hair matte. A full-person
       // alpha left a pale rectangular sheet beside the real hairstyle.
       const hairMesh=new THREE.Mesh(geometry(THREE,hairData),[hairPhotoMaterial,hairVolumeMaterial]);hairMesh.renderOrder=1;

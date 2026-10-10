@@ -71,6 +71,8 @@ export function portraitHeadCutout(view){
     }
     image.data[i*4+3]=supported?Math.round(alpha[i]*255):0;
   }
+  const matteScale=Math.max(canvas.width/view.matte.width,canvas.height/view.matte.height);
+  defringeHairEdges(image.data,canvas.width,canvas.height,matteScale*2);
   ctx.putImageData(image,0,0);return canvas;
 }
 
@@ -108,6 +110,27 @@ export function portraitHairCutout(view,minimumCoverage=.16){
   }
   const pixelScale=Math.max(canvas.width/mask.width,canvas.height/mask.height);
   defringeHairEdges(image.data,canvas.width,canvas.height,pixelScale*2);
+  ctx.putImageData(image,0,0);return canvas;
+}
+
+// A semantic underlay sits behind the soft photographed hair. It is invisible
+// in the frontal view, but prevents a bright room-coloured slit from opening
+// between overlapping hair surfaces when the head turns. Dense interior cells
+// stay opaque; the one-cell boundary remains soft and borrows interior colour.
+export function portraitHairUnderlay(view){
+  const canvas=portraitHairCutout(view,.18),mask=view?.segmentation;
+  if(!mask?.data?.length)return canvas;
+  const ctx=canvas.getContext('2d',{willReadFrequently:true}),image=ctx.getImageData(0,0,canvas.width,canvas.height);
+  const connected=openedCategoryComponent(mask.data,mask.width,mask.height,1,3);
+  const isHair=(mx,my)=>mx>=0&&my>=0&&mx<mask.width&&my<mask.height&&connected[my*mask.width+mx]===1;
+  for(let y=0;y<canvas.height;y++)for(let x=0;x<canvas.width;x++){
+    const mx=Math.min(mask.width-1,Math.floor((x+.5)/canvas.width*mask.width));
+    const my=Math.min(mask.height-1,Math.floor((y+.5)/canvas.height*mask.height));let neighbours=0;
+    for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++)if(isHair(mx+dx,my+dy))neighbours++;
+    image.data[(y*canvas.width+x)*4+3]=neighbours===9?255:neighbours>=4?220:0;
+  }
+  const pixelScale=Math.max(canvas.width/mask.width,canvas.height/mask.height);
+  defringeHairEdges(image.data,canvas.width,canvas.height,Math.max(6,pixelScale*5));
   ctx.putImageData(image,0,0);return canvas;
 }
 

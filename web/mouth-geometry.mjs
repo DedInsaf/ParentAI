@@ -15,10 +15,15 @@ export function mouthInteriorPositions(face, ring, width, output=new Float32Arra
 }
 
 export function mouthInteriorGeometry(face,ring,width) {
-  const indices=[],n=ring.length;
+  const indices=[],colors=[],n=ring.length,centerY=ring.reduce((sum,id)=>sum+face[id*3+1],0)/n;
+  for(let layer=0;layer<2;layer++)for(const id of ring){
+    const lower=face[id*3+1]<centerY?1:0,depth=layer?.72:1;
+    colors.push((.105+lower*.035)*depth,(.018+lower*.012)*depth,(.028+lower*.012)*depth);
+  }
+  colors.push(.035,.004,.008);
   for(let i=0;i<n;i++) {
     const j=(i+1)%n;
     indices.push(i,j,n+i,j,n+j,n+i,n+i,n+j,n*2);
   }
-  return {positions:mouthInteriorPositions(face,ring,width),indices};
+  return {positions:mouthInteriorPositions(face,ring,width),indices,colors};
 }

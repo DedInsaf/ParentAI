@@ -11,6 +11,9 @@ test('mouth stays sealed at animated lips and closes the interior',()=>{
   update(.001);
   const cavity=mouthInteriorGeometry(face,ring,width);
   assert.ok(cavity.indices.every(i=>i>=0&&i<cavity.positions.length/3));
+  assert.equal(cavity.colors.length,cavity.positions.length);
+  assert.ok(cavity.colors.every(value=>Number.isFinite(value)&&value>=0&&value<=1));
+  assert.ok(cavity.colors.at(-3)<cavity.colors[0]);
   for(const opening of [.001,.07,.02]) {
     update(opening);
     assert.equal(mouthInteriorPositions(face,ring,width,cavity.positions),cavity.positions);
