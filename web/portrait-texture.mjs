@@ -42,6 +42,8 @@ export function portraitCutout(view){
     }
     image.data[i*4+3]=supported?Math.round(alpha[i]*255):0;
   }
+  const matteScale=Math.max(canvas.width/view.matte.width,canvas.height/view.matte.height);
+  defringeHairEdges(image.data,canvas.width,canvas.height,matteScale*2);
   ctx.putImageData(image,0,0);return canvas;
 }
 

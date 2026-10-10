@@ -407,7 +407,7 @@ export function portraitHairGeometry(lm,a,frame,face,matte) {
     // starts only after the ray has returned inside its dense >= .5 contour.
     if(j===columns-1)connect(10+ring,photoTransition?0:1);
   }
-  return {...surface(positions,uv,indices,groups),columns,frontRows:11,photoRearRows:usableMatte?2:0,seam};
+  return {...surface(positions,uv,indices,groups),columns,frontRows:11,photoRearRows:usableMatte?2:0,seam,outerPoints,crown};
 }
 
 export function portraitEarGeometry(lm,a,frame,face,side) {

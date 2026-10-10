@@ -44,6 +44,22 @@ function faceSkinColor(THREE,view,fallback){
   for(const id of ids){const p=view.landmarks[id];if(!p)continue;const x=clamp(p.x)*view.canvas.width|0,y=clamp(p.y)*view.canvas.height|0,i=(y*view.canvas.width+x)*4;r+=pixels[i];g+=pixels[i+1];b+=pixels[i+2];count++;}
   return count?new THREE.Color().setRGB(r/count/255,g/count/255,b/count/255,THREE.SRGBColorSpace):new THREE.Color(fallback);
 }
+function hairVolumeTexture(THREE,view,hairData,fallback){
+  const canvas=document.createElement('canvas');canvas.width=hairData.columns;canvas.height=64;
+  const ctx=canvas.getContext('2d',{willReadFrequently:true}),source=view.canvas.getContext('2d',{willReadFrequently:true});
+  const pixels=source.getImageData(0,0,view.canvas.width,view.canvas.height).data,image=ctx.createImageData(canvas.width,canvas.height);
+  const fallbackSrgb=fallback.clone().convertLinearToSRGB(),fallbackRgb=[fallbackSrgb.r,fallbackSrgb.g,fallbackSrgb.b].map(value=>Math.round(value*255));
+  const mask=view.segmentation,hasMask=Number.isInteger(mask?.width)&&mask.width>0&&Number.isInteger(mask?.height)&&mask.height>0&&mask.data?.length>=mask.width*mask.height;
+  for(let y=0;y<canvas.height;y++)for(let x=0;x<canvas.width;x++){
+    const u=y/(canvas.height-1),edge=hairData.outerPoints[Math.min(hairData.outerPoints.length-1,x)],p={x:edge.x*(1-u*.82)+hairData.crown.x*u*.82,y:edge.y*(1-u*.82)+hairData.crown.y*u*.82};
+    const sx=Math.max(0,Math.min(view.canvas.width-1,Math.floor(p.x*view.canvas.width))),sy=Math.max(0,Math.min(view.canvas.height-1,Math.floor(p.y*view.canvas.height))),si=(sy*view.canvas.width+sx)*4,di=(y*canvas.width+x)*4;
+    const mx=hasMask?Math.max(0,Math.min(mask.width-1,Math.floor(p.x*mask.width))):0,my=hasMask?Math.max(0,Math.min(mask.height-1,Math.floor(p.y*mask.height))):0,hair=!hasMask||mask.data[my*mask.width+mx]===1;
+    const shade=.94-.12*u;
+    for(let channel=0;channel<3;channel++)image.data[di+channel]=Math.round((hair?pixels[si+channel]:fallbackRgb[channel])*shade);
+    image.data[di+3]=255;
+  }
+  ctx.putImageData(image,0,0);const texture=new THREE.CanvasTexture(canvas);texture.colorSpace=THREE.SRGBColorSpace;texture.generateMipmaps=false;texture.minFilter=THREE.LinearFilter;return texture;
+}
 
 export class LocalAvatar {
   static create(THREE,views,topology){
@@ -97,15 +113,11 @@ export class LocalAvatar {
       const foreheadBridge=foreheadScalpGeometry(bust.landmarks,frame,base,bust.segmentation);
       const photoHair=photoHairPatchGeometry(bust.landmarks,anchors,frame,base,65,41,{segmentation:bust.segmentation,matte:bust.matte});
       const hairTexture=new THREE.CanvasTexture(portraitHairCutout(bust,.18));hairTexture.colorSpace=THREE.SRGBColorSpace;hairTexture.generateMipmaps=false;hairTexture.minFilter=THREE.LinearFilter;
-      const hairPhotoMaterial=new THREE.MeshStandardMaterial({map:hairTexture,roughness:1,side:THREE.DoubleSide,transparent:true,alphaTest:.01});
+      const hairPhotoMaterial=new THREE.MeshBasicMaterial({map:hairTexture,side:THREE.DoubleSide,transparent:true,alphaTest:.01});
       const denseHairTexture=new THREE.CanvasTexture(portraitHairCutout(bust,.50));denseHairTexture.colorSpace=THREE.SRGBColorSpace;denseHairTexture.generateMipmaps=false;denseHairTexture.minFilter=THREE.LinearFilter;
       const denseHairMaterial=new THREE.MeshBasicMaterial({map:denseHairTexture,side:THREE.FrontSide,transparent:true,alphaTest:.01,depthWrite:false});
       const bodyTexture=new THREE.CanvasTexture(portraitCutout(bodyView));bodyTexture.colorSpace=THREE.SRGBColorSpace;
       const bodyMaterial=new THREE.MeshStandardMaterial({map:bodyTexture,roughness:1,side:THREE.DoubleSide,transparent:true,alphaTest:.02});
-      // The rear cap is visible around the side of a turned head. Rendering its
-      // inward/front-facing triangles made a dark polygon show through the
-      // transparent photo hair across the forehead.
-      const hairVolumeMaterial=new THREE.MeshStandardMaterial({color:hairSample,roughness:.95,side:THREE.BackSide});
       // The photographed front half already curves around the torso. Opaque
       // inner faces used to show through its transparent room gaps as straight
       // bars beside the neck. Keep those closure faces depth-neutral here.
@@ -118,6 +130,10 @@ export class LocalAvatar {
       // single connected mesh prevents the forehead crack that appeared when
       // two independently projected surfaces rotated by different depths.
       const hairData=portraitHairGeometry(bust.landmarks,anchors,frame,base,bust.matte);
+      const volumeTexture=hairVolumeTexture(THREE,bust,hairData,hairSample);
+      // The rear cap is visible around the side of a turned head. It now keeps
+      // the captured colour variation instead of becoming a smooth solid cap.
+      const hairVolumeMaterial=new THREE.MeshStandardMaterial({map:volumeTexture,roughness:.95,side:THREE.BackSide});
       // Both visible hair layers use the semantic hair matte. A full-person
       // alpha left a pale rectangular sheet beside the real hairstyle.
       const hairMesh=new THREE.Mesh(geometry(THREE,hairData),[hairPhotoMaterial,hairVolumeMaterial]);hairMesh.renderOrder=1;
