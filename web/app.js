@@ -1,4 +1,4 @@
-import {Presence, encodeWav, withTimeout, speechOpening, scanQuality, scanTurnIssue, portraitQuality, faceYaw} from './core.mjs';
+import {Presence, encodeWav, withTimeout, requestUserCamera, speechOpening, scanQuality, scanTurnIssue, portraitQuality, faceYaw} from './core.mjs';
 import {blinkAmount} from './head-geometry.mjs';
 import {SpeechGate,isDirectedSpeech} from './listening.mjs';
 import {AvatarMotion} from './avatar-motion.mjs';
@@ -35,7 +35,14 @@ const avatarMotion=new AvatarMotion();let childSpeakingUntil=0;
 const voiceBusy = () => ['generating', 'cancelling'].includes(status.voice);
 const stopTracks = value => value?.getTracks().forEach(t => t.stop());
 function mediaError(e) {
-  const messages = {NotAllowedError: 'Доступ запрещён. Разрешите камеру или микрофон в настройках браузера.', NotFoundError: 'Камера или микрофон не найдены.', NotReadableError: 'Камера или микрофон заняты другим приложением.'};
+  const messages = {
+    NotAllowedError: 'Доступ к камере или микрофону запрещён. Разрешите его для браузера в «Системные настройки → Конфиденциальность и безопасность», затем повторите.',
+    SecurityError: 'Браузер заблокировал камеру или микрофон. Откройте ParentAI по локальному адресу из приложения и разрешите доступ.',
+    NotFoundError: 'Камера или микрофон не найдены. Подключите устройство и повторите.',
+    NotReadableError: 'Камера или микрофон заняты другим приложением. Закройте FaceTime, Zoom или другую программу и повторите.',
+    AbortError: 'Камера или микрофон не смогли запуститься. Закройте другие приложения, использующие их, и повторите.',
+    UnsupportedError: 'Камера недоступна в этом браузере. Откройте ParentAI по адресу localhost из приложения.',
+  };
   return new Error(messages[e.name] || e.message);
 }
 
@@ -154,10 +161,10 @@ function renderSubscription(summary, billing) {
   $('freeAssignments').textContent = free.assignments ?? 5;
   $('freePlans').textContent = free.llm_requests ?? 10;
   $('freeVoice').textContent = free.tts_blocks ?? 3;
-  $('paidAssignments').textContent = paid.assignments ?? 120;
-  $('paidPlans').textContent = paid.llm_requests ?? 160;
-  $('paidVoice').textContent = paid.tts_blocks ?? 500;
-  $('paidPrice').textContent = paid.monthly_price_rubles ?? 299;
+  $('paidAssignments').textContent = paid.assignments ?? 60;
+  $('paidPlans').textContent = paid.llm_requests ?? 80;
+  $('paidVoice').textContent = paid.tts_blocks ?? 180;
+  $('paidPrice').textContent = paid.monthly_price_rubles ?? 490;
   $('freePlanCard').classList.toggle('is-current', current === 'free');
   $('paidPlanCard').classList.toggle('is-current', current === 'paid');
   $('freePlanState').textContent = current === 'free' ? 'Текущий тариф' : 'Базовый тариф';
@@ -167,7 +174,7 @@ function renderSubscription(summary, billing) {
   button.disabled = summary.plan.unlimited || current === 'paid' || waiting || !billing.provider?.enabled;
   button.textContent = summary.plan.unlimited ? 'У вас доступ без ограничений' : current === 'paid' ?
     'Подписка активна' : waiting ? 'Ожидаем подтверждение Platega' :
-    `Оформить за ${paid.monthly_price_rubles ?? 299} ₽/месяц`;
+    `Оформить за ${paid.monthly_price_rubles ?? 490} ₽/месяц`;
   if (!billing.provider?.enabled && current === 'free') {
     $('billingMessage').textContent = 'Кнопка покупки готова. Чтобы принимать оплату, добавьте Merchant ID и API-ключ Platega в настройки сервера.';
   } else if (waiting) {
@@ -229,10 +236,9 @@ function fit() {
 async function enableCamera() {
   if (stream && stream.getVideoTracks().some(t => t.readyState === 'live')) return;
   stopCamera(); const epoch=cameraEpoch;cameraAbort=new AbortController();
-  if (!navigator.mediaDevices?.getUserMedia) throw new Error('Откройте приложение через адрес localhost из run_app.py.');
   let candidate;
   try {
-    candidate=await withTimeout(navigator.mediaDevices.getUserMedia({video:{width:{ideal:960},height:{ideal:720},frameRate:{ideal:20,max:30},facingMode:'user'},audio:false}),20000,stopTracks,cameraAbort.signal);
+    candidate=await requestUserCamera(navigator.mediaDevices,stopTracks,cameraAbort.signal);
     if(epoch!==cameraEpoch || document.hidden) {stopTracks(candidate);throw new Error('Подключение камеры отменено.');}
     stream=candidate;video.srcObject=stream;
     await withTimeout(video.play(),10000);
@@ -273,7 +279,7 @@ async function scan() {
   $('scannerDialog').showModal();$('scannerCamera').appendChild(video.closest('.camera-frame'));controls();
   try {
     scanInstruction('Подключаем камеру. Сядьте лицом к свету, чтобы волосы и уши были видны.');
-    await dependencies();await enableCamera();
+    await Promise.all([enableCamera(),dependencies()]);
     const poses=[
       {role:'front',direction:0,instruction:'Посмотрите прямо в объектив и мягко сомкните губы.'},
       {role:'left',direction:1,instruction:'Немного поверните голову к стрелке ←'},
@@ -464,8 +470,7 @@ async function start() {
   lessonCameraEnabled = $('readyCamera').checked;
   if (lessonCameraEnabled) {
     try {
-      await dependencies();
-      await enableCamera();
+      await Promise.all([enableCamera(),dependencies()]);
       let result;
       for (let attempt = 0; attempt < 10; attempt++) {
         result = detectVideo(performance.now());
@@ -542,17 +547,36 @@ function showLesson() {
 function showSetup() {
   $('setupAvatarSlot').appendChild($('scene'));
   $('setupCameraSlot').appendChild(video.closest('.camera-frame'));
+  $('readyCameraPreview').hidden=true;
   $('lessonPage').hidden = true; $('setupPage').hidden = false;
   document.body.classList.remove('in-lesson');$('lessonToolbar').hidden=true;
   document.querySelector('h1').textContent = 'Рядом во время занятий';
   if (location.hash) history.replaceState({}, '', location.pathname + location.search);
   requestAnimationFrame(fit); window.scrollTo(0,0);
 }
+function closeReadyCameraPreview(uncheck=false) {
+  if (!running && !scanning) stopCamera();
+  $('setupCameraSlot').appendChild(video.closest('.camera-frame'));
+  $('readyCameraPreview').hidden=true;
+  if(uncheck)$('readyCamera').checked=false;
+}
+async function showReadyCameraPreview() {
+  $('readyCameraPreview').hidden=false;
+  $('readyCameraStatus').textContent='Подключаем камеру…';
+  $('readyCameraSlot').appendChild(video.closest('.camera-frame'));
+  try {
+    await enableCamera();
+    $('readyCameraStatus').textContent='Камера работает. Это изображение остаётся на устройстве.';
+  } catch(error) {
+    closeReadyCameraPreview(true);
+    throw error;
+  }
+}
 function setupStep(step) {
   if(scanning || recording) return;
   const content={face:['Давайте создадим ваш образ','Сканер создаст объёмный аватар по снимкам лица. Готовый образ появится здесь автоматически.'],voice:['Знакомый голос — спокойнее учиться','Запишите образец в тихой комнате, затем прослушайте результат.'],ready:['Устроимся поудобнее','Посадите ребёнка перед камерой и начните. Вопросы можно задавать голосом или текстом.']};
   if(!content[step]) return;
-  if(step!=='face') stopCamera();
+  closeReadyCameraPreview(false);
   document.querySelectorAll('[data-step-panel]').forEach(panel=>panel.hidden=panel.dataset.stepPanel!==step);
   document.querySelectorAll('[data-setup-step]').forEach(button=>{
     if(button.dataset.setupStep===step) button.setAttribute('aria-current','step');
@@ -748,6 +772,15 @@ action('testVoiceBtn', () => playVoice('preview')); action('startBtn', start); a
 action('lessonVoiceBtn', () => playVoice('lesson')); action('stopSpeechBtn', cancelTutor);
 $('handsFree').addEventListener('change',()=>{clearError();$('readyHandsFree').checked=$('handsFree').checked;startHandsFree().catch(fail);});
 $('readyHandsFree').addEventListener('change',()=>{$('handsFree').checked=$('readyHandsFree').checked;});
+$('readyCamera').addEventListener('change',async()=>{
+  clearError();$('readyCamera').disabled=true;
+  try {
+    if($('readyCamera').checked)await showReadyCameraPreview();
+    else closeReadyCameraPreview(false);
+  } catch(error){fail(error);}
+  finally{$('readyCamera').disabled=false;controls();}
+});
+$('closeReadyCameraBtn').addEventListener('click',()=>closeReadyCameraPreview(true));
 action('dismissMicIntroBtn',()=>{$('micIntro').hidden=true;});
 document.querySelector('.app-header .brand').addEventListener('click',event=>{event.preventDefault();if(running)stop();setupStep('face');});
 $('replyVoice').addEventListener('change',()=>{if(running&&$('replyVoice').value==='parent')api('voice-warm',new Uint8Array()).catch(()=>{});});

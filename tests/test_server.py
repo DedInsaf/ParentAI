@@ -64,8 +64,8 @@ class ServerTests(unittest.TestCase):
         code,body=self.request('/api/billing/checkout',json.dumps({'plan':'paid'}).encode(),headers)
         self.assertEqual(code,201)
         self.assertEqual(json.loads(body)['redirect'],redirect)
-        self.assertEqual(self.s.platega.amount,299)
-        callback=json.dumps({'Id':provider_id,'Amount':299,'Currency':'RUB','Status':'CONFIRMED'}).encode()
+        self.assertEqual(self.s.platega.amount,490)
+        callback=json.dumps({'Id':provider_id,'Amount':490,'Currency':'RUB','Status':'CONFIRMED'}).encode()
         bad={'X-MerchantId':'merchant','X-Secret':'wrong','Content-Type':'application/json'}
         self.assertEqual(self.request('/api/webhooks/platega',callback,bad,authenticated=False)[0],403)
         good={'X-MerchantId':'merchant','X-Secret':'secret','Content-Type':'application/json'}

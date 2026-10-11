@@ -94,6 +94,14 @@ class UsageTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'Сумма'):
             self.store.payment_callback(provider_id, 'CONFIRMED', 300, 'RUB')
 
+    def test_product_pricing_matches_pro_model_and_paid_guardrail(self):
+        config = BillingConfig.load()
+        self.assertEqual(config.values['llm_model'], 'yandexgpt-5.1')
+        self.assertEqual(config.llm_cost(1200, 500), 1_360_000)
+        self.assertEqual(config.plan('paid')['monthly_price_rubles'], 490)
+        self.assertEqual(config.plan('paid')['assignments'], 60)
+        self.assertEqual(config.plan('paid')['external_cost_rubles'], '150.00')
+
 
 if __name__ == '__main__':
     unittest.main()

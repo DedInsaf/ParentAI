@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {Presence, positionsFor, neutralFacePositions, encodeWav, scanQuality, scanCoverage, scanTurnIssue, faceYaw, mouthRig, speechOpening} from '../web/core.mjs';
+import {Presence, positionsFor, neutralFacePositions, encodeWav, scanQuality, scanCoverage, scanTurnIssue, faceYaw, mouthRig, speechOpening, requestUserCamera} from '../web/core.mjs';
 test('coordinates use matching physical units on a wide camera',()=>{
   const p=positionsFor([{x:.6,y:.6,z:.1},{x:.5,y:.5,z:0}],1280,720,1);
   assert.ok(Math.abs(p[1]/p[0]+720/1280)<1e-6);
@@ -80,6 +80,12 @@ test('cancelling pending microphone permission also disposes late stream',async(
   const pending=withTimeout(new Promise(r=>{resolve=r}),1000,()=>{disposed=true},controller.signal);
   controller.abort(); await assert.rejects(pending);
   resolve({}); await new Promise(r=>setTimeout(r,0)); assert.equal(disposed,true);
+});
+test('camera retries with basic constraints when a browser rejects preferred settings',async()=>{
+  const calls=[];const stream={getTracks:()=>[]};
+  const mediaDevices={getUserMedia:constraints=>{calls.push(constraints);if(calls.length===1){const error=new Error('constraints');error.name='OverconstrainedError';return Promise.reject(error);}return Promise.resolve(stream);}};
+  assert.equal(await requestUserCamera(mediaDevices,()=>{},undefined,100),stream);
+  assert.equal(calls.length,2);assert.deepEqual(calls[1],{video:true,audio:false});
 });
 import {closeFaceOpenings,FACE_OPENINGS} from '../web/core.mjs';
 test('eye and mouth interiors have textured triangles with valid vertices',()=>{

@@ -15,7 +15,7 @@
     <p>Войдите в свой аккаунт, чтобы подготовить образ и голос родителя для занятий.</p>
     <div class="auth-plans" aria-label="Тарифы ParentAI">
       <div><span>Free</span><strong>0 ₽</strong><small>5 заданий в месяц</small></div>
-      <div class="auth-plan-paid"><span>Paid beta</span><strong>299 ₽<small>/месяц</small></strong><small>120 заданий и больше голосовых ответов</small></div>
+      <div class="auth-plan-paid"><span>Paid beta</span><strong>490 ₽<small>/месяц</small></strong><small>60 заданий и больше голосовых ответов</small></div>
     </div>
     <button id="authPaidBtn" type="button" class="auth-paid-button">Создать аккаунт и оформить Paid beta</button>
     <div class="auth-privacy"><span aria-hidden="true">♡</span><div><strong>Ваши данные остаются здесь</strong><p>Пароль хранится только в виде защищённого хеша. Снимки и голос не покидают устройство.</p></div></div>
@@ -67,9 +67,9 @@
         <button id="freePlanBtn" type="button" class="secondary full" disabled>Текущий тариф</button>
       </article>
       <article id="paidPlanCard" class="plan-card featured">
-        <div class="plan-card-title"><div><span class="plan-name">Paid beta</span><strong><span id="paidPrice">299</span> ₽<small>/месяц</small></strong></div><span class="best-choice">Для первых семей</span></div>
+        <div class="plan-card-title"><div><span class="plan-name">Paid beta</span><strong><span id="paidPrice">490</span> ₽<small>/месяц</small></strong></div><span class="best-choice">Для первых семей</span></div>
         <p>Больше заданий и голосового общения без неожиданных остановок.</p>
-        <ul><li><strong id="paidAssignments">120</strong> заданий в месяц</li><li><strong id="paidPlans">160</strong> планов с подсказками</li><li><strong id="paidVoice">500</strong> голосовых ответов</li></ul>
+        <ul><li><strong id="paidAssignments">60</strong> заданий в месяц</li><li><strong id="paidPlans">80</strong> планов с подсказками</li><li><strong id="paidVoice">180</strong> голосовых ответов</li></ul>
         <button id="buyPaidBtn" type="button" class="full">Оформить подписку через Platega</button>
       </article>
     </div>
@@ -122,7 +122,8 @@
     <span class="eyebrow">МОЖНО НАЧИНАТЬ</span><h2>Устроимся поудобнее</h2><p>Поставьте рядом тетрадь и задание. Ребёнок садится перед камерой — и можно заниматься вместе с аватаром.</p>
     <div class="ready-features"><div><span aria-hidden="true">☀</span><p><strong>Спрашивай как обычно</strong>Скажи «помоги» и задай вопрос. Сначала аватар даст подсказку.</p></div><div><span aria-hidden="true">♡</span><p><strong>Можно сделать перерыв</strong>Кнопка перерыва выключает и камеру, и микрофон.</p></div></div>
     <label class="toggle-row ready-mic"><input id="readyHandsFree" type="checkbox" checked><span>Включить микрофон при начале занятия<small>Можно говорить без кнопки. В браузере нужно разрешить доступ.</small></span></label>
-    <label class="toggle-row ready-camera"><input id="readyCamera" type="checkbox"><span>Включить проверку присутствия камерой<small>По умолчанию выключена. Видео обрабатывается только на этом устройстве и не сохраняется.</small></span></label>
+    <label class="toggle-row ready-camera"><input id="readyCamera" type="checkbox"><span>Включить проверку присутствия камерой<small>Предпросмотр откроется сразу. Камера доступна на любом тарифе, видео не сохраняется.</small></span></label>
+    <div id="readyCameraPreview" class="ready-camera-preview" hidden><div class="section-title"><strong>Проверка камеры</strong><button id="closeReadyCameraBtn" type="button" class="quiet">Выключить</button></div><div id="readyCameraSlot"></div><p id="readyCameraStatus" class="helper" role="status">Подключаем камеру…</p></div>
     <p id="readyMicHint" class="helper">Вопросы голосом распознаёт Яндекс. Камера и образец голоса родителя остаются здесь.</p>
     <button id="startBtn" class="next-step start-button" disabled>Начать занятие →</button><p id="startHint" class="helper"></p>
     <section class="parent-summary" aria-labelledby="parentSummaryTitle">

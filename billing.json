@@ -1,10 +1,12 @@
 {
   "currency": "RUB",
-  "pricing_source_updated": "2026-10-10",
+  "pricing_source_updated": "2026-10-11",
+  "llm_model": "yandexgpt-5.1",
+  "pricing_source": "https://aistudio.yandex.ru/ru/docs/ai-studio/pricing",
   "warning_ratio": "0.80",
   "prices": {
-    "llm_input_per_1000_tokens": "0.20",
-    "llm_output_per_1000_tokens": "0.20",
+    "llm_input_per_1000_tokens": "0.80",
+    "llm_output_per_1000_tokens": "0.80",
     "stt_per_15_seconds": "0.1626",
     "tts_v3_per_250_chars": "0.1626"
   },
@@ -16,16 +18,16 @@
       "llm_requests": 10,
       "stt_billed_seconds": 150,
       "tts_blocks": 3,
-      "external_cost_rubles": "5.00"
+      "external_cost_rubles": "10.00"
     },
     "paid": {
       "title": "Paid beta",
-      "monthly_price_rubles": 299,
-      "assignments": 120,
-      "llm_requests": 160,
-      "stt_billed_seconds": 6000,
-      "tts_blocks": 500,
-      "external_cost_rubles": "85.00"
+      "monthly_price_rubles": 490,
+      "assignments": 60,
+      "llm_requests": 80,
+      "stt_billed_seconds": 3600,
+      "tts_blocks": 180,
+      "external_cost_rubles": "150.00"
     }
   }
 }

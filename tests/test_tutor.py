@@ -32,7 +32,7 @@ class TutorTests(unittest.TestCase):
         self.assertEqual(result['answer'], 'Начнём с условия.')
         self.assertEqual(seen['url'], ENDPOINT)
         self.assertEqual(seen['auth'], 'Api-Key secret-value')
-        self.assertEqual(seen['body']['modelUri'], 'gpt://folder-id/yandexgpt-5-lite')
+        self.assertEqual(seen['body']['modelUri'], 'gpt://folder-id/yandexgpt-5.1')
         self.assertEqual(seen['body']['completionOptions']['maxTokens'], '180')
         self.assertEqual(seen['timeout'], 55)
 

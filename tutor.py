@@ -38,7 +38,7 @@ class Tutor:
     def __init__(self, api_key=None, folder_id=None, model=None, opener=None):
         self.api_key = api_key or ''
         self.folder_id = folder_id or ''
-        self.model = model or 'yandexgpt-5-lite'
+        self.model = model or 'yandexgpt-5.1'
         self.opener = opener or urllib.request.urlopen
 
     @classmethod

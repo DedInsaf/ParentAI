@@ -139,6 +139,7 @@ audio{display:block;width:100%;margin-top:20px}
 .ready-features p{margin:0;font-size:14px;color:var(--muted)}
 .ready-features strong{display:block;color:var(--ink);font-size:15px;margin-bottom:5px}
 .ready-camera{margin-top:10px}
+.ready-camera-preview{margin-top:14px;padding:14px;border:1px solid #dde5d9;border-radius:22px;background:#f6f8f2}.ready-camera-preview .section-title{margin-bottom:10px}.ready-camera-preview .section-title strong{font-size:14px}.ready-camera-preview button{min-height:36px;padding:6px 10px;font-size:12px}.ready-camera-preview video{height:240px}.ready-camera-preview .helper{margin:9px 3px 0}
 .parent-summary{margin:24px 0 18px;padding:20px;border:1px solid var(--line);border-radius:22px;background:#faf9f4}
 .parent-summary h3{margin:0;font-size:19px}
 .summary-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:9px;margin:16px 0}

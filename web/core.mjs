@@ -127,6 +127,21 @@ export function withTimeout(promise, ms, dispose = () => {}, signal) {
   return result.finally(() => { clearTimeout(timer); signal?.removeEventListener('abort', abort); });
 }
 
+export async function requestUserCamera(mediaDevices, dispose, signal, timeout = 20000) {
+  if (!mediaDevices?.getUserMedia) {
+    const error = new Error('Камера недоступна в этом браузере.');
+    error.name = 'UnsupportedError';
+    throw error;
+  }
+  const preferred = {video: {width: {ideal: 960}, height: {ideal: 720}, frameRate: {ideal: 20, max: 30}, facingMode: 'user'}, audio: false};
+  try {
+    return await withTimeout(mediaDevices.getUserMedia(preferred), timeout, dispose, signal);
+  } catch (error) {
+    if (!['OverconstrainedError', 'ConstraintNotSatisfiedError'].includes(error?.name)) throw error;
+    return withTimeout(mediaDevices.getUserMedia({video: true, audio: false}), timeout, dispose, signal);
+  }
+}
+
 // MediaPipe's tessellation omits the eye and mouth interiors. Fill those holes
 // from the same photograph rather than displaying the scene background through them.
 export const FACE_OPENINGS = [
