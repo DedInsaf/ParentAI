@@ -1,6 +1,4 @@
-# Python 3.11. cpu includes torch and torchaudio; codec supports PyTorch 2.9+.
+# Python 3.11. Базовая установка без некоммерческой модели XTTS-v2.
 numpy>=1.26,<2
 scipy>=1.12,<2
-coqui-tts[cpu,codec]==0.27.5
-transformers>=4.57,<5
 # Optional native window: pip install pywebview

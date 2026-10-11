@@ -1,4 +1,5 @@
 import io
+import base64
 import json
 from pathlib import Path
 import tempfile
@@ -57,6 +58,29 @@ class SpeechTests(unittest.TestCase):
 
 
 class DialogueTests(unittest.TestCase):
+    def test_structured_plan_is_called_once_and_answer_checked_locally(self):
+        class PlanTutor:
+            calls=0
+            model='test-model'
+            def public_status(self):return {'enabled':True}
+            def create_plan(self,question,level):
+                self.calls+=1
+                return {'plan':{'solution':'x=4','hints':['Вычти 3.','Раздели на 2.','Проверь.'],
+                    'control_questions':['Что получится?','Какое число?','Сходится?'],
+                    'common_errors':[],'answer_criterion':'x=4','acceptable_answers':['4','x=4'],
+                    'final_explanation':'Сначала вычитаем 3, затем делим на 2.'},
+                    'usage':{'input_tokens':100,'output_tokens':100,'actual':True}}
+        with tempfile.TemporaryDirectory() as temp:
+            tutor=PlanTutor();manager=Dialogues(Runtime(temp),tutor)
+            try:
+                first=manager.start('2x+3=11','средняя школа');manager.jobs[first['id']]['thread'].join(1)
+                self.assertIn('Вычти 3',manager.snapshot(first['id'])['answer'])
+                second=manager.start('4','средняя школа',first['session']);manager.jobs[second['id']]['thread'].join(1)
+                self.assertIn('Верно',manager.snapshot(second['id'])['answer'])
+                self.assertEqual(tutor.calls,1)
+                self.assertNotIn('x=4',manager.snapshot(first['id'])['answer'])
+            finally:manager.close()
+
     def test_server_controls_attempts_and_keeps_text_without_clone(self):
         class FakeTutor:
             attempts=[]
@@ -151,15 +175,18 @@ class StreamedVoiceTests(unittest.TestCase):
 
     def test_standard_yandex_voice_does_not_require_or_transmit_parent_reference(self):
         from speech import SpeechSynthesizer
-        from urllib.parse import parse_qs
         seen={}
         class Response:
             def __enter__(self):return self
             def __exit__(self,*args):pass
-            def read(self,limit):return b'\x10\x00'*8000
+            def read(self,limit):
+                audio=recording(rate=16000);middle=len(audio)//2
+                return ('\n'.join(json.dumps({'result':{'audioChunk':{'data':base64.b64encode(part).decode()}}})
+                                  for part in (audio[:middle],audio[middle:]))).encode()
         def opener(request,timeout):
-            seen.update(parse_qs(request.data.decode()));self.assertEqual(timeout,25)
+            seen.update(json.loads(request.data));self.assertEqual(timeout,25)
             self.assertEqual(request.headers['Authorization'],'Api-Key test-key')
+            self.assertIn('/tts/v3/utteranceSynthesis',request.full_url)
             return Response()
         class Tutor:
             def public_status(self):return {'enabled':True}
@@ -169,6 +196,7 @@ class StreamedVoiceTests(unittest.TestCase):
             try:
                 job=manager.start('Помоги','средняя школа',voice='yandex');manager.jobs[job['id']]['thread'].join(2)
                 self.assertTrue(manager.audio(job['id']).is_file())
-                self.assertEqual(seen['text'],['Подсказка']);self.assertEqual(seen['sampleRateHertz'],['16000'])
+                self.assertEqual(seen['text'],'Подсказка')
+                self.assertEqual(seen['outputAudioSpec']['containerAudio']['containerAudioType'],'WAV')
                 self.assertNotIn('folderId',seen);self.assertNotIn('reference',seen)
             finally:manager.close();runtime.close()

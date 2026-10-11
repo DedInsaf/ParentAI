@@ -60,5 +60,19 @@ class TutorTests(unittest.TestCase):
         for prompt in prompts[:3]: self.assertIn('Не сообщай итоговый ответ',prompt)
         self.assertIn('полное решение',prompts[3])
 
+    def test_structured_plan_uses_provider_token_counts(self):
+        value = {'solution':'x = 4', 'hints':['Перенеси 3.','Раздели на 2.','Проверь подстановкой.'],
+                 'control_questions':['Что останется слева?','На что делим?','Равны ли части?'],
+                 'common_errors':['Забыть сменить знак.'], 'answer_criterion':'x равно 4',
+                 'acceptable_answers':['4','x=4'], 'final_explanation':'Вычитаем 3 и делим на 2.'}
+        def open_request(request, timeout):
+            return Response({'result': {'alternatives': [{'message': {'text': json.dumps(value, ensure_ascii=False)}}],
+                                        'usage': {'inputTextTokens':'321','completionTokens':'123','totalTokens':'444'}}})
+        result = Tutor('key','folder',opener=open_request).create_plan('2x + 3 = 11','средняя школа')
+        self.assertEqual(result['plan']['acceptable_answers'],['4','x=4'])
+        self.assertEqual(result['usage']['input_tokens'],321)
+        self.assertEqual(result['usage']['output_tokens'],123)
+        self.assertTrue(result['usage']['actual'])
+
 
 if __name__ == '__main__': unittest.main()

@@ -37,9 +37,10 @@ class Runtime:
         self.process = None
         self.worker = None
         self.reply_busy = False
+        self.xtts_enabled = os.getenv('PARENTAI_ENABLE_XTTS', '0') == '1'
         from voice_engine import VoiceEngine
         self.voice_engine=VoiceEngine()
-        self.reference_mode = 'clone'
+        self.reference_mode = 'clone' if self.xtts_enabled else 'direct'
         self.status = {'tts': 'Не загружена', 'assets': 'Ожидание загрузки', 'voice': 'idle',
                        'progress': '', 'error': '', 'reference': False}
         self.manifest = []
@@ -55,7 +56,8 @@ class Runtime:
         if (self.data / 'reference.wav').is_file():
             self.status['reference'] = True
             try:
-                self.reference_mode = json.loads((self.data / 'reference.json').read_text())['mode']
+                saved_mode = json.loads((self.data / 'reference.json').read_text())['mode']
+                self.reference_mode = saved_mode if saved_mode == 'direct' or self.xtts_enabled else 'direct'
             except (OSError, ValueError, KeyError):
                 pass
 
@@ -67,14 +69,15 @@ class Runtime:
 
     def snapshot(self):
         with self.lock:
-            return {**self.status, 'phrases': list(self.manifest), 'reference_mode': self.reference_mode}
+            return {**self.status, 'phrases': list(self.manifest), 'reference_mode': self.reference_mode,
+                    'xtts_enabled': self.xtts_enabled}
 
     def set(self, **values):
         with self.lock:
             self.status.update(values)
 
     def start(self):
-        if self.reference_mode=="clone" and self.status["reference"]:
+        if self.xtts_enabled and self.reference_mode=="clone" and self.status["reference"]:
             self.voice_engine.warm(self.data/"reference.wav")
         threading.Thread(target=self.start_assets, daemon=True).start()
 
@@ -187,6 +190,8 @@ class Runtime:
     def reference(self, payload, mode='clone'):
         if mode not in ('clone', 'direct'):
             raise ValueError('Неизвестный режим голоса')
+        if mode == 'clone' and not self.xtts_enabled:
+            raise ValueError('XTTS-v2 выключен: его лицензия не разрешает коммерческое использование. Выберите запись без клонирования.')
         with self.lock:
             if self.status['voice'] in BUSY or self.reply_busy:
                 raise ValueError('Сначала остановите создание голоса.')
@@ -207,6 +212,8 @@ class Runtime:
                 raise ValueError('Создание голоса уже идёт.')
             if not self.status['reference']:
                 raise ValueError('Сначала запишите и прослушайте голос.')
+            if self.reference_mode == 'clone' and not self.xtts_enabled:
+                raise ValueError('XTTS-v2 выключен до подтверждения коммерческой лицензии.')
             self.cancel.clear()
             self.status.update(voice='generating', error='', progress='Подготовка голоса…')
             self.worker = threading.Thread(target=self._generate, daemon=True)

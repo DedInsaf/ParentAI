@@ -12,7 +12,9 @@ const video = $('camera');
 const fail = e => { $('error').hidden = false; $('error').textContent = e.message || String(e); };
 const clearError = () => { $('error').hidden = true; };
 const sleep = ms => new Promise(r => setTimeout(r, ms));
-let token, status = {}, stream, detector, avatarTopology, THREE, renderer, scene, camera, mesh, avatarGroup, modelAvatar;
+const requestId = () => globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+let token, currentUser, authenticated = false, appStarted = false;
+let status = {}, stream, detector, avatarTopology, THREE, renderer, scene, camera, mesh, avatarGroup, modelAvatar;
 let audioContext, analyser, audioSource, pcm, playing = false, recording = false, scanning = false;
 let running = false, paused = false, lastFrame = -1, lastDetect = 0, lastResult = null, lastSeenFrame = 0;
 let lastMediaTimestamp = -1;
@@ -21,7 +23,7 @@ const presence = new Presence();
 const pendingActions = new Set();
 let online = false, recordCancelled = false, recordingStream, recordingAbort, referenceRejected = false, previewUrl, renderTime = 0;
 let referenceLoaded = false, voiceModeTouched = false;
-let lessonStarted = 0, lessonElapsed = 0, tutorBusy = false;
+let lessonStarted = 0, lessonElapsed = 0, tutorBusy = false, lessonCameraEnabled = false;
 let activeCues=[], audioStarted=0, dialogId=null, helpEpoch=0;
 let questionRecording=false, questionStop=false, questionCancel=false, questionAbort, questionStream;
 let currentJob=null;
@@ -38,21 +40,27 @@ function mediaError(e) {
 }
 
 
-async function api(path, body, retry = true, timeout = 15000, signal) {
+async function api(path, body, retry = true, timeout = 15000, signal, operationId = requestId()) {
   const controller = new AbortController();
   const abort=()=>controller.abort();signal?.addEventListener("abort",abort,{once:true});if(signal?.aborted)abort();
   const timer = setTimeout(() => controller.abort(), timeout);
   try {
     const res = await fetch('/api/' + path, {method: body === undefined ? 'GET' : 'POST',
       signal: controller.signal,
-      headers: {'X-App-Token': token, ...(body !== undefined ? {'Content-Type': 'application/octet-stream'} : {})}, body});
+      headers: {'X-App-Token': token, 'X-Request-Id': operationId,
+        ...(body !== undefined ? {'Content-Type': 'application/octet-stream'} : {})}, body});
     if (res.status === 403 && retry) {
       const session = await fetch('/api/session', {signal: controller.signal});
       if (!session.ok) throw new Error('Не удалось восстановить подключение');
       ({token} = await session.json());
-      return api(path, body, false, timeout,signal);
+      return api(path, body, false, timeout,signal,operationId);
     }
     const data = await res.json();
+    if (res.status === 401) {
+      authenticated = false;
+      location.reload();
+      throw new Error(data.error || 'Сессия завершена. Войдите снова.');
+    }
     if (!res.ok) throw new Error(data.error || `Ошибка ${res.status}`);
     return data;
   } finally { clearTimeout(timer);signal?.removeEventListener("abort",abort); }
@@ -104,6 +112,11 @@ async function poll() {
     $('connection').textContent = 'Подключено';
     $('ttsStatus').textContent = `Клонирование: ${status.voice_engine?.message || status.tts}`;
     $('assetsStatus').textContent = `Распознавание: ${status.assets}`;
+    const cloneOption=$('voiceMode').querySelector('option[value="clone"]');
+    cloneOption.disabled=!status.xtts_enabled;
+    cloneOption.textContent=status.xtts_enabled?'Напоминания и новые ответы моим голосом':'Клонирование XTTS недоступно для платного продукта';
+    if(!status.xtts_enabled&&$('voiceMode').value==='clone'){$('voiceMode').value='direct';updateVoiceMode();}
+    renderParentSummary(status.usage);
     if (!tutorBusy && !questionRecording) $('tutorStatus').textContent = status.tutor?.enabled?'Скажи «помоги» или напиши вопрос. Будем пробовать по шагам.':'Помощник ещё не подключён. Попроси родителя настроить Яндекс.';
     if (!recording) $('voiceHint').textContent = status.error || status.progress || (status.phrases.length ? 'Сохранённый голос готов. Можно начать занятие.' : 'Выберите способ записи голоса.');
     if (status.reference && !referenceLoaded && !recording) {
@@ -115,7 +128,20 @@ async function poll() {
     if (running && !paused) await pause();
   } finally { controls(); }
 }
-async function pollLoop() { await poll(); setTimeout(pollLoop, 2000); }
+function renderParentSummary(value) {
+  if (!value || !$('planName')) return;
+  $('planName').textContent = value.plan.title;
+  $('summaryAssignments').textContent = value.report.assignments;
+  $('summaryHints').textContent = value.report.hints;
+  $('summaryIndependent').textContent = value.report.solved_independently;
+  $('summaryDifficult').textContent = value.report.difficult;
+  $('summaryToday').textContent = `${Number(value.usage.today_cost_rubles).toFixed(2)} ₽`;
+  $('summaryCost').textContent = `${Number(value.usage.external_cost_rubles).toFixed(2)} ₽`;
+  $('summaryRemaining').textContent = value.plan.unlimited ? 'Без ограничений' :
+    `${value.remaining.assignments} заданий · ${value.remaining.llm_requests} планов · ${value.remaining.tts_blocks} голосовых ответов`;
+  $('summaryText').textContent = value.report.summary;
+}
+async function pollLoop() { if (!authenticated) return; await poll(); if (authenticated) setTimeout(pollLoop, 2000); }
 
 async function avatarDependencies(){
   if(!avatarDependenciesPromise)avatarDependenciesPromise=(async()=>{
@@ -395,18 +421,24 @@ async function record() {
 }
 async function start() {
   await context().resume();
-  try {
-    await dependencies();
-    await enableCamera();
-    let result;
-    for (let attempt = 0; attempt < 10; attempt++) {
-      result = detectVideo(performance.now());
-      if (result.faceLandmarks?.length === 1) break;
-      await sleep(120);
-    }
-    if (result.faceLandmarks?.length !== 1) throw new Error('Перед началом в кадре должен быть один ребёнок.');
-    if(document.hidden || !stream) throw new Error('Подключение занятия отменено.');
-  } catch(error){stopCamera();stopHandsFree();throw error;}
+  lessonCameraEnabled = $('readyCamera').checked;
+  if (lessonCameraEnabled) {
+    try {
+      await dependencies();
+      await enableCamera();
+      let result;
+      for (let attempt = 0; attempt < 10; attempt++) {
+        result = detectVideo(performance.now());
+        if (result.faceLandmarks?.length === 1) break;
+        await sleep(120);
+      }
+      if (result.faceLandmarks?.length !== 1) throw new Error('Перед началом в кадре должен быть один ребёнок.');
+      if(document.hidden || !stream) throw new Error('Подключение занятия отменено.');
+    } catch(error){stopCamera();stopHandsFree();throw error;}
+  } else {
+    stopCamera();
+    $('monitorStatus').textContent = 'Камера выключена родителем';
+  }
   stopAudio(); running = true; paused = false; presence.reset(); lessonElapsed = 0; lessonStarted = performance.now(); showLesson(); controls();
   if($('replyVoice').value==='parent') api('voice-warm',new Uint8Array()).catch(()=>{});
   startHandsFree().catch(fail);
@@ -415,10 +447,10 @@ async function start() {
 async function pause() {
   stopAudio(); cancelTutor();stopHandsFree();
   if (!paused) { lessonElapsed += performance.now() - lessonStarted; paused = true; document.body.classList.add('on-break');stopCamera();setListenerState('off','Перерыв. Камера и микрофон выключены.'); $('pauseBtn').textContent = 'Продолжить занятие'; $('monitorStatus').textContent = 'Перерыв · камера выключена'; }
-  else { await enableCamera(); presence.reset(); paused = false;document.body.classList.remove('on-break'); lessonStarted = performance.now(); $('pauseBtn').textContent = 'Сделать перерыв';startHandsFree().catch(fail); }
+  else { if (lessonCameraEnabled) await enableCamera(); presence.reset(); paused = false;document.body.classList.remove('on-break'); lessonStarted = performance.now(); $('pauseBtn').textContent = 'Сделать перерыв';startHandsFree().catch(fail); }
   controls();
 }
-function stop() { stopHandsFree();api('voice-release',new Uint8Array()).catch(()=>{});running = false; paused = false;document.body.classList.remove('on-break'); stopAudio(); stopCamera(); cancelTutor(); presence.reset(); $('pauseBtn').textContent = 'Сделать перерыв'; $('monitorStatus').textContent = 'Занятие завершено · камера выключена'; showSetup(); controls(); }
+function stop() { stopHandsFree();api('voice-release',new Uint8Array()).catch(()=>{});running = false; paused = false;lessonCameraEnabled=false;document.body.classList.remove('on-break'); stopAudio(); stopCamera(); cancelTutor(); presence.reset(); $('pauseBtn').textContent = 'Сделать перерыв'; $('monitorStatus').textContent = 'Занятие завершено · камера выключена'; showSetup(); controls(); }
 let reminderPending = false;
 async function reminder() {
   if (reminderPending) return;
@@ -429,7 +461,7 @@ async function reminder() {
 }
 function tick(now) {
   requestAnimationFrame(tick);
-  if (running && !paused && !scanning) {
+  if (running && !paused && !scanning && lessonCameraEnabled) {
     try {
       const result = landmarks(now);
       if (!stream?.getVideoTracks().some(t => t.readyState === 'live') || now - lastSeenFrame > 3000) throw new Error('Камера перестала передавать изображение. Нажмите «Продолжить», чтобы подключить её снова.');
@@ -529,7 +561,8 @@ async function answerQuestion(question) {
   };
   try {
     await context().resume();$('tutorStatus').textContent='Думаю, как помочь…';
-    const started=await api('dialog',JSON.stringify({question,level:$('schoolLevel').value,session:dialogId,voice:$('replyVoice').value}));
+    const started=await api('dialog',JSON.stringify({question,level:$('schoolLevel').value,session:dialogId,
+      voice:$('replyVoice').value,request_id:requestId()}));
     if(epoch!==helpEpoch){await api('dialog-cancel',JSON.stringify({id:started.id}));return;}
     dialogId=started.session;currentJob=started.id;
     const deadline=performance.now()+660000;
@@ -545,7 +578,7 @@ async function answerQuestion(question) {
         if(!received&&result.cues?.length)await getAudio(started.id,null,result.cues,result.answer);
         await Promise.all(completions);if(epoch!==helpEpoch)return;
         followupUntil=performance.now()+60000;
-        $('tutorStatus').textContent=result.warning||'Твоя очередь — попробуй следующий шаг.';break;
+        $('tutorStatus').textContent=result.warning||result.limit_warning||'Твоя очередь — попробуй следующий шаг.';break;
       }
       if(result.state==='error')throw new Error(result.warning);
       if(result.state==='cancelled')break;
@@ -604,6 +637,7 @@ async function recognizeHandsFree(wav,listenId){
   setListenerState('processing','Распознаю вопрос. Сейчас отвечу.');
   try{
     const result=await api('speech',wav,true,50000,abort.signal);
+    if(result.limit_warning)$('tutorStatus').textContent=result.limit_warning;
     if(listenId!==listenEpoch||epoch!==helpEpoch||!running||paused)return;
     if(isDirectedSpeech(result.text,performance.now()<followupUntil))await answerQuestion(result.text);
     else setListenerState('listening','Скажи «помоги» и задай вопрос.');
@@ -646,6 +680,7 @@ async function voiceQuestion() {
   try {
     $('tutorStatus').textContent='Распознаю твой вопрос…';
     const result=await api('speech',wav,true,50000);
+    if(result.limit_warning)$('tutorStatus').textContent=result.limit_warning;
     if(epoch!==helpEpoch) return;
     tutorBusy=false;
     await answerQuestion(result.text);
@@ -674,7 +709,7 @@ action('lessonVoiceBtn', () => playVoice('lesson')); action('stopSpeechBtn', can
 $('handsFree').addEventListener('change',()=>{clearError();$('readyHandsFree').checked=$('handsFree').checked;startHandsFree().catch(fail);});
 $('readyHandsFree').addEventListener('change',()=>{$('handsFree').checked=$('readyHandsFree').checked;});
 action('dismissMicIntroBtn',()=>{$('micIntro').hidden=true;});
-document.querySelector('.brand').addEventListener('click',event=>{event.preventDefault();if(running)stop();setupStep('face');});
+document.querySelector('.app-header .brand').addEventListener('click',event=>{event.preventDefault();if(running)stop();setupStep('face');});
 $('replyVoice').addEventListener('change',()=>{if(running&&$('replyVoice').value==='parent')api('voice-warm',new Uint8Array()).catch(()=>{});});
 $('voiceQuestionBtn').addEventListener('click',()=>voiceQuestion().catch(fail));
 $('scanAudio').addEventListener('change',()=>{if(!$('scanAudio').checked) window.speechSynthesis?.cancel();});
@@ -734,11 +769,98 @@ async function refreshMicrophones() {
   } catch {}
 }
 navigator.mediaDevices?.addEventListener('devicechange', refreshMicrophones);
-refreshMicrophones();
-if (location.hash === '#lesson') history.replaceState({}, '', location.pathname + location.search);
-updateVoiceMode(); controls(); requestAnimationFrame(tick);
+
+function authMode(mode) {
+  const login = mode === 'login';
+  $('loginForm').hidden = !login;
+  $('registerForm').hidden = login;
+  $('loginTab').setAttribute('aria-selected', String(login));
+  $('registerTab').setAttribute('aria-selected', String(!login));
+  $('authError').hidden = true;
+  requestAnimationFrame(() => $(login ? 'loginIdentifier' : 'registerLogin').focus());
+}
+
+function authBusy(form, busy) {
+  for (const control of form.elements) control.disabled = busy;
+  const button = form.querySelector('button[type=submit]');
+  if (button) {
+    if (!button.dataset.label) button.dataset.label = button.textContent;
+    button.textContent = busy ? 'Подождите…' : button.dataset.label;
+  }
+}
+
+async function authRequest(path, values) {
+  const response = await fetch('/api/auth/' + path, {
+    method: 'POST',
+    headers: {'X-App-Token': token, 'Content-Type': 'application/json'},
+    body: JSON.stringify(values),
+  });
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || `Ошибка ${response.status}`);
+  return data;
+}
+
+async function startApplication() {
+  if (appStarted) return;
+  appStarted = true;
+  refreshMicrophones();
+  if (location.hash === '#lesson') history.replaceState({}, '', location.pathname + location.search);
+  updateVoiceMode(); controls(); requestAnimationFrame(tick);
+  try { await poll(); await restoreAvatar(); }
+  catch (error) { online = false; fail(error); }
+  pollLoop();
+}
+
+function showApplication(user) {
+  currentUser = user;
+  authenticated = true;
+  $('accountLogin').textContent = user.is_admin ? `${user.login} · Админ` : user.login;
+  $('authPage').hidden = true;
+  document.querySelector('.app-header').hidden = false;
+  $('setupPage').hidden = false;
+  document.body.classList.remove('auth-pending');
+  startApplication();
+}
+
+$('loginTab').addEventListener('click', () => authMode('login'));
+$('registerTab').addEventListener('click', () => authMode('register'));
+document.querySelector('.auth-brand').addEventListener('click', event => event.preventDefault());
+for (const [formId, path] of [['loginForm', 'login'], ['registerForm', 'register']]) {
+  $(formId).addEventListener('submit', async event => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    $('authError').hidden = true;
+    if (formId === 'registerForm' && $('registerPassword').value !== $('registerPasswordConfirmation').value) {
+      $('authError').textContent = 'Пароли не совпадают.';
+      $('authError').hidden = false;
+      $('registerPasswordConfirmation').focus();
+      return;
+    }
+    const values = Object.fromEntries(new FormData(form));
+    authBusy(form, true);
+    try {
+      const data = await authRequest(path, values);
+      showApplication(data.user);
+    } catch (error) {
+      $('authError').textContent = error.message || String(error);
+      $('authError').hidden = false;
+    } finally { authBusy(form, false); }
+  });
+}
+$('logoutBtn').addEventListener('click', async () => {
+  $('logoutBtn').disabled = true;
+  try { await authRequest('logout', {}); }
+  finally { location.reload(); }
+});
+
 try {
-  ({token} = await (await fetch('/api/session')).json());
-  await poll(); await restoreAvatar();
-} catch { online = false; }
-pollLoop();
+  const response = await fetch('/api/session');
+  if (!response.ok) throw new Error('Не удалось подключиться к приложению.');
+  const session = await response.json();
+  token = session.token;
+  if (session.user) showApplication(session.user);
+  else authMode('login');
+} catch (error) {
+  $('authError').textContent = error.message || String(error);
+  $('authError').hidden = false;
+}

@@ -6,15 +6,46 @@
 <link rel="stylesheet" href="style.css">
 <script type="importmap">{"imports":{"three":"/vendor/three.module.js"}}</script>
 </head>
-<body>
-<header class="app-header">
+<body class="auth-pending">
+<main id="authPage" class="auth-page">
+  <section class="auth-welcome" aria-labelledby="authTitle">
+    <a class="brand auth-brand" href="#" aria-label="ParentAI"><svg viewBox="0 0 44 44" aria-hidden="true"><rect width="44" height="44" rx="16" fill="#eedcc7"/><path d="M13 24c0-6 4-11 9-11s9 5 9 11" fill="none" stroke="#43695d" stroke-width="3" stroke-linecap="round"/><circle cx="17" cy="23" r="1.5" fill="#43695d"/><circle cx="27" cy="23" r="1.5" fill="#43695d"/><path d="M18 29q4 4 8 0" fill="none" stroke="#43695d" stroke-width="2" stroke-linecap="round"/></svg><span>Parent<span class="brand-ai">AI</span></span></a>
+    <span class="eyebrow">СПОКОЙНАЯ УЧЁБА РЯДОМ</span>
+    <h1 id="authTitle">Поддержка родителя, даже когда он не рядом</h1>
+    <p>Войдите в свой аккаунт, чтобы подготовить образ и голос родителя для занятий.</p>
+    <div class="auth-privacy"><span aria-hidden="true">♡</span><div><strong>Ваши данные остаются здесь</strong><p>Пароль хранится только в виде защищённого хеша. Снимки и голос не покидают устройство.</p></div></div>
+  </section>
+  <section class="card auth-card" aria-label="Вход и регистрация">
+    <div class="auth-tabs" role="tablist" aria-label="Выберите действие">
+      <button id="loginTab" type="button" role="tab" aria-selected="true" aria-controls="loginForm">Войти</button>
+      <button id="registerTab" type="button" role="tab" aria-selected="false" aria-controls="registerForm">Регистрация</button>
+    </div>
+    <form id="loginForm">
+      <h2>С возвращением</h2><p class="muted">Используйте логин или почту — как удобнее.</p>
+      <label for="loginIdentifier">Логин или почта</label><input id="loginIdentifier" name="identifier" type="text" autocomplete="username" maxlength="254" required autofocus>
+      <label for="loginPassword">Пароль</label><input id="loginPassword" name="password" type="password" autocomplete="current-password" maxlength="128" required>
+      <button class="full auth-submit" type="submit">Войти в аккаунт</button>
+    </form>
+    <form id="registerForm" hidden>
+      <h2>Создать аккаунт</h2><p class="muted">Все поля обязательны.</p>
+      <label for="registerLogin">Логин</label><input id="registerLogin" name="login" type="text" autocomplete="username" minlength="3" maxlength="32" pattern="[A-Za-zА-Яа-яЁё0-9][A-Za-zА-Яа-яЁё0-9._-]{2,31}" title="От 3 до 32 символов: буквы, цифры, точка, дефис и подчёркивание" required>
+      <label for="registerEmail">Почта</label><input id="registerEmail" name="email" type="email" autocomplete="email" maxlength="254" required>
+      <label for="registerPassword">Пароль</label><input id="registerPassword" name="password" type="password" autocomplete="new-password" minlength="8" maxlength="128" required><small class="field-hint">Минимум 8 символов</small>
+      <label for="registerPasswordConfirmation">Подтвердите пароль</label><input id="registerPasswordConfirmation" name="password_confirmation" type="password" autocomplete="new-password" minlength="8" maxlength="128" required>
+      <button class="full auth-submit" type="submit">Создать аккаунт</button>
+    </form>
+    <p id="authError" class="auth-error" role="alert" hidden></p>
+  </section>
+</main>
+<header class="app-header" hidden>
   <a class="brand" href="#" aria-label="ParentAI — начало"><svg viewBox="0 0 44 44" aria-hidden="true"><rect width="44" height="44" rx="16" fill="#eedcc7"/><path d="M13 24c0-6 4-11 9-11s9 5 9 11" fill="none" stroke="#43695d" stroke-width="3" stroke-linecap="round"/><circle cx="17" cy="23" r="1.5" fill="#43695d"/><circle cx="27" cy="23" r="1.5" fill="#43695d"/><path d="M18 29q4 4 8 0" fill="none" stroke="#43695d" stroke-width="2" stroke-linecap="round"/></svg><span>Parent<span class="brand-ai">AI</span></span></a>
   <div class="header-context"><h1>Рядом во время занятий</h1><p id="connection" role="status">Подключаемся…</p></div>
   <span class="privacy-chip">Камера ребёнка остаётся на устройстве</span>
+  <div class="account"><span id="accountLogin"></span><button id="logoutBtn" type="button" class="quiet">Выйти</button></div>
   <div id="lessonToolbar" class="lesson-toolbar" hidden><button id="pauseBtn" class="secondary" disabled>Сделать перерыв</button><button id="stopBtn" class="quiet" disabled>Закончить</button></div>
 </header>
 <p id="readyHint" role="status"></p><div id="error" role="alert" hidden></div>
-<main id="setupPage">
+<main id="setupPage" hidden>
   <nav class="setup-steps" aria-label="Настройка родителя">
     <button type="button" data-setup-step="face" aria-current="step"><span>1</span><div>Ваш образ<small>Лицо, шея и плечи</small></div></button>
     <button type="button" data-setup-step="voice"><span>2</span><div>Ваш голос<small>Запишем и послушаем</small></div></button>
@@ -59,8 +90,22 @@
     <span class="eyebrow">МОЖНО НАЧИНАТЬ</span><h2>Устроимся поудобнее</h2><p>Поставьте рядом тетрадь и задание. Ребёнок садится перед камерой — и можно заниматься вместе с аватаром.</p>
     <div class="ready-features"><div><span aria-hidden="true">☀</span><p><strong>Спрашивай как обычно</strong>Скажи «помоги» и задай вопрос. Сначала аватар даст подсказку.</p></div><div><span aria-hidden="true">♡</span><p><strong>Можно сделать перерыв</strong>Кнопка перерыва выключает и камеру, и микрофон.</p></div></div>
     <label class="toggle-row ready-mic"><input id="readyHandsFree" type="checkbox" checked><span>Включить микрофон при начале занятия<small>Можно говорить без кнопки. В браузере нужно разрешить доступ.</small></span></label>
+    <label class="toggle-row ready-camera"><input id="readyCamera" type="checkbox"><span>Включить проверку присутствия камерой<small>По умолчанию выключена. Видео обрабатывается только на этом устройстве и не сохраняется.</small></span></label>
     <p id="readyMicHint" class="helper">Вопросы голосом распознаёт Яндекс. Камера и образец голоса родителя остаются здесь.</p>
     <button id="startBtn" class="next-step start-button" disabled>Начать занятие →</button><p id="startHint" class="helper"></p>
+    <section class="parent-summary" aria-labelledby="parentSummaryTitle">
+      <div class="section-title"><h3 id="parentSummaryTitle">Для родителя</h3><span id="planName" class="status-chip">Free</span></div>
+      <div class="summary-grid">
+        <div><strong id="summaryAssignments">0</strong><span>заданий</span></div>
+        <div><strong id="summaryHints">0</strong><span>подсказок</span></div>
+        <div><strong id="summaryIndependent">0</strong><span>самостоятельно</span></div>
+        <div><strong id="summaryDifficult">0</strong><span>со сложностями</span></div>
+      </div>
+      <p id="summaryText" class="helper">Пока нет завершённых заданий.</p>
+      <p class="summary-cost"><span>Расход: сегодня <strong id="summaryToday">0,00 ₽</strong>, за месяц <strong id="summaryCost">0,00 ₽</strong></span><span>Осталось: <strong id="summaryRemaining">5 заданий</strong></span></p>
+      <p class="muted">Сохраняются только счётчики и итог занятия — без полного разговора, фото и аудиозаписей.</p>
+    </section>
+    <p class="photo-next"><strong>Следующий сценарий: фото задания.</strong> Интерфейс и серверный контракт будут добавлены после выбора OCR-провайдера и отдельного согласования его стоимости.</p>
     <details class="device-settings"><summary>Что важно знать родителю</summary><p>Камера проверяет, есть ли лицо в кадре. Она не определяет, решает ли ребёнок задание. Читать и смотреть в тетрадь можно. Если ребёнок ушёл на 8 секунд, прозвучит напоминание.</p><p id="assetsStatus">Камера: подключение…</p><p id="ttsStatus">Голос: подключение…</p><p class="muted">Новые ответы голосом родителя создаются на компьютере; первый ответ может потребовать прогрева модели.</p></details>
   </section>
 </main>
@@ -80,7 +125,7 @@
     <section class="card tutor"><div class="section-title"><h2>Что не получается?</h2><span class="hint-chip">Подсказка за подсказкой</span></div><p id="tutorStatus" role="status">Можно спросить голосом или написать здесь.</p>
       <div id="tutorMessages" role="log" aria-label="Обсуждение задания"></div>
       <form id="tutorForm"><label for="assignment">Твой вопрос или задание</label><textarea id="assignment" rows="3" maxlength="4000" placeholder="Например: не понимаю, как решить 2x + 3 = 11"></textarea><div class="buttons"><button id="askBtn" type="submit">Дай подсказку</button><button id="cancelHelpBtn" class="secondary" type="button" hidden>Отменить</button><button id="clearHelpBtn" class="quiet" type="button">Новое задание</button></div></form>
-      <details class="lesson-settings"><summary>Настройки с родителем</summary><label for="schoolLevel">Как объяснять</label><select id="schoolLevel"><option value="начальная школа">1–4 класс</option><option value="средняя школа">5–9 класс</option><option value="старшая школа">10–11 класс</option></select><label for="replyVoice">Каким голосом отвечать</label><select id="replyVoice"><option value="parent">Голос родителя</option><option value="yandex">Обычный голос Яндекса · быстрее</option></select><p class="muted">Голос Яндекса оплачивается по тарифу SpeechKit. Голос родителя создаётся локально через XTTS.</p><p class="muted" id="tutorPrivacy">В режиме без кнопки микрофон включён во время занятия. Короткие фрагменты речи отправляются в SpeechKit, текст вопроса и история — в YandexGPT. Во время ответа речь не распознаётся. Шумы фильтруются, но речь телевизора иногда может пройти фильтр. В быстром режиме текст ответа также отправляется в SpeechKit. Камера ребёнка и образец голоса родителя остаются на устройстве. Снимки родителя для аватара обрабатываются и хранятся только на этом устройстве.</p></details>
+      <details class="lesson-settings"><summary>Настройки с родителем</summary><label for="schoolLevel">Как объяснять</label><select id="schoolLevel"><option value="начальная школа">1–4 класс</option><option value="средняя школа">5–9 класс</option><option value="старшая школа">10–11 класс</option></select><label for="replyVoice">Каким голосом отвечать</label><select id="replyVoice"><option value="yandex">Обычный голос Яндекса · основной</option><option value="parent">Голос родителя · только некоммерческий XTTS</option></select><p class="muted">Голос Яндекса оплачивается по тарифу SpeechKit v3. Клонирование XTTS выключено до подтверждения коммерческой лицензии.</p><p class="muted" id="tutorPrivacy">В режиме без кнопки микрофон включён во время занятия. Короткие фрагменты речи отправляются в SpeechKit, а текст нового задания один раз — в YandexGPT для подготовки плана подсказок. Во время ответа речь не распознаётся. Шумы фильтруются, но речь телевизора иногда может пройти фильтр. Для озвучивания сокращённый текст ответа также отправляется в SpeechKit. Камера ребёнка и образец голоса родителя остаются на устройстве. Снимки родителя для аватара обрабатываются и хранятся только на этом устройстве.</p></details>
     </section>
     <section class="card child-camera"><div class="section-title"><h2>Ты в кадре</h2><span class="privacy-chip small">Только здесь</span></div><div id="lessonCameraSlot"></div><p id="monitorStatus" role="status">Готово к занятию</p><p class="helper">Смотри в тетрадь, думай, пробуй. Я подожду.</p></section>
   </aside>

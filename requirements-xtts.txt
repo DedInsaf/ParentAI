@@ -1,0 +1,4 @@
+# Только для некоммерческой разработки после принятия Coqui Public Model License.
+-r requirements.txt
+coqui-tts[cpu,codec]==0.27.5
+transformers>=4.57,<5

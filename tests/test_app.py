@@ -142,6 +142,7 @@ class RuntimeTests(unittest.TestCase):
         self.addCleanup(self.r.close)
 
     def test_invalid_reference_does_not_replace_existing(self):
+        self.r.xtts_enabled = True
         self.r.reference(wav(speech()))
         path = Path(self.temp.name)/'reference.wav'
         original = path.read_bytes()
@@ -153,6 +154,8 @@ class RuntimeTests(unittest.TestCase):
         with self.assertRaises(ValueError): self.r.reference(wav(speech()))
 
     def test_bank_is_atomic(self):
+        self.r.xtts_enabled = True
+        self.r.reference_mode = 'clone'
         def synth(bank):
             for i in range(len(PHRASES)):
                 (bank / f'phrase-{i}.wav').write_bytes(wav(speech()[:48000]))
@@ -185,6 +188,11 @@ class RuntimeTests(unittest.TestCase):
         published = self.r.safe_audio(self.r.manifest[0]['file'])
         self.assertEqual(published.read_bytes(), (self.r.data/'reference.wav').read_bytes())
 
+    def test_xtts_clone_is_disabled_without_explicit_noncommercial_opt_in(self):
+        self.assertFalse(self.r.snapshot()['xtts_enabled'])
+        with self.assertRaisesRegex(ValueError, 'лицензия'):
+            self.r.reference(wav(speech()), mode='clone')
+
     def test_cancellation_does_not_publish_bank(self):
         self.r.cancel.set()
         self.r.reference(wav(speech()[:48000*8]), mode='direct')
@@ -200,6 +208,7 @@ class RuntimeTests(unittest.TestCase):
             process = popen([sys.executable, '-c', 'import time; time.sleep(30)'], **kwargs)
             processes.append(process)
             return process
+        self.r.xtts_enabled = True
         self.r.reference(wav(speech()))
         with patch('runtime.subprocess.Popen', side_effect=spawn):
             self.r.generate()

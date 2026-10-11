@@ -1,0 +1,31 @@
+{
+  "currency": "RUB",
+  "pricing_source_updated": "2026-10-10",
+  "warning_ratio": "0.80",
+  "prices": {
+    "llm_input_per_1000_tokens": "0.20",
+    "llm_output_per_1000_tokens": "0.20",
+    "stt_per_15_seconds": "0.1626",
+    "tts_v3_per_250_chars": "0.1626"
+  },
+  "plans": {
+    "free": {
+      "title": "Free",
+      "monthly_price_rubles": 0,
+      "assignments": 5,
+      "llm_requests": 10,
+      "stt_billed_seconds": 150,
+      "tts_blocks": 3,
+      "external_cost_rubles": "5.00"
+    },
+    "paid": {
+      "title": "Paid beta",
+      "monthly_price_rubles": 299,
+      "assignments": 120,
+      "llm_requests": 160,
+      "stt_billed_seconds": 6000,
+      "tts_blocks": 500,
+      "external_cost_rubles": "85.00"
+    }
+  }
+}

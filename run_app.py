@@ -2,8 +2,9 @@
 import argparse
 import threading
 import webbrowser
-from runtime import Runtime
+from runtime import Runtime, ROOT
 from server import AppServer
+from tutor import load_local_env
 
 
 def main():
@@ -13,6 +14,7 @@ def main():
     parser.add_argument('--no-models', action='store_true', help='Диагностика интерфейса без загрузки моделей')
     parser.add_argument('--port', type=int, default=8767)
     args = parser.parse_args()
+    load_local_env(ROOT / 'parentai.env')
     runtime = Runtime()
     try:
         server = AppServer(runtime, args.port)
