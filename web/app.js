@@ -23,7 +23,7 @@ const presence = new Presence();
 const pendingActions = new Set();
 let online = false, recordCancelled = false, recordingStream, recordingAbort, referenceRejected = false, previewUrl, renderTime = 0;
 let referenceLoaded = false, voiceModeTouched = false;
-let lessonStarted = 0, lessonElapsed = 0, tutorBusy = false, lessonCameraEnabled = false;
+let lessonStarted = 0, lessonElapsed = 0, tutorBusy = false, lessonCameraEnabled = false, lessonPresenceEnabled = false;
 let activeCues=[], audioStarted=0, dialogId=null, helpEpoch=0;
 let questionRecording=false, questionStop=false, questionCancel=false, questionAbort, questionStream;
 let currentJob=null;
@@ -34,6 +34,7 @@ const audioSources=new Set();let audioNext=0;
 const avatarMotion=new AvatarMotion();let childSpeakingUntil=0;
 const voiceBusy = () => ['generating', 'cancelling'].includes(status.voice);
 const stopTracks = value => value?.getTracks().forEach(t => t.stop());
+const cameraLive = () => !!stream?.getVideoTracks().some(track => track.readyState === 'live');
 function mediaError(e) {
   const messages = {
     NotAllowedError: 'Доступ к камере или микрофону запрещён. Разрешите его для браузера в «Системные настройки → Конфиденциальность и безопасность», затем повторите.',
@@ -90,6 +91,8 @@ function controls() {
   $('startBtn').disabled = !online || transition || !mesh || !(status.phrases?.length) || running || scanning || recording || voiceBusy();
   $('pauseBtn').disabled = !running || transition;
   $('stopBtn').disabled = !running;
+  $('retryCameraBtn').hidden = !running || paused || cameraLive();
+  $('retryCameraBtn').disabled = !running || paused || pendingActions.has('retryCameraBtn');
   $('lessonVoiceBtn').disabled = !running || paused || tutorBusy || questionRecording || !(status.phrases?.length);
   $('stopSpeechBtn').disabled = !playing;
   $('askBtn').disabled = tutorBusy || questionRecording || listenerPending || !online || !status.tutor?.enabled;
@@ -234,7 +237,11 @@ function fit() {
   camera.updateProjectionMatrix();
 }
 async function enableCamera() {
-  if (stream && stream.getVideoTracks().some(t => t.readyState === 'live')) return;
+  if (cameraLive()) {
+    if (video.srcObject !== stream) video.srcObject = stream;
+    await withTimeout(video.play(),10000);
+    lastSeenFrame=performance.now();detectError=false;controls();return;
+  }
   stopCamera(); const epoch=cameraEpoch;cameraAbort=new AbortController();
   let candidate;
   try {
@@ -470,32 +477,51 @@ async function start() {
   lessonCameraEnabled = $('readyCamera').checked;
   if (lessonCameraEnabled) {
     try {
-      await Promise.all([enableCamera(),dependencies()]);
-      let result;
-      for (let attempt = 0; attempt < 10; attempt++) {
-        result = detectVideo(performance.now());
-        if (result.faceLandmarks?.length === 1) break;
-        await sleep(120);
-      }
-      if (result.faceLandmarks?.length !== 1) throw new Error('Перед началом в кадре должен быть один ребёнок.');
-      if(document.hidden || !stream) throw new Error('Подключение занятия отменено.');
+      await enableCamera();
+      if(document.hidden || !cameraLive()) throw new Error('Подключение занятия отменено.');
     } catch(error){stopCamera();stopHandsFree();throw error;}
   } else {
     stopCamera();
     $('monitorStatus').textContent = 'Камера выключена родителем';
   }
-  stopAudio(); running = true; paused = false; presence.reset(); lessonElapsed = 0; lessonStarted = performance.now(); showLesson(); controls();
+  stopAudio(); running = true; paused = false; presence.reset(); lessonElapsed = 0; lessonStarted = performance.now(); showLesson();
+  if(lessonCameraEnabled) startLessonPresence();
+  else $('monitorStatus').textContent='Камера выключена родителем';
+  controls();
   if($('replyVoice').value==='parent') api('voice-warm',new Uint8Array()).catch(()=>{});
   startHandsFree().catch(fail);
   try { await playVoice('lesson'); } catch(e) { fail(e); }
 }
 async function pause() {
   stopAudio(); cancelTutor();stopHandsFree();
-  if (!paused) { lessonElapsed += performance.now() - lessonStarted; paused = true; document.body.classList.add('on-break');stopCamera();setListenerState('off','Перерыв. Камера и микрофон выключены.'); $('pauseBtn').textContent = 'Продолжить занятие'; $('monitorStatus').textContent = 'Перерыв · камера выключена'; }
-  else { if (lessonCameraEnabled) await enableCamera(); presence.reset(); paused = false;document.body.classList.remove('on-break'); lessonStarted = performance.now(); $('pauseBtn').textContent = 'Сделать перерыв';startHandsFree().catch(fail); }
+  if (!paused) { lessonElapsed += performance.now() - lessonStarted; paused = true; lessonPresenceEnabled=false;document.body.classList.add('on-break');stopCamera();setListenerState('off','Перерыв. Камера и микрофон выключены.'); $('pauseBtn').textContent = 'Продолжить занятие'; $('monitorStatus').textContent = 'Перерыв · камера выключена'; }
+  else { if (lessonCameraEnabled) await enableCamera(); presence.reset(); paused = false;document.body.classList.remove('on-break'); lessonStarted = performance.now(); $('pauseBtn').textContent = 'Сделать перерыв';if(lessonCameraEnabled)startLessonPresence();startHandsFree().catch(fail); }
   controls();
 }
-function stop() { stopHandsFree();api('voice-release',new Uint8Array()).catch(()=>{});running = false; paused = false;lessonCameraEnabled=false;document.body.classList.remove('on-break'); stopAudio(); stopCamera(); cancelTutor(); presence.reset(); $('pauseBtn').textContent = 'Сделать перерыв'; $('monitorStatus').textContent = 'Занятие завершено · камера выключена'; showSetup(); controls(); }
+function stop() { stopHandsFree();api('voice-release',new Uint8Array()).catch(()=>{});running = false; paused = false;lessonCameraEnabled=false;lessonPresenceEnabled=false;document.body.classList.remove('on-break'); stopAudio(); stopCamera(); cancelTutor(); presence.reset(); $('pauseBtn').textContent = 'Сделать перерыв'; $('monitorStatus').textContent = 'Занятие завершено · камера выключена'; showSetup(); controls(); }
+function startLessonPresence() {
+  lessonPresenceEnabled=!!detector;
+  $('monitorStatus').textContent=lessonPresenceEnabled?'Камера включена · ищем лицо':'Камера включена · запускаем проверку лица';
+  if(lessonPresenceEnabled)return;
+  dependencies().then(()=>{
+    if(!running||paused||!lessonCameraEnabled||!cameraLive())return;
+    lessonPresenceEnabled=true;lastFrame=-1;presence.reset();$('monitorStatus').textContent='Камера включена · ищем лицо';
+  }).catch(()=>{
+    if(running&&!paused&&lessonCameraEnabled&&cameraLive())$('monitorStatus').textContent='Камера включена · проверка лица временно недоступна';
+  });
+}
+async function reconnectLessonCamera() {
+  if (!running || paused) return;
+  lessonCameraEnabled=true;$('readyCamera').checked=true;
+  $('monitorStatus').textContent='Подключаем камеру…';controls();
+  try {
+    await enableCamera();
+    if(!cameraLive()) throw new Error('Камера не передаёт изображение. Повторите подключение.');
+    detectError=false;presence.reset();startLessonPresence();
+  } catch(error) {
+    lessonCameraEnabled=false;lessonPresenceEnabled=false;stopCamera();$('monitorStatus').textContent='Камера не подключена';throw error;
+  } finally {controls();}
+}
 let reminderPending = false;
 async function reminder() {
   if (reminderPending) return;
@@ -508,13 +534,16 @@ function tick(now) {
   requestAnimationFrame(tick);
   if (running && !paused && !scanning && lessonCameraEnabled) {
     try {
-      const result = landmarks(now);
-      if (!stream?.getVideoTracks().some(t => t.readyState === 'live') || now - lastSeenFrame > 3000) throw new Error('Камера перестала передавать изображение. Нажмите «Продолжить», чтобы подключить её снова.');
-      const found = result?.faceLandmarks?.length > 0;
-      const current = presence.update(found, now / 1000);
-      $('monitorStatus').textContent = {present:'Лицо в кадре · занятие идёт',missing:'Лицо вне кадра · ждём возвращения',absent:'Пора вернуться к занятию',returning:'С возвращением'}[current.state];
-      if (found && audioKind === 'reminder') stopAudio();
-      if (current.remind && !tutorBusy && !questionRecording && !listenerPending && now>childSpeakingUntil && !playing) reminder();
+      if (!cameraLive() || video.readyState < 2) throw new Error('Камера перестала передавать изображение. Нажмите «Продолжить», чтобы подключить её снова.');
+      if(lessonPresenceEnabled){
+        const result = landmarks(now);
+        if (now - lastSeenFrame > 3000) throw new Error('Камера перестала передавать изображение. Нажмите «Продолжить», чтобы подключить её снова.');
+        const found = result?.faceLandmarks?.length > 0;
+        const current = presence.update(found, now / 1000);
+        $('monitorStatus').textContent = {present:'Лицо в кадре · занятие идёт',missing:'Лицо вне кадра · ждём возвращения',absent:'Пора вернуться к занятию',returning:'С возвращением'}[current.state];
+        if (found && audioKind === 'reminder') stopAudio();
+        if (current.remind && !tutorBusy && !questionRecording && !listenerPending && now>childSpeakingUntil && !playing) reminder();
+      }
     } catch (e) { if (!detectError) { detectError = true; pause(); fail(e); } }
   }
   if (mesh && !document.hidden && now - renderTime >= 33) {
@@ -769,6 +798,7 @@ $('scannerDialog').addEventListener('cancel',event=>{event.preventDefault();canc
 action('cancelVoiceBtn', async () => { await api('cancel', new Uint8Array()); await poll(); });
 action('scanBtn', scan); action('recordBtn', record); action('generateBtn', async () => { await api('generate', new Uint8Array()); await poll(); });
 action('testVoiceBtn', () => playVoice('preview')); action('startBtn', start); action('pauseBtn', pause); action('stopBtn', stop);
+action('retryCameraBtn', reconnectLessonCamera);
 action('lessonVoiceBtn', () => playVoice('lesson')); action('stopSpeechBtn', cancelTutor);
 $('handsFree').addEventListener('change',()=>{clearError();$('readyHandsFree').checked=$('handsFree').checked;startHandsFree().catch(fail);});
 $('readyHandsFree').addEventListener('change',()=>{$('handsFree').checked=$('readyHandsFree').checked;});

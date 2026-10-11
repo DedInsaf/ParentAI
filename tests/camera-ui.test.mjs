@@ -5,11 +5,24 @@ import test from 'node:test';
 const html = readFileSync(new URL('../web/avatar.html', import.meta.url), 'utf8');
 const script = readFileSync(new URL('../web/app.js', import.meta.url), 'utf8');
 
-test('camera opt-in opens an immediate local preview on every plan', () => {
-  assert.match(html, /id="readyCamera"/);
+test('camera is enabled by default with an immediate local preview on every plan', () => {
+  assert.match(html, /id="readyCamera"[^>]+checked/);
   assert.match(html, /id="readyCameraPreview"[^>]+hidden/);
-  assert.match(html, /Камера доступна на любом тарифе/);
+  assert.match(html, /Включена по умолчанию на любом тарифе/);
   assert.match(script, /readyCamera'\)\.addEventListener\('change'/);
   assert.match(script, /showReadyCameraPreview\(\)/);
-  assert.match(script, /Promise\.all\(\[enableCamera\(\),dependencies\(\)\]\)/);
+  assert.match(script, /await enableCamera\(\)/);
+});
+
+test('lesson can reconnect camera and does not require a face before opening', () => {
+  assert.match(html, /id="retryCameraBtn"/);
+  assert.match(script, /action\('retryCameraBtn', reconnectLessonCamera\)/);
+  assert.match(script, /cameraLive\(\)/);
+  assert.doesNotMatch(script, /Перед началом в кадре должен быть один ребёнок/);
+});
+
+test('face detection failure does not switch off a working lesson camera', () => {
+  assert.match(script, /function startLessonPresence\(\)/);
+  assert.match(script, /Камера включена · проверка лица временно недоступна/);
+  assert.match(script, /if\(lessonPresenceEnabled\)\{/);
 });

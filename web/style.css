@@ -186,6 +186,7 @@ body.in-lesson #readyHint:empty{display:none}
 #monitorStatus{font-size:13px;color:var(--muted)}
 .child-camera .buttons{margin-top:12px}
 .child-camera button{font-size:13px;padding:10px 14px}
+#retryCameraBtn{width:100%;margin-top:12px}
 .child-camera .helper{margin-bottom:0}
 #tutorMessages{max-height:330px;overflow:auto;display:grid;gap:12px;margin:14px 0;scrollbar-width:thin}
 .chat-message{margin:0;padding:16px 18px;white-space:pre-wrap;overflow-wrap:anywhere;border-radius:20px;background:#f5f0e7;font-size:15px}
