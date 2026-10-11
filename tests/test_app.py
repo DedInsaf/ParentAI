@@ -188,10 +188,15 @@ class RuntimeTests(unittest.TestCase):
         published = self.r.safe_audio(self.r.manifest[0]['file'])
         self.assertEqual(published.read_bytes(), (self.r.data/'reference.wav').read_bytes())
 
-    def test_xtts_clone_is_disabled_without_explicit_noncommercial_opt_in(self):
-        self.assertFalse(self.r.snapshot()['xtts_enabled'])
+    def test_parent_voice_is_enabled_by_default_and_can_be_explicitly_disabled(self):
+        self.assertTrue(self.r.snapshot()['xtts_enabled'])
+        self.r.reference(wav(speech()), mode='clone')
+        self.assertEqual(self.r.reference_mode,'clone')
+        with patch.dict('os.environ',{'PARENTAI_ENABLE_XTTS':'0'}):
+            disabled=Runtime(Path(self.temp.name)/'disabled');self.addCleanup(disabled.close)
+        self.assertFalse(disabled.snapshot()['xtts_enabled'])
         with self.assertRaisesRegex(ValueError, 'лицензия'):
-            self.r.reference(wav(speech()), mode='clone')
+            disabled.reference(wav(speech()), mode='clone')
 
     def test_cancellation_does_not_publish_bank(self):
         self.r.cancel.set()

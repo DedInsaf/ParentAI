@@ -50,7 +50,7 @@ class PlategaClient:
                 "interval": 3,
                 "intervalCount": 1,
             },
-            "description": "ParentAI Paid beta — ежемесячная подписка",
+            "description": "Адым Paid beta — ежемесячная подписка",
         }, ensure_ascii=False).encode("utf-8")
         request = urllib.request.Request(
             PLATEGA_SUBSCRIPTION_ENDPOINT, data=body, method="POST", headers={

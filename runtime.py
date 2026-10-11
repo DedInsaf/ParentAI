@@ -37,7 +37,13 @@ class Runtime:
         self.process = None
         self.worker = None
         self.reply_busy = False
-        self.xtts_enabled = os.getenv('PARENTAI_ENABLE_XTTS', '0') == '1'
+        # PRODUCT INVARIANT: Adym speaks in the parent's recorded/cloned
+        # voice by default. A generic provider voice makes the avatar feel like
+        # an unrelated assistant and defeats the core promise of the product.
+        # Deployments that cannot use XTTS under their chosen licence must opt
+        # out explicitly with PARENTAI_ENABLE_XTTS=0; never silently make a
+        # third-party voice the default.
+        self.xtts_enabled = os.getenv('PARENTAI_ENABLE_XTTS', '1').strip().lower() not in ('0','false','no')
         from voice_engine import VoiceEngine
         self.voice_engine=VoiceEngine()
         self.reference_mode = 'clone' if self.xtts_enabled else 'direct'

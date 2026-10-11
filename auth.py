@@ -14,7 +14,10 @@ import unicodedata
 
 
 PASSWORD_ITERATIONS = 600_000
-SESSION_LIFETIME = 30 * 24 * 60 * 60
+# A remembered login is renewed whenever the application starts. Ten years is
+# effectively "until logout" for this local application, while still leaving
+# every session with a finite expiry in SQLite.
+SESSION_LIFETIME = 10 * 365 * 24 * 60 * 60
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
@@ -166,17 +169,23 @@ class AuthStore:
             )
         return token
 
-    def user_for_session(self, token) -> User | None:
+    def user_for_session(self, token, *, renew=False) -> User | None:
         if not isinstance(token, str) or not token:
             return None
         now = int(time.time())
+        token_hash = sha256(token.encode()).digest()
         with self._connect() as connection:
             row = connection.execute(
                 """SELECT users.id, users.login, users.email, users.role
                    FROM sessions JOIN users ON users.id = sessions.user_id
                    WHERE sessions.token_hash = ? AND sessions.expires_at > ?""",
-                (sha256(token.encode()).digest(), now),
+                (token_hash, now),
             ).fetchone()
+            if row and renew:
+                connection.execute(
+                    "UPDATE sessions SET expires_at = ? WHERE token_hash = ?",
+                    (now + SESSION_LIFETIME, token_hash),
+                )
         return User(row["id"], row["login"], row["email"], row["role"]) if row else None
 
     def set_role(self, identifier, role):

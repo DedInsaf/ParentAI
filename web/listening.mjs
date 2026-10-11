@@ -38,3 +38,14 @@ export function isDirectedSpeech(text,followup=false){
   const stuck=/(не понимаю|не получается|не знаю|не понял|не поняла|это правильно|проверь|решить|уравнение|задачу)/u.test(cleaned);
   return addressed||stuck||(followup && /[а-яё0-9]/u.test(cleaned));
 }
+
+export function classifySpeechRecognitionError(error){
+  const message=String(error?.message||error||'Неизвестная ошибка распознавания речи.').trim();
+  const retryableAudio=/(не слышно речи|не разобрал вопрос|повторите или введите текст|запись вопроса неполная|некорректная запись вопроса)/iu.test(message);
+  if(retryableAudio)return {stop:false,message:'Не разобрал речь. Подойди ближе к микрофону и попробуй ещё раз.'};
+
+  // Provider, network, access, and quota failures must be shown verbatim. Hiding
+  // them behind "не разобрал речь" makes a SpeechKit outage look like a bad mic
+  // and causes the hands-free loop to keep sending requests to a broken service.
+  return {stop:true,message};
+}

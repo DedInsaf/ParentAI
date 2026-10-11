@@ -2,18 +2,18 @@
 <html lang="ru">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="theme-color" content="#faf7f2"><title>ParentAI · Давай разберёмся вместе</title>
+<meta name="theme-color" content="#faf7f2"><title>Адым · шаг к самостоятельной учёбе</title>
 <link rel="stylesheet" href="style.css">
 <script type="importmap">{"imports":{"three":"/vendor/three.module.js"}}</script>
 </head>
 <body class="auth-pending">
 <main id="authPage" class="auth-page">
   <section class="auth-welcome" aria-labelledby="authTitle">
-    <a class="brand auth-brand" href="#" aria-label="ParentAI"><svg viewBox="0 0 44 44" aria-hidden="true"><rect width="44" height="44" rx="16" fill="#eedcc7"/><path d="M13 24c0-6 4-11 9-11s9 5 9 11" fill="none" stroke="#43695d" stroke-width="3" stroke-linecap="round"/><circle cx="17" cy="23" r="1.5" fill="#43695d"/><circle cx="27" cy="23" r="1.5" fill="#43695d"/><path d="M18 29q4 4 8 0" fill="none" stroke="#43695d" stroke-width="2" stroke-linecap="round"/></svg><span>Parent<span class="brand-ai">AI</span></span></a>
-    <span class="eyebrow">СПОКОЙНАЯ УЧЁБА РЯДОМ</span>
-    <h1 id="authTitle">Поддержка родителя, даже когда он не рядом</h1>
+    <a class="brand auth-brand" href="#" aria-label="Адым — шаг"><svg viewBox="0 0 44 44" aria-hidden="true"><rect width="44" height="44" rx="16" fill="#eedcc7"/><path d="M13 24c0-6 4-11 9-11s9 5 9 11" fill="none" stroke="#43695d" stroke-width="3" stroke-linecap="round"/><circle cx="17" cy="23" r="1.5" fill="#43695d"/><circle cx="27" cy="23" r="1.5" fill="#43695d"/><path d="M18 29q4 4 8 0" fill="none" stroke="#43695d" stroke-width="2" stroke-linecap="round"/></svg><span>Адым <small class="brand-meaning">· шаг</small></span></a>
+    <span class="eyebrow">«АДЫМ» ПО-ТАТАРСКИ — «ШАГ»</span>
+    <h1 id="authTitle">Шаг к самостоятельной учёбе</h1>
     <p>Войдите в свой аккаунт, чтобы подготовить образ и голос родителя для занятий.</p>
-    <div class="auth-plans" aria-label="Тарифы ParentAI">
+    <div class="auth-plans" aria-label="Тарифы Адым">
       <div><span>Free</span><strong>0 ₽</strong><small>5 заданий в месяц</small></div>
       <div class="auth-plan-paid"><span>Paid beta</span><strong>490 ₽<small>/месяц</small></strong><small>60 заданий и больше голосовых ответов</small></div>
     </div>
@@ -43,8 +43,8 @@
   </section>
 </main>
 <header class="app-header" hidden>
-  <a class="brand" href="#" aria-label="ParentAI — начало"><svg viewBox="0 0 44 44" aria-hidden="true"><rect width="44" height="44" rx="16" fill="#eedcc7"/><path d="M13 24c0-6 4-11 9-11s9 5 9 11" fill="none" stroke="#43695d" stroke-width="3" stroke-linecap="round"/><circle cx="17" cy="23" r="1.5" fill="#43695d"/><circle cx="27" cy="23" r="1.5" fill="#43695d"/><path d="M18 29q4 4 8 0" fill="none" stroke="#43695d" stroke-width="2" stroke-linecap="round"/></svg><span>Parent<span class="brand-ai">AI</span></span></a>
-  <div class="header-context"><h1>Рядом во время занятий</h1><p id="connection" role="status">Подключаемся…</p></div>
+  <a class="brand" href="#" aria-label="Адым — начало"><svg viewBox="0 0 44 44" aria-hidden="true"><rect width="44" height="44" rx="16" fill="#eedcc7"/><path d="M13 24c0-6 4-11 9-11s9 5 9 11" fill="none" stroke="#43695d" stroke-width="3" stroke-linecap="round"/><circle cx="17" cy="23" r="1.5" fill="#43695d"/><circle cx="27" cy="23" r="1.5" fill="#43695d"/><path d="M18 29q4 4 8 0" fill="none" stroke="#43695d" stroke-width="2" stroke-linecap="round"/></svg><span>Адым <small class="brand-meaning">· шаг</small></span></a>
+  <div class="header-context"><h1>Шаг за шагом к самостоятельности</h1><p id="connection" role="status">Подключаемся…</p></div>
   <span class="privacy-chip">Камера ребёнка остаётся на устройстве</span>
   <button id="billingBtn" type="button" class="billing-trigger" aria-haspopup="dialog" aria-controls="billingDialog">
     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7.5A2.5 2.5 0 0 1 6.5 5h11A2.5 2.5 0 0 1 20 7.5v9a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 16.5v-9Z"/><path d="M4 9h16M16 14h1"/></svg>
@@ -62,7 +62,7 @@
     <div class="plan-comparison">
       <article id="freePlanCard" class="plan-card">
         <div class="plan-card-title"><div><span class="plan-name">Free</span><strong>0 ₽</strong></div><span id="freePlanState" class="plan-state">Текущий тариф</span></div>
-        <p>Чтобы спокойно попробовать ParentAI.</p>
+        <p>Чтобы спокойно попробовать Адым.</p>
         <ul><li><strong id="freeAssignments">5</strong> заданий в месяц</li><li><strong id="freePlans">10</strong> планов с подсказками</li><li><strong id="freeVoice">3</strong> голосовых ответа</li></ul>
         <button id="freePlanBtn" type="button" class="secondary full" disabled>Текущий тариф</button>
       </article>
@@ -100,7 +100,7 @@
     <p class="tip">Снимки делаются автоматически. Подсказки звучат вслух: смотрите в объектив, слушайте и спокойно поворачивайте голову.</p>
     <label class="toggle-row"><input id="scanAudio" type="checkbox" checked><span>Подсказывать голосом<small>Подсказывать каждый поворот и момент снимка</small></span></label>
     <label class="toggle-row avatar-consent"><input id="avatarConsent" type="checkbox"><span>Разрешаю создать аватар из моих снимков<small>Обработка выполняется на этом устройстве. Снимки не отправляются в интернет.</small></span></label>
-    <p id="cameraHint" class="helper" role="status">Готовый аватар автоматически сохранится в ParentAI.</p>
+    <p id="cameraHint" class="helper" role="status">Готовый аватар автоматически сохранится в Адым.</p>
     <div id="scannerUnavailable" class="tip" role="status" hidden></div>
     <button id="scanBtn" class="next-step" disabled>Создать мой аватар</button>
     <dialog id="scannerDialog" aria-labelledby="scannerTitle"><div class="scanner-heading"><h2 id="scannerTitle">Создаём ваш образ</h2><button id="cancelScanBtn" type="button" class="secondary">Закрыть сканирование</button></div><p id="scannerMessage" role="status"></p><div id="scannerCamera"></div><div class="capture-status"><strong id="captureStep">Подключаем камеру</strong><span id="captureCountdown" aria-live="off"></span></div></dialog>
@@ -109,8 +109,8 @@
   </section>
   <section class="card voice-setup" data-step-panel="voice" hidden>
     <span class="eyebrow">ЗНАКОМЫЙ ГОЛОС</span><h2>Давайте запишем ваш голос</h2><p>В тихой комнате, обычным спокойным голосом. После записи можно всё прослушать и повторить.</p>
-    <label for="voiceMode">Что будет говорить аватар?</label><select id="voiceMode"><option value="direct">Только моё записанное напоминание</option><option value="clone">Напоминания и новые ответы моим голосом</option></select>
-    <p id="voiceModeHint" class="tip">Запись сохранится как есть. Для новых ответов вашим голосом выберите второй вариант.</p>
+    <label for="voiceMode">Что будет говорить аватар?</label><select id="voiceMode"><option value="clone" selected>Напоминания и новые ответы моим голосом</option><option value="direct">Только моё записанное напоминание</option></select>
+    <p id="voiceModeHint" class="tip">Голос родителя — основной голос Адым. Запись используется для напоминаний и новых ответов.</p>
     <label class="reading-label" for="readText">Прочитайте этот текст</label><blockquote id="readText">Давай вернёмся к заданию. Если нужна помощь, позови меня.</blockquote>
     <details class="device-settings"><summary>Выбрать другой микрофон</summary><label for="microphone">Устройство записи</label><select id="microphone"><option value="">По умолчанию</option></select></details>
     <meter id="level" min="0" max="1" value="0" aria-label="Уровень микрофона"></meter><p id="voiceHint" role="status">Нажмите «Записать», первую секунду помолчите, затем читайте.</p>
@@ -158,7 +158,7 @@
     <section class="card tutor"><div class="section-title"><h2>Что не получается?</h2><span class="hint-chip">Подсказка за подсказкой</span></div><p id="tutorStatus" role="status">Можно спросить голосом или написать здесь.</p>
       <div id="tutorMessages" role="log" aria-label="Обсуждение задания"></div>
       <form id="tutorForm"><label for="assignment">Твой вопрос или задание</label><textarea id="assignment" rows="3" maxlength="4000" placeholder="Например: не понимаю, как решить 2x + 3 = 11"></textarea><div class="buttons"><button id="askBtn" type="submit">Дай подсказку</button><button id="cancelHelpBtn" class="secondary" type="button" hidden>Отменить</button><button id="clearHelpBtn" class="quiet" type="button">Новое задание</button></div></form>
-      <details class="lesson-settings"><summary>Настройки с родителем</summary><label for="schoolLevel">Как объяснять</label><select id="schoolLevel"><option value="начальная школа">1–4 класс</option><option value="средняя школа">5–9 класс</option><option value="старшая школа">10–11 класс</option></select><label for="replyVoice">Каким голосом отвечать</label><select id="replyVoice"><option value="yandex">Обычный голос Яндекса · основной</option><option value="parent">Голос родителя · только некоммерческий XTTS</option></select><p class="muted">Голос Яндекса оплачивается по тарифу SpeechKit v3. Клонирование XTTS выключено до подтверждения коммерческой лицензии.</p><p class="muted" id="tutorPrivacy">В режиме без кнопки микрофон включён во время занятия. Короткие фрагменты речи отправляются в SpeechKit, а текст нового задания один раз — в YandexGPT для подготовки плана подсказок. Во время ответа речь не распознаётся. Шумы фильтруются, но речь телевизора иногда может пройти фильтр. Для озвучивания сокращённый текст ответа также отправляется в SpeechKit. Камера ребёнка и образец голоса родителя остаются на устройстве. Снимки родителя для аватара обрабатываются и хранятся только на этом устройстве.</p></details>
+      <details class="lesson-settings"><summary>Настройки с родителем</summary><label for="schoolLevel">Как объяснять</label><select id="schoolLevel"><option value="начальная школа">1–4 класс</option><option value="средняя школа">5–9 класс</option><option value="старшая школа">10–11 класс</option></select><label for="replyVoice">Каким голосом отвечать</label><select id="replyVoice"><option value="parent" selected>Голос родителя · основной</option><option value="yandex">Обычный голос Яндекса · выбрать вручную</option></select><p class="muted">Адым по умолчанию отвечает голосом родителя. Голос Яндекса используется только после явного ручного выбора. Для XTTS нужна лицензия, подходящая вашему сценарию использования.</p><p class="muted" id="tutorPrivacy">В режиме без кнопки микрофон включён во время занятия. Короткие фрагменты речи отправляются в SpeechKit, а текст нового задания один раз — в YandexGPT для подготовки плана подсказок. Во время ответа речь не распознаётся. Шумы фильтруются, но речь телевизора иногда может пройти фильтр. Только при ручном выборе голоса Яндекса сокращённый текст ответа также отправляется в SpeechKit для озвучивания. Камера ребёнка и образец голоса родителя остаются на устройстве. Снимки родителя для аватара обрабатываются и хранятся только на этом устройстве.</p></details>
     </section>
     <section class="card child-camera"><div class="section-title"><h2>Ты в кадре</h2><span class="privacy-chip small">Только здесь</span></div><div id="lessonCameraSlot"></div><p id="monitorStatus" role="status">Готово к занятию</p><button id="retryCameraBtn" type="button" class="secondary" hidden>Включить камеру</button><p class="helper">Смотри в тетрадь, думай, пробуй. Я подожду.</p></section>
   </aside>

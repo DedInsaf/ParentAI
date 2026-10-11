@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {SpeechGate,isDirectedSpeech} from '../web/listening.mjs';
+import {SpeechGate,isDirectedSpeech,classifySpeechRecognitionError} from '../web/listening.mjs';
 const rate=16000;
 const frame=(volume,frequency=210)=>Float32Array.from({length:320},(_,i)=>volume*Math.sin(2*Math.PI*frequency*i/rate));
 function send(gate,n,volume,frequency){let result;for(let i=0;i<n;i++)result=gate.push(frame(volume,frequency))||result;return result;}
@@ -32,4 +32,15 @@ test('question routing distinguishes Russian requests and follow-up answers from
   for(const text of ['','Музыка играет тихо','Реклама закончилась'])assert.equal(isDirectedSpeech(text),false,text);
   assert.equal(isDirectedSpeech('получилось пять',true),true);
   assert.equal(isDirectedSpeech('5',true),true);
+});
+
+test('speech errors distinguish unclear audio from provider failures',()=>{
+  assert.deepEqual(classifySpeechRecognitionError(new Error('SpeechKit не разобрал вопрос. Повторите или введите текст.')),
+    {stop:false,message:'Не разобрал речь. Подойди ближе к микрофону и попробуй ещё раз.'});
+  assert.deepEqual(classifySpeechRecognitionError(new Error('Не слышно речи. Подойдите ближе к микрофону.')),
+    {stop:false,message:'Не разобрал речь. Подойди ближе к микрофону и попробуй ещё раз.'});
+  assert.deepEqual(classifySpeechRecognitionError(new Error('Не удалось связаться со SpeechKit. Повторите позже.')),
+    {stop:true,message:'Не удалось связаться со SpeechKit. Повторите позже.'});
+  assert.deepEqual(classifySpeechRecognitionError(new Error('Превышена квота SpeechKit (код 429).')),
+    {stop:true,message:'Превышена квота SpeechKit (код 429).'});
 });

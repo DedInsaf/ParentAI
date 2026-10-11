@@ -20,11 +20,11 @@ def _password(args):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Управление локальными аккаунтами ParentAI")
+    parser = argparse.ArgumentParser(description="Управление локальными аккаунтами Адым")
     commands = parser.add_subparsers(dest="command", required=True)
     create = commands.add_parser("create-admin", help="Создать администратора без лимитов продукта")
     create.add_argument("--login", default="admin")
-    create.add_argument("--email", default="admin@parentai.local")
+    create.add_argument("--email", default="admin@adym.local")
     create.add_argument("--generate-password", action="store_true",
                         help="Создать стойкий случайный пароль и показать его один раз")
     promote = commands.add_parser("promote", help="Назначить существующего пользователя администратором")

@@ -4,6 +4,9 @@ import base64
 import binascii
 import json
 import math
+import importlib.util
+import threading
+import time
 import urllib.error
 import urllib.request
 import wave
@@ -14,6 +17,8 @@ from scipy.signal import resample_poly
 
 STT_ENDPOINT = 'https://stt.api.cloud.yandex.net/speech/v1/stt:recognize'
 TTS_ENDPOINT = 'https://tts.api.cloud.yandex.net/tts/v3/utteranceSynthesis'
+RETRYABLE_STT_CODES = frozenset((500, 501, 503, 504))
+LOCAL_STT_MODEL = 'openai/whisper-small'
 
 
 def _json_stream(payload):
@@ -59,10 +64,65 @@ def stt_pcm(payload):
     return (np.clip(samples, -1, 1)*32767).astype('<i2').tobytes()
 
 
+class LocalSpeechRecognizer:
+    """Private, zero-provider-cost Russian STT using a local Whisper model."""
+    def __init__(self, model=LOCAL_STT_MODEL, cache_dir=None, pipeline_factory=None):
+        self.model = model
+        self.cache_dir = Path(cache_dir) if cache_dir else None
+        self.pipeline_factory = pipeline_factory
+        self.pipeline = None
+        self.lock = threading.RLock()
+
+    def public_status(self):
+        available = bool(self.pipeline_factory) or (
+            importlib.util.find_spec('torch') is not None and
+            importlib.util.find_spec('transformers') is not None)
+        return {'enabled': available, 'provider': 'Локальный Whisper',
+                'model': self.model, 'local': True, 'external_cost': 0}
+
+    def _pipeline(self):
+        with self.lock:
+            if self.pipeline is not None:
+                return self.pipeline
+            try:
+                if self.pipeline_factory:
+                    self.pipeline = self.pipeline_factory()
+                else:
+                    from transformers import AutoModelForSpeechSeq2Seq, AutoProcessor, pipeline
+                    if self.cache_dir:
+                        self.cache_dir.mkdir(parents=True, exist_ok=True)
+                    local = {'cache_dir': str(self.cache_dir), 'local_files_only': True} if self.cache_dir else {}
+                    processor = AutoProcessor.from_pretrained(self.model, **local)
+                    model = AutoModelForSpeechSeq2Seq.from_pretrained(self.model, **local)
+                    self.pipeline = pipeline(
+                        'automatic-speech-recognition', model=model, device='cpu',
+                        tokenizer=processor.tokenizer, feature_extractor=processor.feature_extractor)
+            except Exception as exc:
+                raise ValueError('Локальная модель распознавания не загрузилась. Проверьте установку Whisper.') from exc
+            return self.pipeline
+
+    def recognize(self, payload):
+        pcm = stt_pcm(payload)
+        samples = np.frombuffer(pcm, dtype='<i2').astype(np.float32) / 32768
+        try:
+            result = self._pipeline()(
+                {'array': samples, 'sampling_rate': 16000},
+                generate_kwargs={'language': 'ru', 'task': 'transcribe'})
+            text = result.get('text', '').strip()
+        except ValueError:
+            raise
+        except Exception as exc:
+            raise ValueError('Локальное распознавание не смогло обработать запись.') from exc
+        if not text:
+            raise ValueError('Локальный Whisper не разобрал вопрос. Повторите или введите текст.')
+        return text
+
+
 class SpeechRecognizer:
-    def __init__(self, key='', opener=None):
+    def __init__(self, key='', opener=None, sleeper=None):
         self.key = key
         self.opener = opener or urllib.request.urlopen
+        self.sleeper = sleeper or time.sleep
 
     def public_status(self):
         return {'enabled': bool(self.key), 'provider': 'Yandex SpeechKit'}
@@ -74,21 +134,34 @@ class SpeechRecognizer:
         request = urllib.request.Request(
             STT_ENDPOINT + '?lang=ru-RU&topic=general&format=lpcm&sampleRateHertz=16000&profanityFilter=true',
             data=pcm, headers={'Authorization': f'Api-Key {self.key}', 'Content-Type': 'application/octet-stream'})
-        try:
-            with self.opener(request, timeout=40) as response:
-                result = json.loads(response.read(1_000_000))
-            text = result.get('result', '').strip()
-            if not text:
-                raise ValueError('SpeechKit не разобрал вопрос. Повторите или введите текст.')
-            return text
-        except urllib.error.HTTPError as exc:
-            if exc.code in (401, 403):
-                raise ValueError('Ключ SpeechKit не имеет доступа. Нужны yc.ai.speechkitStt.execute и роль ai.speechkit-stt.user.') from None
-            raise ValueError(f'SpeechKit временно недоступен (код {exc.code}).') from None
-        except (urllib.error.URLError, TimeoutError):
-            raise ValueError('Не удалось связаться со SpeechKit. Повторите позже.') from None
-        except (json.JSONDecodeError, AttributeError):
-            raise ValueError('SpeechKit вернул некорректный ответ.') from None
+        for attempt in range(3):
+            try:
+                with self.opener(request, timeout=40) as response:
+                    result = json.loads(response.read(1_000_000))
+                text = result.get('result', '').strip()
+                if not text:
+                    raise ValueError('SpeechKit не разобрал вопрос. Повторите или введите текст.')
+                return text
+            except urllib.error.HTTPError as exc:
+                # Yandex documents 500/501/503/504 as provider-side transient
+                # failures. Retry the same in-memory audio briefly; never retry
+                # access, malformed-request, or quota errors automatically.
+                if exc.code in RETRYABLE_STT_CODES and attempt < 2:
+                    self.sleeper((.4, 1.0)[attempt])
+                    continue
+                if exc.code == 401:
+                    raise ValueError('Ключ SpeechKit недействителен. Проверьте YANDEX_SPEECHKIT_API_KEY.') from None
+                if exc.code == 403:
+                    raise ValueError('Ключ SpeechKit не имеет доступа. Нужны yc.ai.speechkitStt.execute и роль ai.speechkit-stt.user.') from None
+                if exc.code == 400:
+                    raise ValueError('SpeechKit отклонил формат записи (код 400).') from None
+                if exc.code == 429:
+                    raise ValueError('Превышена квота SpeechKit (код 429). Повторите позже или проверьте лимиты Yandex Cloud.') from None
+                raise ValueError(f'SpeechKit временно недоступен после 3 попыток (код {exc.code}).') from None
+            except (urllib.error.URLError, TimeoutError):
+                raise ValueError('Не удалось связаться со SpeechKit. Повторите позже.') from None
+            except (json.JSONDecodeError, AttributeError):
+                raise ValueError('SpeechKit вернул некорректный ответ.') from None
 
 
 class SpeechSynthesizer:

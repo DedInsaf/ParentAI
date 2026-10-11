@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from auth import AuthStore
+from auth import AuthStore, SESSION_LIFETIME
 
 
 class AuthStoreTests(unittest.TestCase):
@@ -47,6 +47,16 @@ class AuthStoreTests(unittest.TestCase):
         self.assertEqual(self.store.user_for_session(token), user)
         self.store.delete_session(token)
         self.assertIsNone(self.store.user_for_session(token))
+
+    def test_session_is_renewed_when_application_starts(self):
+        user = self.store.register('valid-user', 'one@example.com', 'strong-pass', 'strong-pass')
+        with patch('auth.time.time', return_value=1_000):
+            token = self.store.create_session(user.id)
+        with patch('auth.time.time', return_value=2_000):
+            self.assertEqual(self.store.user_for_session(token, renew=True), user)
+        with sqlite3.connect(self.store.path) as connection:
+            expires_at = connection.execute('SELECT expires_at FROM sessions').fetchone()[0]
+        self.assertEqual(expires_at, 2_000 + SESSION_LIFETIME)
 
     def test_admin_role_is_returned_and_can_be_promoted(self):
         admin = self.store.register('admin-user', 'admin@example.com', 'strong-pass', 'strong-pass', role='admin')

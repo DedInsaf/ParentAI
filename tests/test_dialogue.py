@@ -5,12 +5,13 @@ from pathlib import Path
 import tempfile
 import time
 import unittest
+import urllib.error
 import wave
 import numpy as np
 from scipy.io import wavfile
-from dialogue import Dialogues
+from dialogue import DEFAULT_REPLY_VOICE,Dialogues
 from runtime import Runtime
-from speech import SpeechRecognizer, stt_pcm
+from speech import LocalSpeechRecognizer, SpeechRecognizer, stt_pcm
 from lipsync import timeline, viseme
 
 
@@ -24,6 +25,19 @@ def recording(seconds=1, rate=48000, silent=False):
 
 
 class SpeechTests(unittest.TestCase):
+    def test_local_whisper_is_private_default_and_recognizes_russian(self):
+        seen = {}
+        def transcribe(audio, generate_kwargs):
+            seen['audio'] = audio
+            seen['options'] = generate_kwargs
+            return {'text': '  Помоги решить задачу  '}
+        recognizer = LocalSpeechRecognizer(pipeline_factory=lambda: transcribe)
+        self.assertEqual(recognizer.recognize(recording()), 'Помоги решить задачу')
+        self.assertTrue(recognizer.public_status()['local'])
+        self.assertEqual(recognizer.public_status()['external_cost'], 0)
+        self.assertEqual(seen['audio']['sampling_rate'], 16000)
+        self.assertEqual(seen['options'], {'language': 'ru', 'task': 'transcribe'})
+
     def test_pcm_resampling_and_rejections(self):
         pcm = stt_pcm(recording())
         self.assertEqual(len(pcm), 32000)
@@ -44,6 +58,37 @@ class SpeechTests(unittest.TestCase):
             return Response()
         self.assertEqual(SpeechRecognizer('test-key', open_request).recognize(recording()), 'Помоги с уравнением')
 
+    def test_speechkit_errors_identify_key_quota_and_provider(self):
+        cases = {
+            401: 'недействителен',
+            403: 'не имеет доступа',
+            400: 'формат записи',
+            429: 'квота',
+            503: 'временно недоступен',
+        }
+        for code, message in cases.items():
+            with self.subTest(code=code):
+                def fail(request, timeout, code=code):
+                    raise urllib.error.HTTPError(request.full_url, code, 'failed', {}, io.BytesIO())
+                with self.assertRaisesRegex(ValueError, message):
+                    SpeechRecognizer('test-key', fail, sleeper=lambda _: None).recognize(recording())
+
+    def test_speechkit_retries_transient_500_and_recovers(self):
+        calls, delays = [], []
+        class Response:
+            def __enter__(self): return self
+            def __exit__(self, *_): pass
+            def read(self, limit): return json.dumps({'result': 'Слышу вопрос'}).encode()
+        def flaky(request, timeout):
+            calls.append(request)
+            if len(calls) < 3:
+                raise urllib.error.HTTPError(request.full_url, 500, 'failed', {}, io.BytesIO())
+            return Response()
+        recognizer = SpeechRecognizer('test-key', flaky, sleeper=delays.append)
+        self.assertEqual(recognizer.recognize(recording()), 'Слышу вопрос')
+        self.assertEqual(len(calls), 3)
+        self.assertEqual(delays, [.4, 1.0])
+
     def test_lipsync_pauses_and_russian_shapes(self):
         with tempfile.TemporaryDirectory() as temp:
             path = Path(temp)/'answer.wav'
@@ -58,6 +103,10 @@ class SpeechTests(unittest.TestCase):
 
 
 class DialogueTests(unittest.TestCase):
+    def test_parent_voice_is_the_product_default(self):
+        self.assertEqual(DEFAULT_REPLY_VOICE,'parent')
+        self.assertEqual(Dialogues.start.__defaults__[1],'parent')
+
     def test_structured_plan_is_called_once_and_answer_checked_locally(self):
         class PlanTutor:
             calls=0

@@ -20,7 +20,7 @@ ENTRY_FILE = os.path.join(BASE_DIR, "web", "avatar.html")
 
 if __name__ == "__main__":
     window = webview.create_window(
-        "ИИ-Родитель",
+        "Адым — шаг",
         ENTRY_FILE,
         width=1100,
         height=800,

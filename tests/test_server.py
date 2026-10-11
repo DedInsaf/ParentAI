@@ -6,10 +6,13 @@ import unittest
 import urllib.request
 import urllib.error
 from unittest.mock import patch
+from http.cookies import SimpleCookie
+from auth import SESSION_LIFETIME
 from runtime import Runtime
 from server import AppServer
 from tutor import Tutor
 from test_avatar_model import glb
+from test_dialogue import recording
 
 
 class ServerTests(unittest.TestCase):
@@ -28,14 +31,18 @@ class ServerTests(unittest.TestCase):
     def tearDown(self):
         self.s.shutdown(); self.s.server_close(); self.thread.join(); self.temp.cleanup(); self.iterations.stop()
 
-    def request(self, path, data=None, headers=None, authenticated=True):
+    def request(self, path, data=None, headers=None, authenticated=True, include_headers=False):
         headers = dict(headers or {})
         if authenticated:
             headers.setdefault('Cookie', 'parentai_session=' + self.session)
         req=urllib.request.Request(self.s.origin+path,data=data,headers=headers)
         try:
-            with urllib.request.urlopen(req) as response: return response.status,response.read()
-        except urllib.error.HTTPError as e: return e.code,e.read()
+            with urllib.request.urlopen(req) as response:
+                result = (response.status, response.read())
+                return (*result, response.headers) if include_headers else result
+        except urllib.error.HTTPError as e:
+            result = (e.code, e.read())
+            return (*result, e.headers) if include_headers else result
 
     def test_public_ui_and_protected_api(self):
         self.assertEqual(self.request('/')[0],200)
@@ -49,6 +56,15 @@ class ServerTests(unittest.TestCase):
         session=json.loads(self.request('/api/session')[1])
         self.assertEqual(session['user']['login'],'test-user')
         self.assertEqual(self.request('/api/session',headers={'Sec-Fetch-Site':'cross-site'})[0],403)
+
+    def test_session_restore_renews_persistent_cookie(self):
+        code, body, headers = self.request('/api/session', include_headers=True)
+        self.assertEqual(code, 200)
+        self.assertEqual(json.loads(body)['user']['login'], 'test-user')
+        cookie = SimpleCookie(headers['Set-Cookie'])['parentai_session']
+        self.assertEqual(cookie.value, self.session)
+        self.assertEqual(int(cookie['max-age']), SESSION_LIFETIME)
+        self.assertTrue(cookie['expires'])
 
     def test_platega_checkout_and_authenticated_callback_activate_paid(self):
         provider_id='11111111-1111-4111-8111-111111111111'
@@ -132,6 +148,18 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(self.request('/api/dialog-audio/guess')[0],403)
         headers={'Origin':self.s.origin,'X-App-Token':self.s.token}
         self.assertEqual(self.request('/api/dialog',b'{}',headers)[0],400)
+
+    def test_local_speech_has_zero_external_cost(self):
+        class LocalSpeech:
+            def public_status(self):
+                return {'enabled':True,'provider':'Локальный Whisper','model':'test-whisper','local':True}
+            def recognize(self, payload):
+                return 'Помоги решить задачу'
+        self.s.speech = LocalSpeech()
+        result = self.s.recognize(1, recording(), 'local-speech-request')
+        self.assertEqual(result['text'], 'Помоги решить задачу')
+        dashboard = self.s.usage.dashboard(1)
+        self.assertEqual(dashboard['usage']['external_cost_rubles'], '0.0000')
 
     def test_tutor_is_protected_and_reports_missing_configuration(self):
         payload=json.dumps({'question':'Помоги','history':[],'level':'средняя школа'}).encode()

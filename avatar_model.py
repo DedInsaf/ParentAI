@@ -119,7 +119,7 @@ def validate_model(raw):
         raise ValueError('Сканер вернул повреждённую модель. Повторите создание аватара.') from exc
 
 
-def save_model(runtime, raw, provider='parentai-server'):
+def save_model(runtime, raw, provider='adym-server'):
     metadata = validate_model(raw)
     from runtime import atomic_json
     with runtime.lock:
@@ -151,5 +151,5 @@ def model_path(runtime):
 
 
 def scanner_status():
-    return {'provider': 'ParentAI', 'enabled': True, 'mode': 'on-device',
+    return {'provider': 'Адым', 'enabled': True, 'mode': 'on-device',
             'message': 'Сканирование и построение модели выполняются на устройстве.'}

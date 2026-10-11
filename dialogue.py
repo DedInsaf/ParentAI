@@ -16,6 +16,11 @@ from usage import LimitExceeded, estimate_tokens
 REPEAT_WORDS = ("повтори", "ещё раз", "не расслышал", "не расслышала")
 NEXT_WORDS = ("дальше", "следующая подсказка", "не знаю", "не понимаю", "подскажи ещё")
 
+# PRODUCT INVARIANT: answers are spoken in the parent's voice unless the
+# parent explicitly chooses another provider in the lesson settings. Do not
+# change this default to Yandex and do not silently substitute another person.
+DEFAULT_REPLY_VOICE = "parent"
+
 
 def _normalized_answer(value):
     value = value.casefold().replace("ё", "е")
@@ -57,7 +62,7 @@ class Dialogues:
             raise ValueError('Слишком много быстрых запросов. Сделай короткий перерыв.')
         recent.append(now)
 
-    def start(self, question, level, session=None, voice="parent", user_id=0, request_id=None,
+    def start(self, question, level, session=None, voice=DEFAULT_REPLY_VOICE, user_id=0, request_id=None,
               unlimited=False):
         if voice not in ("parent", "yandex"):
             raise ValueError("Неизвестный голос ответа.")

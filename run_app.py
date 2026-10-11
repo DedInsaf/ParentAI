@@ -8,7 +8,7 @@ from tutor import load_local_env
 
 
 def main():
-    parser = argparse.ArgumentParser(description='ИИ-Родитель')
+    parser = argparse.ArgumentParser(description='Адым — шаг к самостоятельной учёбе')
     parser.add_argument('--desktop', action='store_true', help='Окно pywebview (доступ к камере зависит от ОС)')
     parser.add_argument('--no-browser', action='store_true')
     parser.add_argument('--no-models', action='store_true', help='Диагностика интерфейса без загрузки моделей')
@@ -21,15 +21,17 @@ def main():
     except OSError as exc:
         raise SystemExit(f'Не удалось открыть порт {args.port}: {exc}. Используйте --port 0.')
     url = server.origin + '/'
-    print(f'ИИ-Родитель: {url}\nДля завершения нажмите Ctrl+C.', flush=True)
+    print(f'Адым: {url}\nДля завершения нажмите Ctrl+C.', flush=True)
     if not args.no_models:
         runtime.start()
     try:
         if args.desktop:
             import webview
             threading.Thread(target=server.serve_forever, daemon=True).start()
-            webview.create_window('ИИ-Родитель', url, width=1200, height=900)
-            webview.start()
+            webview.create_window('Адым — шаг', url, width=1200, height=900)
+            # pywebview starts in private mode by default, which deletes the
+            # authentication cookie as soon as the window is closed.
+            webview.start(private_mode=False, storage_path=str(runtime.data / 'webview'))
             server.shutdown()
         else:
             if not args.no_browser:

@@ -1,6 +1,6 @@
 import {Presence, encodeWav, withTimeout, requestUserCamera, speechOpening, scanQuality, scanTurnIssue, portraitQuality, faceYaw} from './core.mjs';
 import {blinkAmount} from './head-geometry.mjs';
-import {SpeechGate,isDirectedSpeech} from './listening.mjs';
+import {SpeechGate,isDirectedSpeech,classifySpeechRecognitionError} from './listening.mjs';
 import {AvatarMotion} from './avatar-motion.mjs';
 import {ModelAvatar} from './avatar-model.mjs';
 import {LocalAvatar} from './local-avatar.mjs';
@@ -38,11 +38,11 @@ const cameraLive = () => !!stream?.getVideoTracks().some(track => track.readySta
 function mediaError(e) {
   const messages = {
     NotAllowedError: 'Доступ к камере или микрофону запрещён. Разрешите его для браузера в «Системные настройки → Конфиденциальность и безопасность», затем повторите.',
-    SecurityError: 'Браузер заблокировал камеру или микрофон. Откройте ParentAI по локальному адресу из приложения и разрешите доступ.',
+    SecurityError: 'Браузер заблокировал камеру или микрофон. Откройте Адым по локальному адресу из приложения и разрешите доступ.',
     NotFoundError: 'Камера или микрофон не найдены. Подключите устройство и повторите.',
     NotReadableError: 'Камера или микрофон заняты другим приложением. Закройте FaceTime, Zoom или другую программу и повторите.',
     AbortError: 'Камера или микрофон не смогли запуститься. Закройте другие приложения, использующие их, и повторите.',
-    UnsupportedError: 'Камера недоступна в этом браузере. Откройте ParentAI по адресу localhost из приложения.',
+    UnsupportedError: 'Камера недоступна в этом браузере. Откройте Адым по адресу localhost из приложения.',
   };
   return new Error(messages[e.name] || e.message);
 }
@@ -123,8 +123,14 @@ async function poll() {
     $('ttsStatus').textContent = `Клонирование: ${status.voice_engine?.message || status.tts}`;
     $('assetsStatus').textContent = `Распознавание: ${status.assets}`;
     const cloneOption=$('voiceMode').querySelector('option[value="clone"]');
+    const parentReplyOption=$('replyVoice').querySelector('option[value="parent"]');
     cloneOption.disabled=!status.xtts_enabled;
-    cloneOption.textContent=status.xtts_enabled?'Напоминания и новые ответы моим голосом':'Клонирование XTTS недоступно для платного продукта';
+    parentReplyOption.disabled=!status.xtts_enabled;
+    cloneOption.textContent=status.xtts_enabled?'Напоминания и новые ответы моим голосом':'Голос родителя отключён в конфигурации';
+    parentReplyOption.textContent=status.xtts_enabled?'Голос родителя · основной':'Голос родителя · отключён в конфигурации';
+    // PRODUCT INVARIANT: never switch replyVoice to Yandex automatically.
+    // A provider voice is allowed only after an explicit parent selection;
+    // otherwise a failure stays visible instead of impersonating the parent.
     if(!status.xtts_enabled&&$('voiceMode').value==='clone'){$('voiceMode').value='direct';updateVoiceMode();}
     renderParentSummary(status.usage);
     renderSubscription(status.usage, status.billing);
@@ -281,7 +287,7 @@ function detectVideo(now) {
 }
 
 async function scan() {
-  if(!$('avatarConsent').checked){$('avatarConsent').focus();throw new Error('Разрешите ParentAI создать аватар из снимков на этом устройстве.');}
+  if(!$('avatarConsent').checked){$('avatarConsent').focus();throw new Error('Разрешите Адым создать аватар из снимков на этом устройстве.');}
   stopAudio();scanning=true;const epoch=++scanEpoch,abort=new AbortController();scannerAbort=abort;restoringAbort?.abort();
   $('scannerDialog').showModal();$('scannerCamera').appendChild(video.closest('.camera-frame'));controls();
   try {
@@ -566,7 +572,7 @@ function showLesson() {
   $('lessonCameraSlot').appendChild(video.closest('.camera-frame'));
   $('setupPage').hidden = true; $('lessonPage').hidden = false;
   document.body.classList.add('in-lesson');$('lessonToolbar').hidden=false;
-  document.querySelector('h1').textContent = 'Давай позанимаемся';
+  document.querySelector('h1').textContent = 'Сделаем следующий шаг вместе';
   $('lessonSpeech').textContent = 'Я рядом. Скажи «помоги» и расскажи, что не получается.';
   $('micIntro').hidden=!$('handsFree').checked || !status.speech?.enabled;
   setListenerState('off','Микрофон ещё не включён. Можно написать вопрос.');
@@ -579,7 +585,7 @@ function showSetup() {
   $('readyCameraPreview').hidden=true;
   $('lessonPage').hidden = true; $('setupPage').hidden = false;
   document.body.classList.remove('in-lesson');$('lessonToolbar').hidden=true;
-  document.querySelector('h1').textContent = 'Рядом во время занятий';
+  document.querySelector('h1').textContent = 'Шаг за шагом к самостоятельности';
   if (location.hash) history.replaceState({}, '', location.pathname + location.search);
   requestAnimationFrame(fit); window.scrollTo(0,0);
 }
@@ -736,8 +742,9 @@ async function recognizeHandsFree(wav,listenId){
     else setListenerState('listening','Скажи «помоги» и задай вопрос.');
   }catch(e){
     if(listenId!==listenEpoch||epoch!==helpEpoch)return;
-    if(/не имеет доступа|добавьте|лимит|код 429/i.test(e.message)){$('handsFree').checked=false;stopHandsFree();setListenerState('error',e.message);fail(e);}
-    else setListenerState('listening','Не разобрал речь. Попробуй ещё раз.');
+    const failure=classifySpeechRecognitionError(e);
+    if(failure.stop){$('handsFree').checked=false;stopHandsFree();setListenerState('error',failure.message);fail(new Error(failure.message));}
+    else setListenerState('listening',failure.message);
   }finally{listenerPending=false;controls();}
 }
 async function voiceQuestion() {

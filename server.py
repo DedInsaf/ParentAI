@@ -1,6 +1,7 @@
 """Loopback-only bridge. Avatar scans and voice references stay private on the device."""
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from http.cookies import CookieError, SimpleCookie
+from email.utils import formatdate
 import json
 import mimetypes
 from pathlib import Path
@@ -13,7 +14,7 @@ from collections import defaultdict, deque
 from urllib.parse import urlsplit, parse_qs
 from runtime import ROOT
 from tutor import Tutor
-from speech import SpeechRecognizer, SpeechSynthesizer, audio_duration_ms
+from speech import LocalSpeechRecognizer, SpeechRecognizer, SpeechSynthesizer, audio_duration_ms
 from dialogue import Dialogues
 from avatar_model import MAX_MODEL_BYTES, model_path, save_model, scanner_status
 from auth import AuthStore, SESSION_LIFETIME
@@ -28,7 +29,16 @@ class AppServer(ThreadingHTTPServer):
     def __init__(self, runtime, port=0):
         self.runtime = runtime
         self.tutor = Tutor.from_environment(ROOT)
-        self.speech = SpeechRecognizer(os.getenv('YANDEX_SPEECHKIT_API_KEY') or os.getenv('YANDEX_API_KEY'))
+        # PRODUCT INVARIANT: speech recognition is local by default. It keeps a
+        # child's audio on the family computer, has zero provider cost, and does
+        # not stop working during a Yandex outage. Cloud STT is explicit opt-in.
+        stt_engine = os.getenv('PARENTAI_STT_ENGINE', 'local').strip().lower()
+        if stt_engine == 'yandex':
+            self.speech = SpeechRecognizer(os.getenv('YANDEX_SPEECHKIT_API_KEY') or os.getenv('YANDEX_API_KEY'))
+        else:
+            self.speech = LocalSpeechRecognizer(
+                os.getenv('PARENTAI_STT_MODEL', 'openai/whisper-small'),
+                runtime.data / 'models' / 'huggingface')
         self.fast_voice=SpeechSynthesizer(os.getenv('YANDEX_TTS_API_KEY') or os.getenv('YANDEX_SPEECHKIT_API_KEY') or os.getenv('YANDEX_API_KEY'))
         self.auth = AuthStore(runtime.data / 'users.sqlite3')
         self.usage = UsageStore(runtime.data / 'usage.sqlite3')
@@ -65,18 +75,22 @@ class AppServer(ThreadingHTTPServer):
                 raise ValueError('Слишком много голосовых вопросов подряд. Сделай короткий перерыв.')
             recent.append(now)
             duration = audio_duration_ms(payload)
+            speech_status = self.speech.public_status()
+            local_speech = bool(speech_status.get('local'))
             billed_seconds = max(15, math.ceil(duration / 15000) * 15)
             reservation = self.usage.reserve(
                 user_id, 'stt', request_id, duration_ms=duration, billed_units=billed_seconds,
-                estimated_cost=self.usage.config.stt_cost(billed_seconds),
-                provider='Yandex SpeechKit', model='general-v1', bypass_limits=unlimited)
+                estimated_cost=0 if local_speech else self.usage.config.stt_cost(billed_seconds),
+                provider=speech_status.get('provider', ''),
+                model=speech_status.get('model', 'general-v1'), bypass_limits=unlimited)
             try:
                 text = self.speech.recognize(payload)
             except Exception:
                 self.usage.fail(reservation['id'])
                 raise
             self.usage.complete(reservation['id'], duration_ms=duration, billed_units=billed_seconds,
-                                cost=self.usage.config.stt_cost(billed_seconds), actual_usage=True)
+                                cost=0 if local_speech else self.usage.config.stt_cost(billed_seconds),
+                                actual_usage=not local_speech)
             result = {'text': text, 'limit_warning': reservation['warning']}
             self.speech_cache[cache_key] = (now, result)
             return result
@@ -117,7 +131,8 @@ class Handler(BaseHTTPRequestHandler):
         return self.server.auth.user_for_session(self.session_token())
 
     def session_cookie(self, token):
-        return (f'parentai_session={token}; Path=/; Max-Age={SESSION_LIFETIME}; '
+        expires = formatdate(time.time() + SESSION_LIFETIME, usegmt=True)
+        return (f'parentai_session={token}; Path=/; Max-Age={SESSION_LIFETIME}; Expires={expires}; '
                 'HttpOnly; SameSite=Strict')
 
     def clear_session_cookie(self):
@@ -150,8 +165,11 @@ class Handler(BaseHTTPRequestHandler):
         if path == '/api/session':
             if self.headers.get('Sec-Fetch-Site', 'same-origin') not in ('same-origin', 'none'):
                 return self.send(403, {'error': 'Invalid origin'})
-            user = self.current_user()
-            return self.send(200, {'token': self.server.token, 'user': user.public() if user else None})
+            token = self.session_token()
+            user = self.server.auth.user_for_session(token, renew=True)
+            headers = {'Set-Cookie': self.session_cookie(token)} if user else None
+            return self.send(200, {'token': self.server.token, 'user': user.public() if user else None},
+                             headers=headers)
         if path in ('/api/parent/summary', '/api/metrics/cost'):
             if self.headers.get('X-App-Token') != self.server.token:
                 return self.send(403, {'error': 'Invalid token'})

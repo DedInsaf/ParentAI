@@ -1,4 +1,9 @@
 # Python 3.11. Базовая установка без некоммерческой модели XTTS-v2.
 numpy>=1.26,<2
 scipy>=1.12,<2
+# Local-first speech recognition. The multilingual Whisper weights are cached
+# under data/models on first setup and no child audio is sent to a provider.
+torch>=2.2
+transformers>=4.46,<5
+safetensors>=0.4
 # Optional native window: pip install pywebview
