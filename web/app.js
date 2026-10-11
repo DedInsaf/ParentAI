@@ -147,6 +147,9 @@ function renderSubscription(summary, billing) {
   const current = summary.plan.code;
   const free = billing.plans?.free || {};
   const paid = billing.plans?.paid || {};
+  const planTitle = summary.plan.unlimited ? 'Admin' : summary.plan.title;
+  $('headerPlanName').textContent = planTitle;
+  $('billingBtn').setAttribute('aria-label', `Тариф: ${planTitle}. Открыть информацию о подписке`);
   $('currentPlanHero').textContent = summary.plan.unlimited ? 'Admin · без ограничений' : `Сейчас: ${summary.plan.title}`;
   $('freeAssignments').textContent = free.assignments ?? 5;
   $('freePlans').textContent = free.llm_requests ?? 10;
@@ -862,6 +865,9 @@ function showApplication(user) {
 $('loginTab').addEventListener('click', () => authMode('login'));
 $('registerTab').addEventListener('click', () => authMode('register'));
 $('authPaidBtn').addEventListener('click', () => authMode('register'));
+$('billingBtn').addEventListener('click', () => $('billingDialog').showModal());
+$('closeBillingBtn').addEventListener('click', () => {$('billingDialog').close(); $('billingBtn').focus();});
+$('billingDialog').addEventListener('click', event => {if (event.target === $('billingDialog')) $('billingDialog').close();});
 document.querySelector('.auth-brand').addEventListener('click', event => event.preventDefault());
 for (const [formId, path] of [['loginForm', 'login'], ['registerForm', 'register']]) {
   $(formId).addEventListener('submit', async event => {

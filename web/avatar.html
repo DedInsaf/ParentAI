@@ -46,15 +46,18 @@
   <a class="brand" href="#" aria-label="ParentAI — начало"><svg viewBox="0 0 44 44" aria-hidden="true"><rect width="44" height="44" rx="16" fill="#eedcc7"/><path d="M13 24c0-6 4-11 9-11s9 5 9 11" fill="none" stroke="#43695d" stroke-width="3" stroke-linecap="round"/><circle cx="17" cy="23" r="1.5" fill="#43695d"/><circle cx="27" cy="23" r="1.5" fill="#43695d"/><path d="M18 29q4 4 8 0" fill="none" stroke="#43695d" stroke-width="2" stroke-linecap="round"/></svg><span>Parent<span class="brand-ai">AI</span></span></a>
   <div class="header-context"><h1>Рядом во время занятий</h1><p id="connection" role="status">Подключаемся…</p></div>
   <span class="privacy-chip">Камера ребёнка остаётся на устройстве</span>
+  <button id="billingBtn" type="button" class="billing-trigger" aria-haspopup="dialog" aria-controls="billingDialog">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7.5A2.5 2.5 0 0 1 6.5 5h11A2.5 2.5 0 0 1 20 7.5v9a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 16.5v-9Z"/><path d="M4 9h16M16 14h1"/></svg>
+    <span><small>Тариф</small><strong id="headerPlanName">Free</strong></span>
+  </button>
   <div class="account"><span id="accountLogin"></span><button id="logoutBtn" type="button" class="quiet">Выйти</button></div>
   <div id="lessonToolbar" class="lesson-toolbar" hidden><button id="pauseBtn" class="secondary" disabled>Сделать перерыв</button><button id="stopBtn" class="quiet" disabled>Закончить</button></div>
 </header>
-<p id="readyHint" role="status"></p><div id="error" role="alert" hidden></div>
-<main id="setupPage" hidden>
-  <section class="card subscription-overview" aria-labelledby="subscriptionTitle">
+<dialog id="billingDialog" class="billing-dialog" aria-labelledby="subscriptionTitle">
+  <div class="billing-dialog-shell">
     <div class="subscription-heading">
-      <div><span class="eyebrow">ТАРИФ И ПОДПИСКА</span><h2 id="subscriptionTitle">Сколько помощи доступно в этом месяце</h2><p>Текущий тариф виден сразу. Перейти на Paid beta можно здесь — до настройки аватара и начала занятия.</p></div>
-      <span id="currentPlanHero" class="plan-badge">Free</span>
+      <div><span class="eyebrow">ТАРИФ И ПОДПИСКА</span><h2 id="subscriptionTitle">Выберите подходящий тариф</h2><p>Лимиты прозрачны, а текущий тариф всегда доступен в шапке приложения.</p></div>
+      <div class="billing-dialog-actions"><span id="currentPlanHero" class="plan-badge">Free</span><button id="closeBillingBtn" type="button" class="dialog-close" aria-label="Закрыть окно тарифов">×</button></div>
     </div>
     <div class="plan-comparison">
       <article id="freePlanCard" class="plan-card">
@@ -71,7 +74,10 @@
       </article>
     </div>
     <p id="billingMessage" class="billing-message" role="status">Оплата подписки проходит на защищённой странице Platega через СБП. Списание повторяется раз в месяц; отменить подписку можно по ссылке из письма Platega.</p>
-  </section>
+  </div>
+</dialog>
+<p id="readyHint" role="status"></p><div id="error" role="alert" hidden></div>
+<main id="setupPage" hidden>
   <nav class="setup-steps" aria-label="Настройка родителя">
     <button type="button" data-setup-step="face" aria-current="step"><span>1</span><div>Ваш образ<small>Лицо, шея и плечи</small></div></button>
     <button type="button" data-setup-step="voice"><span>2</span><div>Ваш голос<small>Запишем и послушаем</small></div></button>

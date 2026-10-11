@@ -50,6 +50,8 @@ small{font-size:12px}
 .account{display:flex;align-items:center;gap:5px;padding-left:10px;border-left:1px solid var(--line)}
 .account>span{font-size:13px;font-weight:650;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .account button{min-height:38px;padding:8px 10px;font-size:12px}
+.billing-trigger{display:flex;align-items:center;gap:9px;min-height:42px;padding:7px 13px;border:1px solid #dbe4d7;border-radius:16px;background:#f4f7ef;color:var(--ink);box-shadow:none;text-align:left}
+.billing-trigger:hover:enabled{background:#eaf1e5;box-shadow:none}.billing-trigger svg{width:20px;height:20px;fill:none;stroke:#527362;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}.billing-trigger span{display:grid;line-height:1.1}.billing-trigger small{font-size:9px;letter-spacing:.7px;text-transform:uppercase;color:var(--muted)}.billing-trigger strong{font-size:13px;color:#355f4e}
 .header-context{flex:1}
 .header-context p{margin:3px 0 0;font-size:12px;color:var(--muted)}
 .privacy-chip,.status-chip,.hint-chip,.clock{font-size:12px;border-radius:50px;padding:7px 12px;background:var(--green-light);color:#4c6554;line-height:1.3}
@@ -64,9 +66,13 @@ small{font-size:12px}
 .buttons{display:flex;gap:10px;flex-wrap:wrap;margin-top:18px}
 .full{width:100%}
 .next-step{width:100%;margin-top:24px;min-height:54px}
-.subscription-overview{grid-column:1/-1;grid-row:1;padding:30px;background:linear-gradient(135deg,#fffefa 0%,#f2f6e9 100%);border-color:#dfe7d8;box-shadow:0 14px 44px #4b62420d}
+.billing-dialog{width:min(860px,calc(100vw - 32px));max-width:none;border:0;border-radius:30px;padding:0;background:transparent;color:var(--ink);overflow:visible}
+.billing-dialog::backdrop{background:rgba(35,49,42,.46);backdrop-filter:blur(5px)}
+.billing-dialog-shell{padding:30px;background:linear-gradient(135deg,#fffefa 0%,#f2f6e9 100%);border:1px solid #dfe7d8;border-radius:30px;box-shadow:0 26px 80px #23342a2e}
 .subscription-heading{display:flex;justify-content:space-between;align-items:flex-start;gap:24px}
 .subscription-heading h2{font-size:29px;letter-spacing:-.8px}.subscription-heading p{color:var(--muted);font-size:15px;max-width:720px;margin-bottom:0}
+.billing-dialog-actions{display:flex;align-items:center;gap:10px;flex-shrink:0}
+.dialog-close{display:grid;place-items:center;width:42px;height:42px;min-height:42px;padding:0;border-radius:50%;background:#eef1e9;color:#53645b;font-size:25px;font-weight:400;line-height:1}.dialog-close:hover:enabled{background:#e2e9dd;color:var(--ink);box-shadow:none}
 .plan-badge{flex-shrink:0;padding:10px 17px;border-radius:999px;background:#355f4e;color:white;font-size:14px;font-weight:700}
 .plan-comparison{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:24px}
 .plan-card{display:flex;flex-direction:column;border:1px solid #e1e5dc;border-radius:24px;background:#fffefa;padding:22px}
@@ -77,19 +83,19 @@ small{font-size:12px}
 .plan-card>p{font-size:13px;color:var(--muted);margin:13px 0 8px}.plan-card ul{margin:5px 0 18px;padding:0;list-style:none;display:grid;gap:7px;font-size:13px;color:var(--muted)}
 .plan-card li:before{content:"✓";color:#4d7b64;font-weight:800;margin-right:8px}.plan-card li strong{color:var(--ink)}.plan-card button{margin-top:auto}
 .plan-card.is-current{box-shadow:inset 0 0 0 2px #527562}.billing-message{font-size:12px;color:var(--muted);margin:16px 2px 0}
-.setup-steps{display:flex;gap:10px;grid-column:1/-1;grid-row:2;background:#f0efe6;border-radius:24px;padding:8px}
+.setup-steps{display:flex;gap:10px;grid-column:1/-1;grid-row:1;background:#f0efe6;border-radius:24px;padding:8px}
 .setup-steps button{flex:1;display:flex;align-items:center;gap:13px;justify-content:center;text-align:left;background:transparent;color:#627267;border-radius:18px}
 .setup-steps button span{display:grid;place-items:center;width:34px;height:34px;border-radius:50%;background:#e1e5d9;flex-shrink:0}
 .setup-steps small{display:block;font-weight:400;font-size:12px;margin-top:2px}
 .setup-steps button[aria-current]{background:#fffefa;color:#355846;box-shadow:0 3px 8px #544e3210}
 .setup-steps button[aria-current] span{background:#dfead8}
 .setup-steps button:hover:enabled{background:#faf9f2}
-.setup-intro{grid-column:1/-1;grid-row:3;padding:8px 4px 4px}
+.setup-intro{grid-column:1/-1;grid-row:2;padding:8px 4px 4px}
 .setup-intro h2{font-size:36px;letter-spacing:-1px}
 .setup-intro p{color:var(--muted);font-size:17px;margin:8px 0 0}
 #setupPage{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(320px,.9fr);align-items:start;gap:24px}
-.preview{grid-column:2;grid-row:4;position:sticky;top:24px}
-[data-step-panel]{grid-column:1;grid-row:4}
+.preview{grid-column:2;grid-row:3;position:sticky;top:24px}
+[data-step-panel]{grid-column:1;grid-row:3}
 .tip{background:#f7ecdf;color:#66523d;border-radius:20px;padding:15px 18px;font-size:14px;margin:18px 0}
 .helper span{font-size:20px;color:#9b7355;margin-right:6px}
 #scene{position:relative;height:410px;overflow:hidden;border-radius:24px;background:radial-gradient(ellipse at 50% 40%,#f3eddb,#e6eadf 78%)}
@@ -242,7 +248,7 @@ body.in-lesson #readyHint:empty{display:none}
 .section-title{flex-wrap:wrap;gap:8px}
 .section-title h2{font-size:19px}
 #setupPage,#lessonPage{grid-template-columns:1fr;gap:18px}
-.subscription-overview{padding:21px}.subscription-heading{display:block}.subscription-heading h2{font-size:25px}.plan-badge{display:inline-block;margin-top:14px}.plan-comparison{grid-template-columns:1fr}.plan-card{padding:18px}.plan-card.featured{padding:17px}
+.billing-dialog{width:calc(100vw - 20px);max-height:calc(100dvh - 20px);overflow:auto}.billing-dialog-shell{padding:21px;border-radius:25px}.subscription-heading{display:block;padding-right:42px}.subscription-heading h2{font-size:25px}.billing-dialog-actions{position:absolute;top:18px;right:18px}.billing-dialog-actions .plan-badge{display:none}.plan-comparison{grid-template-columns:1fr}.plan-card{padding:18px}.plan-card.featured{padding:17px}
 .setup-steps{gap:2px;padding:6px;border-radius:21px}
 .setup-steps button{font-size:12px;gap:6px;padding:10px 5px;min-height:48px;border-radius:16px}
 .setup-steps button span{width:25px;height:25px;font-size:11px}
@@ -250,8 +256,8 @@ body.in-lesson #readyHint:empty{display:none}
 .setup-intro h2{font-size:28px}
 .setup-intro p{font-size:15px}
 .setup-intro{padding:3px 4px}
-.preview{grid-column:1;grid-row:5;position:static}
-[data-step-panel]{grid-column:1;grid-row:4}
+.preview{grid-column:1;grid-row:4;position:static}
+[data-step-panel]{grid-column:1;grid-row:3}
 .setup video{height:300px}
 .scan-overlay #cameraHint{font-size:18px}
 #scene{height:370px}
