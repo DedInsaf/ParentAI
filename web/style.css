@@ -31,6 +31,8 @@ small{font-size:12px}
 .auth-brand{display:inline-flex;margin-bottom:72px}
 .auth-welcome>h1{font-size:clamp(40px,5.2vw,66px);font-weight:650;line-height:1.04;letter-spacing:-2.7px;max-width:760px}
 .auth-welcome>p{font-size:18px;color:var(--muted);max-width:620px;margin:22px 0 36px}
+.auth-plans{display:grid;grid-template-columns:1fr 1fr;gap:12px;max-width:620px;margin-bottom:14px}.auth-plans>div{display:grid;grid-template-columns:1fr auto;gap:3px 12px;padding:15px 17px;border:1px solid #e0e4d9;border-radius:20px;background:#fffefa}.auth-plans span{font-size:13px;font-weight:700}.auth-plans strong{font-size:17px}.auth-plans small{grid-column:1/-1;color:var(--muted);font-size:11px}.auth-plans strong small{font-size:10px;margin-left:2px}.auth-plans .auth-plan-paid{border-color:#789281;background:#f5faef}
+.auth-paid-button{margin:0 0 18px;min-height:46px;background:#3f6c58}
 .auth-privacy{display:flex;gap:14px;align-items:flex-start;max-width:570px;padding:18px 20px;border-radius:22px;background:#f1eee5}
 .auth-privacy>span{display:grid;place-items:center;width:42px;height:42px;flex:0 0 42px;border-radius:15px;background:#e5eadf;color:#496d5d;font-size:24px}
 .auth-privacy strong{font-size:14px}.auth-privacy p{font-size:13px;color:var(--muted);margin:4px 0 0}
@@ -62,19 +64,32 @@ small{font-size:12px}
 .buttons{display:flex;gap:10px;flex-wrap:wrap;margin-top:18px}
 .full{width:100%}
 .next-step{width:100%;margin-top:24px;min-height:54px}
-.setup-steps{display:flex;gap:10px;grid-column:1/-1;background:#f0efe6;border-radius:24px;padding:8px}
+.subscription-overview{grid-column:1/-1;grid-row:1;padding:30px;background:linear-gradient(135deg,#fffefa 0%,#f2f6e9 100%);border-color:#dfe7d8;box-shadow:0 14px 44px #4b62420d}
+.subscription-heading{display:flex;justify-content:space-between;align-items:flex-start;gap:24px}
+.subscription-heading h2{font-size:29px;letter-spacing:-.8px}.subscription-heading p{color:var(--muted);font-size:15px;max-width:720px;margin-bottom:0}
+.plan-badge{flex-shrink:0;padding:10px 17px;border-radius:999px;background:#355f4e;color:white;font-size:14px;font-weight:700}
+.plan-comparison{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:24px}
+.plan-card{display:flex;flex-direction:column;border:1px solid #e1e5dc;border-radius:24px;background:#fffefa;padding:22px}
+.plan-card.featured{border:2px solid #638573;background:#fbfff8;padding:21px}
+.plan-card-title{display:flex;justify-content:space-between;gap:16px;align-items:flex-start}.plan-card-title>div{display:grid;gap:3px}
+.plan-name{font-size:14px;color:var(--muted);font-weight:700}.plan-card-title strong{font-size:27px;line-height:1.2;color:var(--ink)}.plan-card-title strong small{font-size:12px;color:var(--muted);font-weight:500;margin-left:3px}
+.plan-state,.best-choice{font-size:11px;border-radius:999px;padding:6px 9px;background:#e8f1e8;color:#426451;white-space:nowrap}.best-choice{background:#f5e4ce;color:#765339}
+.plan-card>p{font-size:13px;color:var(--muted);margin:13px 0 8px}.plan-card ul{margin:5px 0 18px;padding:0;list-style:none;display:grid;gap:7px;font-size:13px;color:var(--muted)}
+.plan-card li:before{content:"✓";color:#4d7b64;font-weight:800;margin-right:8px}.plan-card li strong{color:var(--ink)}.plan-card button{margin-top:auto}
+.plan-card.is-current{box-shadow:inset 0 0 0 2px #527562}.billing-message{font-size:12px;color:var(--muted);margin:16px 2px 0}
+.setup-steps{display:flex;gap:10px;grid-column:1/-1;grid-row:2;background:#f0efe6;border-radius:24px;padding:8px}
 .setup-steps button{flex:1;display:flex;align-items:center;gap:13px;justify-content:center;text-align:left;background:transparent;color:#627267;border-radius:18px}
 .setup-steps button span{display:grid;place-items:center;width:34px;height:34px;border-radius:50%;background:#e1e5d9;flex-shrink:0}
 .setup-steps small{display:block;font-weight:400;font-size:12px;margin-top:2px}
 .setup-steps button[aria-current]{background:#fffefa;color:#355846;box-shadow:0 3px 8px #544e3210}
 .setup-steps button[aria-current] span{background:#dfead8}
 .setup-steps button:hover:enabled{background:#faf9f2}
-.setup-intro{grid-column:1/-1;padding:8px 4px 4px}
+.setup-intro{grid-column:1/-1;grid-row:3;padding:8px 4px 4px}
 .setup-intro h2{font-size:36px;letter-spacing:-1px}
 .setup-intro p{color:var(--muted);font-size:17px;margin:8px 0 0}
 #setupPage{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(320px,.9fr);align-items:start;gap:24px}
-.preview{grid-column:2;grid-row:3;position:sticky;top:24px}
-[data-step-panel]{grid-column:1;grid-row:3}
+.preview{grid-column:2;grid-row:4;position:sticky;top:24px}
+[data-step-panel]{grid-column:1;grid-row:4}
 .tip{background:#f7ecdf;color:#66523d;border-radius:20px;padding:15px 18px;font-size:14px;margin:18px 0}
 .helper span{font-size:20px;color:#9b7355;margin-right:6px}
 #scene{position:relative;height:410px;overflow:hidden;border-radius:24px;background:radial-gradient(ellipse at 50% 40%,#f3eddb,#e6eadf 78%)}
@@ -215,7 +230,7 @@ body.in-lesson #readyHint:empty{display:none}
 
 @media(max-width:760px){body{padding:18px 14px 28px}
 .auth-page{min-height:calc(100vh - 46px);display:block;max-width:500px}
-.auth-welcome{padding:6px 2px 24px}.auth-brand{margin-bottom:42px}.auth-welcome>h1{font-size:38px;letter-spacing:-1.7px}.auth-welcome>p{font-size:16px;margin:17px 0 22px}.auth-privacy{display:none}.auth-card{padding:22px}
+.auth-welcome{padding:6px 2px 24px}.auth-brand{margin-bottom:42px}.auth-welcome>h1{font-size:38px;letter-spacing:-1.7px}.auth-welcome>p{font-size:16px;margin:17px 0 22px}.auth-plans{grid-template-columns:1fr}.auth-paid-button{width:100%}.auth-privacy{display:none}.auth-card{padding:22px}
 .app-header{gap:14px;padding-bottom:18px;margin-bottom:20px;flex-wrap:wrap}
 .brand{font-size:22px}
 .brand svg{width:38px;height:38px}
@@ -227,6 +242,7 @@ body.in-lesson #readyHint:empty{display:none}
 .section-title{flex-wrap:wrap;gap:8px}
 .section-title h2{font-size:19px}
 #setupPage,#lessonPage{grid-template-columns:1fr;gap:18px}
+.subscription-overview{padding:21px}.subscription-heading{display:block}.subscription-heading h2{font-size:25px}.plan-badge{display:inline-block;margin-top:14px}.plan-comparison{grid-template-columns:1fr}.plan-card{padding:18px}.plan-card.featured{padding:17px}
 .setup-steps{gap:2px;padding:6px;border-radius:21px}
 .setup-steps button{font-size:12px;gap:6px;padding:10px 5px;min-height:48px;border-radius:16px}
 .setup-steps button span{width:25px;height:25px;font-size:11px}
@@ -234,8 +250,8 @@ body.in-lesson #readyHint:empty{display:none}
 .setup-intro h2{font-size:28px}
 .setup-intro p{font-size:15px}
 .setup-intro{padding:3px 4px}
-.preview{grid-column:1;grid-row:4;position:static}
-[data-step-panel]{grid-column:1;grid-row:3}
+.preview{grid-column:1;grid-row:5;position:static}
+[data-step-panel]{grid-column:1;grid-row:4}
 .setup video{height:300px}
 .scan-overlay #cameraHint{font-size:18px}
 #scene{height:370px}

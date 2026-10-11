@@ -18,6 +18,7 @@ from dialogue import Dialogues
 from avatar_model import MAX_MODEL_BYTES, model_path, save_model, scanner_status
 from auth import AuthStore, SESSION_LIFETIME
 from usage import LimitExceeded, UsageStore, estimate_tokens
+from payments import PlategaClient
 import os
 
 
@@ -31,10 +32,12 @@ class AppServer(ThreadingHTTPServer):
         self.fast_voice=SpeechSynthesizer(os.getenv('YANDEX_TTS_API_KEY') or os.getenv('YANDEX_SPEECHKIT_API_KEY') or os.getenv('YANDEX_API_KEY'))
         self.auth = AuthStore(runtime.data / 'users.sqlite3')
         self.usage = UsageStore(runtime.data / 'usage.sqlite3')
+        self.platega = PlategaClient(os.getenv('PLATEGA_MERCHANT_ID'), os.getenv('PLATEGA_SECRET'))
         self.dialogues = Dialogues(runtime,self.tutor,self.fast_voice,self.usage)
         self.speech_lock = threading.RLock()
         self.speech_cache = {}
         self.speech_recent = defaultdict(deque)
+        self.payment_locks = defaultdict(threading.Lock)
         self.token = secrets.token_urlsafe(32)
         super().__init__(('127.0.0.1', port), Handler)
         self.origin = f'http://127.0.0.1:{self.server_port}'
@@ -120,6 +123,26 @@ class Handler(BaseHTTPRequestHandler):
     def clear_session_cookie(self):
         return 'parentai_session=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict'
 
+    def platega_webhook(self):
+        if not self.server.platega.valid_callback(
+                self.headers.get('X-MerchantId'), self.headers.get('X-Secret')):
+            return self.send(403, {'error': 'Invalid Platega credentials'})
+        try:
+            size = int(self.headers.get('Content-Length', '0'))
+            if not 1 <= size <= 64_000:
+                return self.send(413, {'error': 'Invalid callback size'})
+            value = json.loads(self.rfile.read(size))
+            if not isinstance(value, dict):
+                raise ValueError('Некорректный callback Platega.')
+            get = lambda *names: next((value[name] for name in names if name in value), None)
+            provider_id = get('SubscriptionId', 'subscriptionId', 'Id', 'id')
+            self.server.usage.payment_callback(
+                provider_id, get('Status', 'status'), get('Amount', 'amount'),
+                get('Currency', 'currency'))
+            return self.send(200, {'ok': True})
+        except (json.JSONDecodeError, ValueError) as exc:
+            return self.send(400, {'error': str(exc)})
+
     def do_GET(self):
         if not self.allowed():
             return self.send(403, {'error': 'Invalid host'})
@@ -174,6 +197,8 @@ class Handler(BaseHTTPRequestHandler):
                 value['voice_engine']=self.server.runtime.voice_engine.status()
                 value['scanner']=scanner_status()
                 value['usage']=self.server.usage.dashboard(user.id, user.role == 'admin')
+                value['billing']={'provider':self.server.platega.public_status(),
+                                  'plans':self.server.usage.catalog()}
             return self.send(200, value)
         root = self.server.runtime.data if path.startswith('/audio/') else ROOT / 'web'
         if root == self.server.runtime.data and not self.current_user():
@@ -190,12 +215,14 @@ class Handler(BaseHTTPRequestHandler):
         self.send(200, target.read_bytes(), mimetypes.guess_type(str(target))[0] or 'application/octet-stream')
 
     def do_POST(self):
+        path = urlsplit(self.path).path
+        if path == '/api/webhooks/platega':
+            return self.platega_webhook()
         if (not self.allowed() or self.headers.get('Origin') != self.server.origin
                 or self.headers.get('X-App-Token') != self.server.token):
             return self.send(403, {'error': 'Invalid origin or token'})
         try:
             size = int(self.headers.get('Content-Length', '0'))
-            path = urlsplit(self.path).path
             limit = MAX_MODEL_BYTES if path == '/api/avatar-model' else 10_000_000
             if not 0 <= size <= limit:
                 return self.send(413, {'error': 'Модель слишком большая' if path == '/api/avatar-model' else 'Запись слишком большая'})
@@ -227,6 +254,25 @@ class Handler(BaseHTTPRequestHandler):
             if path == '/api/auth/logout':
                 self.server.auth.delete_session(self.session_token())
                 return self.send(200, {'ok': True}, headers={'Set-Cookie': self.clear_session_cookie()})
+            if path == '/api/billing/checkout':
+                value = json.loads(payload)
+                if not isinstance(value, dict) or value.get('plan') != 'paid':
+                    raise ValueError('Неизвестный тариф подписки.')
+                if user.role == 'admin':
+                    raise ValueError('У администратора уже есть тестовый доступ без ограничений.')
+                if self.server.usage.subscription(user.id)['plan'] == 'paid':
+                    raise ValueError('Тариф Paid beta уже подключён.')
+                with self.server.payment_locks[user.id]:
+                    pending = self.server.usage.pending_checkout(user.id)
+                    if pending:
+                        return self.send(200, {'provider':'Platega', 'redirect':pending['redirect_url'],
+                                               'status':'pending', 'duplicate':True})
+                    amount = self.server.usage.catalog()['paid']['monthly_price_rubles']
+                    checkout = self.server.platega.create_subscription(amount)
+                    self.server.usage.record_checkout(
+                        user.id, checkout['provider_id'], checkout['redirect'], amount)
+                return self.send(201, {'provider':'Platega', 'redirect':checkout['redirect'],
+                                       'status':'pending', 'duplicate':False})
             if path == '/api/avatar-model':
                 return self.send(200, save_model(self.server.runtime, payload))
             if path == '/api/avatar':

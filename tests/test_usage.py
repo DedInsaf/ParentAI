@@ -81,6 +81,19 @@ class UsageTests(unittest.TestCase):
         self.assertEqual(report['usage']['llm_requests'], 4)
         self.assertNotEqual(report['usage']['external_cost_rubles'], '0.0000')
 
+    def test_confirmed_platega_callback_activates_paid_plan(self):
+        provider_id = '11111111-1111-4111-8111-111111111111'
+        redirect = 'https://pay.platega.io/subscription/11111111'
+        self.store.record_checkout(12, provider_id, redirect, 299)
+        self.assertEqual(self.store.pending_checkout(12)['redirect_url'], redirect)
+        self.assertEqual(self.store.subscription(12)['plan'], 'free')
+        self.store.payment_callback(provider_id, 'CONFIRMED', 299, 'RUB')
+        self.assertEqual(self.store.subscription(12)['plan'], 'paid')
+        self.store.payment_callback(provider_id, 'SUBSCRIPTION_CANCELLED', 299, 'RUB')
+        self.assertEqual(self.store.subscription(12)['plan'], 'free')
+        with self.assertRaisesRegex(ValueError, 'Сумма'):
+            self.store.payment_callback(provider_id, 'CONFIRMED', 300, 'RUB')
+
 
 if __name__ == '__main__':
     unittest.main()

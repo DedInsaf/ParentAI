@@ -50,6 +50,30 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(session['user']['login'],'test-user')
         self.assertEqual(self.request('/api/session',headers={'Sec-Fetch-Site':'cross-site'})[0],403)
 
+    def test_platega_checkout_and_authenticated_callback_activate_paid(self):
+        provider_id='11111111-1111-4111-8111-111111111111'
+        redirect='https://pay.platega.io/subscription/11111111'
+        class FakePlatega:
+            def public_status(self):return {'provider':'Platega','enabled':True,'method':'recurring_sbp'}
+            def create_subscription(self,amount):
+                self.amount=amount
+                return {'provider_id':provider_id,'redirect':redirect,'status':'pending'}
+            def valid_callback(self,merchant,secret):return merchant=='merchant' and secret=='secret'
+        self.s.platega=FakePlatega()
+        headers={'Origin':self.s.origin,'X-App-Token':self.s.token,'Content-Type':'application/json'}
+        code,body=self.request('/api/billing/checkout',json.dumps({'plan':'paid'}).encode(),headers)
+        self.assertEqual(code,201)
+        self.assertEqual(json.loads(body)['redirect'],redirect)
+        self.assertEqual(self.s.platega.amount,299)
+        callback=json.dumps({'Id':provider_id,'Amount':299,'Currency':'RUB','Status':'CONFIRMED'}).encode()
+        bad={'X-MerchantId':'merchant','X-Secret':'wrong','Content-Type':'application/json'}
+        self.assertEqual(self.request('/api/webhooks/platega',callback,bad,authenticated=False)[0],403)
+        good={'X-MerchantId':'merchant','X-Secret':'secret','Content-Type':'application/json'}
+        self.assertEqual(self.request('/api/webhooks/platega',callback,good,authenticated=False)[0],200)
+        self.assertEqual(self.s.usage.subscription(1)['plan'],'paid')
+        status=json.loads(self.request('/api/status',headers={'X-App-Token':self.s.token})[1])
+        self.assertTrue(status['billing']['provider']['enabled'])
+
     def test_login_accepts_login_or_email_and_logout_revokes_session(self):
         headers={'Origin':self.s.origin,'X-App-Token':self.s.token,'Content-Type':'application/json'}
         for identifier in ('test-user','TEST@EXAMPLE.COM'):

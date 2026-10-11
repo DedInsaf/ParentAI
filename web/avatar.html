@@ -13,6 +13,11 @@
     <span class="eyebrow">СПОКОЙНАЯ УЧЁБА РЯДОМ</span>
     <h1 id="authTitle">Поддержка родителя, даже когда он не рядом</h1>
     <p>Войдите в свой аккаунт, чтобы подготовить образ и голос родителя для занятий.</p>
+    <div class="auth-plans" aria-label="Тарифы ParentAI">
+      <div><span>Free</span><strong>0 ₽</strong><small>5 заданий в месяц</small></div>
+      <div class="auth-plan-paid"><span>Paid beta</span><strong>299 ₽<small>/месяц</small></strong><small>120 заданий и больше голосовых ответов</small></div>
+    </div>
+    <button id="authPaidBtn" type="button" class="auth-paid-button">Создать аккаунт и оформить Paid beta</button>
     <div class="auth-privacy"><span aria-hidden="true">♡</span><div><strong>Ваши данные остаются здесь</strong><p>Пароль хранится только в виде защищённого хеша. Снимки и голос не покидают устройство.</p></div></div>
   </section>
   <section class="card auth-card" aria-label="Вход и регистрация">
@@ -46,6 +51,27 @@
 </header>
 <p id="readyHint" role="status"></p><div id="error" role="alert" hidden></div>
 <main id="setupPage" hidden>
+  <section class="card subscription-overview" aria-labelledby="subscriptionTitle">
+    <div class="subscription-heading">
+      <div><span class="eyebrow">ТАРИФ И ПОДПИСКА</span><h2 id="subscriptionTitle">Сколько помощи доступно в этом месяце</h2><p>Текущий тариф виден сразу. Перейти на Paid beta можно здесь — до настройки аватара и начала занятия.</p></div>
+      <span id="currentPlanHero" class="plan-badge">Free</span>
+    </div>
+    <div class="plan-comparison">
+      <article id="freePlanCard" class="plan-card">
+        <div class="plan-card-title"><div><span class="plan-name">Free</span><strong>0 ₽</strong></div><span id="freePlanState" class="plan-state">Текущий тариф</span></div>
+        <p>Чтобы спокойно попробовать ParentAI.</p>
+        <ul><li><strong id="freeAssignments">5</strong> заданий в месяц</li><li><strong id="freePlans">10</strong> планов с подсказками</li><li><strong id="freeVoice">3</strong> голосовых ответа</li></ul>
+        <button id="freePlanBtn" type="button" class="secondary full" disabled>Текущий тариф</button>
+      </article>
+      <article id="paidPlanCard" class="plan-card featured">
+        <div class="plan-card-title"><div><span class="plan-name">Paid beta</span><strong><span id="paidPrice">299</span> ₽<small>/месяц</small></strong></div><span class="best-choice">Для первых семей</span></div>
+        <p>Больше заданий и голосового общения без неожиданных остановок.</p>
+        <ul><li><strong id="paidAssignments">120</strong> заданий в месяц</li><li><strong id="paidPlans">160</strong> планов с подсказками</li><li><strong id="paidVoice">500</strong> голосовых ответов</li></ul>
+        <button id="buyPaidBtn" type="button" class="full">Оформить подписку через Platega</button>
+      </article>
+    </div>
+    <p id="billingMessage" class="billing-message" role="status">Оплата подписки проходит на защищённой странице Platega через СБП. Списание повторяется раз в месяц; отменить подписку можно по ссылке из письма Platega.</p>
+  </section>
   <nav class="setup-steps" aria-label="Настройка родителя">
     <button type="button" data-setup-step="face" aria-current="step"><span>1</span><div>Ваш образ<small>Лицо, шея и плечи</small></div></button>
     <button type="button" data-setup-step="voice"><span>2</span><div>Ваш голос<small>Запишем и послушаем</small></div></button>

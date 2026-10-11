@@ -131,6 +131,20 @@ class UsageStore:
                 );
                 CREATE INDEX IF NOT EXISTS usage_user_created ON usage_events(user_id, created_at);
                 CREATE INDEX IF NOT EXISTS usage_lesson ON usage_events(lesson_id);
+                CREATE TABLE IF NOT EXISTS payment_subscriptions (
+                    provider_id TEXT PRIMARY KEY,
+                    user_id INTEGER NOT NULL,
+                    provider TEXT NOT NULL,
+                    plan TEXT NOT NULL CHECK(plan IN ('paid')),
+                    amount_rubles INTEGER NOT NULL,
+                    currency TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    redirect_url TEXT NOT NULL,
+                    created_at INTEGER NOT NULL,
+                    updated_at INTEGER NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS payment_user_created
+                    ON payment_subscriptions(user_id, created_at);
                 """
             )
 
@@ -175,6 +189,76 @@ class UsageStore:
             row = connection.execute("SELECT plan, status FROM subscriptions WHERE user_id = ?", (user_id,)).fetchone()
         plan = row["plan"] if row and row["status"] == "active" else "free"
         return {"plan": plan, "status": row["status"] if row else "active", **self.config.plan(plan)}
+
+    def catalog(self):
+        return {name: {
+            "code": name,
+            "title": value["title"],
+            "monthly_price_rubles": int(value["monthly_price_rubles"]),
+            "assignments": int(value["assignments"]),
+            "llm_requests": int(value["llm_requests"]),
+            "stt_billed_seconds": int(value["stt_billed_seconds"]),
+            "tts_blocks": int(value["tts_blocks"]),
+        } for name, value in self.config.values["plans"].items()}
+
+    def pending_checkout(self, user_id, max_age=15 * 60):
+        threshold = int(time.time()) - max_age
+        with self._connect() as connection:
+            row = connection.execute(
+                """SELECT provider_id, redirect_url, status FROM payment_subscriptions
+                   WHERE user_id=? AND (status='subscription_activated'
+                         OR (status='pending' AND created_at>=?))
+                   ORDER BY created_at DESC LIMIT 1""", (user_id, threshold)).fetchone()
+        return (dict(row) if row else None)
+
+    def record_checkout(self, user_id, provider_id, redirect_url, amount_rubles):
+        now = int(time.time())
+        with self._connect() as connection:
+            connection.execute(
+                """INSERT INTO payment_subscriptions
+                   (provider_id,user_id,provider,plan,amount_rubles,currency,status,redirect_url,created_at,updated_at)
+                   VALUES (?,?,'platega','paid',?,'RUB','pending',?,?,?)""",
+                (provider_id, user_id, int(amount_rubles), redirect_url, now, now))
+
+    def payment_callback(self, provider_id, status, amount, currency):
+        if not isinstance(provider_id, str) or not isinstance(status, str):
+            raise ValueError("Некорректный callback Platega.")
+        normalized = status.strip().upper()
+        with self.lock, self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                "SELECT user_id,amount_rubles,currency FROM payment_subscriptions WHERE provider_id=?",
+                (provider_id,)).fetchone()
+            if not row:
+                raise ValueError("Подписка Platega не найдена.")
+            try:
+                received_amount = int(amount)
+            except (TypeError, ValueError):
+                raise ValueError("Platega не передала сумму подписки.") from None
+            if received_amount != row["amount_rubles"] or currency != row["currency"]:
+                raise ValueError("Сумма или валюта Platega не совпадает с заказом.")
+            now = int(time.time())
+            connection.execute(
+                "UPDATE payment_subscriptions SET status=?,updated_at=? WHERE provider_id=?",
+                (normalized.lower(), now, provider_id))
+            if normalized == "CONFIRMED":
+                connection.execute(
+                    """INSERT INTO subscriptions(user_id,plan,status,updated_at) VALUES (?,'paid','active',?)
+                       ON CONFLICT(user_id) DO UPDATE SET plan='paid',status='active',updated_at=excluded.updated_at""",
+                    (row["user_id"], now))
+            elif normalized in {"CANCELED", "CANCELLED", "CHARGEBACKED", "SUBSCRIPTION_CANCELLED"}:
+                connection.execute(
+                    """INSERT INTO subscriptions(user_id,plan,status,updated_at) VALUES (?,'paid','cancelled',?)
+                       ON CONFLICT(user_id) DO UPDATE SET plan='paid',status='cancelled',updated_at=excluded.updated_at""",
+                    (row["user_id"], now))
+        return {"user_id": row["user_id"], "status": normalized}
+
+    def latest_payment(self, user_id):
+        with self._connect() as connection:
+            row = connection.execute(
+                """SELECT provider,status,created_at,updated_at FROM payment_subscriptions
+                   WHERE user_id=? ORDER BY created_at DESC LIMIT 1""", (user_id,)).fetchone()
+        return dict(row) if row else None
 
     def ensure_lesson(self, user_id, lesson_id):
         if not lesson_id:
@@ -388,6 +472,7 @@ class UsageStore:
                                 "hints": row["hints"], "solved_independently": bool(row["solved_independently"]),
                                 "difficulty": bool(row["difficulty"]),
                                 "cost_rubles": micros_to_rubles(row["cost"])} for row in recent],
+            "payment": self.latest_payment(user_id),
         }
 
     def cost_metrics(self):

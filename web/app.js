@@ -117,6 +117,7 @@ async function poll() {
     cloneOption.textContent=status.xtts_enabled?'Напоминания и новые ответы моим голосом':'Клонирование XTTS недоступно для платного продукта';
     if(!status.xtts_enabled&&$('voiceMode').value==='clone'){$('voiceMode').value='direct';updateVoiceMode();}
     renderParentSummary(status.usage);
+    renderSubscription(status.usage, status.billing);
     if (!tutorBusy && !questionRecording) $('tutorStatus').textContent = status.tutor?.enabled?'Скажи «помоги» или напиши вопрос. Будем пробовать по шагам.':'Помощник ещё не подключён. Попроси родителя настроить Яндекс.';
     if (!recording) $('voiceHint').textContent = status.error || status.progress || (status.phrases.length ? 'Сохранённый голос готов. Можно начать занятие.' : 'Выберите способ записи голоса.');
     if (status.reference && !referenceLoaded && !recording) {
@@ -140,6 +141,42 @@ function renderParentSummary(value) {
   $('summaryRemaining').textContent = value.plan.unlimited ? 'Без ограничений' :
     `${value.remaining.assignments} заданий · ${value.remaining.llm_requests} планов · ${value.remaining.tts_blocks} голосовых ответов`;
   $('summaryText').textContent = value.report.summary;
+}
+function renderSubscription(summary, billing) {
+  if (!summary || !billing || !$('currentPlanHero')) return;
+  const current = summary.plan.code;
+  const free = billing.plans?.free || {};
+  const paid = billing.plans?.paid || {};
+  $('currentPlanHero').textContent = summary.plan.unlimited ? 'Admin · без ограничений' : `Сейчас: ${summary.plan.title}`;
+  $('freeAssignments').textContent = free.assignments ?? 5;
+  $('freePlans').textContent = free.llm_requests ?? 10;
+  $('freeVoice').textContent = free.tts_blocks ?? 3;
+  $('paidAssignments').textContent = paid.assignments ?? 120;
+  $('paidPlans').textContent = paid.llm_requests ?? 160;
+  $('paidVoice').textContent = paid.tts_blocks ?? 500;
+  $('paidPrice').textContent = paid.monthly_price_rubles ?? 299;
+  $('freePlanCard').classList.toggle('is-current', current === 'free');
+  $('paidPlanCard').classList.toggle('is-current', current === 'paid');
+  $('freePlanState').textContent = current === 'free' ? 'Текущий тариф' : 'Базовый тариф';
+  $('freePlanBtn').textContent = current === 'free' ? 'Текущий тариф' : 'Free';
+  const button = $('buyPaidBtn');
+  const waiting = ['pending','subscription_activated'].includes(summary.payment?.status);
+  button.disabled = summary.plan.unlimited || current === 'paid' || waiting || !billing.provider?.enabled;
+  button.textContent = summary.plan.unlimited ? 'У вас доступ без ограничений' : current === 'paid' ?
+    'Подписка активна' : waiting ? 'Ожидаем подтверждение Platega' :
+    `Оформить за ${paid.monthly_price_rubles ?? 299} ₽/месяц`;
+  if (!billing.provider?.enabled && current === 'free') {
+    $('billingMessage').textContent = 'Кнопка покупки готова. Чтобы принимать оплату, добавьте Merchant ID и API-ключ Platega в настройки сервера.';
+  } else if (waiting) {
+    $('billingMessage').textContent = 'Подписка создана в Platega и ожидает подтверждения. Нажмите кнопку ещё раз, чтобы вернуться к оплате.';
+    button.disabled = false;
+  } else if (current === 'paid') {
+    $('billingMessage').textContent = 'Paid beta активна. Platega управляет ежемесячным списанием и присылает уведомления на вашу почту.';
+  } else if (summary.plan.unlimited) {
+    $('billingMessage').textContent = 'Администратор тестирует все возможности продукта без тарифных ограничений.';
+  } else {
+    $('billingMessage').textContent = 'Оплата проходит на защищённой странице Platega через СБП. Списание повторяется раз в месяц; отменить подписку можно по ссылке из письма Platega.';
+  }
 }
 async function pollLoop() { if (!authenticated) return; await poll(); if (authenticated) setTimeout(pollLoop, 2000); }
 
@@ -824,6 +861,7 @@ function showApplication(user) {
 
 $('loginTab').addEventListener('click', () => authMode('login'));
 $('registerTab').addEventListener('click', () => authMode('register'));
+$('authPaidBtn').addEventListener('click', () => authMode('register'));
 document.querySelector('.auth-brand').addEventListener('click', event => event.preventDefault());
 for (const [formId, path] of [['loginForm', 'login'], ['registerForm', 'register']]) {
   $(formId).addEventListener('submit', async event => {
@@ -851,6 +889,20 @@ $('logoutBtn').addEventListener('click', async () => {
   $('logoutBtn').disabled = true;
   try { await authRequest('logout', {}); }
   finally { location.reload(); }
+});
+$('buyPaidBtn').addEventListener('click', async () => {
+  clearError();
+  pendingActions.add('buyPaidBtn'); controls();
+  try {
+    const checkout = await api('billing/checkout', JSON.stringify({plan:'paid'}), true, 30000);
+    const target = new URL(checkout.redirect);
+    if (target.protocol !== 'https:' || target.hostname !== 'pay.platega.io') throw new Error('Получена небезопасная ссылка оплаты.');
+    location.assign(target.href);
+  } catch (error) {
+    fail(error);
+  } finally {
+    pendingActions.delete('buyPaidBtn'); controls();
+  }
 });
 
 try {
