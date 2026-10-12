@@ -13,6 +13,7 @@ from dialogue import DEFAULT_REPLY_VOICE,Dialogues
 from runtime import Runtime
 from speech import LocalSpeechRecognizer, SpeechRecognizer, stt_pcm
 from lipsync import timeline, viseme
+from usage import UsageStore
 
 
 def recording(seconds=1, rate=48000, silent=False):
@@ -129,6 +130,79 @@ class DialogueTests(unittest.TestCase):
                 self.assertEqual(tutor.calls,1)
                 self.assertNotIn('x=4',manager.snapshot(first['id'])['answer'])
             finally:manager.close()
+
+    def test_local_math_is_used_before_yandex_and_has_zero_cloud_cost(self):
+        from tutor import Tutor
+        def cloud_must_not_run(*_args, **_kwargs):
+            raise AssertionError('YandexGPT must not be called for supported local math')
+        with tempfile.TemporaryDirectory() as temp:
+            usage = UsageStore(Path(temp) / 'usage.sqlite3')
+            manager = Dialogues(Runtime(temp), Tutor('key', 'folder', opener=cloud_must_not_run), usage=usage)
+            try:
+                job = manager.start('Реши уравнение 2x + 3 = 11', 'средняя школа', user_id=41)
+                manager.jobs[job['id']]['thread'].join(2)
+                result = manager.snapshot(job['id'], 41)
+                report = usage.dashboard(41)
+                self.assertEqual(result['state'], 'done')
+                self.assertNotIn('x = 4', result['answer'])
+                self.assertEqual(report['usage']['local_assignments'], 1)
+                self.assertEqual(report['usage']['yandex_assignments'], 0)
+                self.assertEqual(report['usage']['llm_requests'], 0)
+                self.assertEqual(report['usage']['external_cost_rubles'], '0.0000')
+            finally:
+                manager.close()
+
+    def test_yandex_outage_falls_back_to_safe_local_guidance(self):
+        from tutor import Tutor
+        def offline(*_args, **_kwargs):
+            raise urllib.error.URLError('offline')
+        with tempfile.TemporaryDirectory() as temp:
+            usage = UsageStore(Path(temp) / 'usage.sqlite3')
+            manager = Dialogues(Runtime(temp), Tutor('key', 'folder', opener=offline), usage=usage)
+            try:
+                job = manager.start('Докажи теорему Пифагора', 'средняя школа', user_id=42)
+                manager.jobs[job['id']]['thread'].join(2)
+                result = manager.snapshot(job['id'], 42)
+                report = usage.dashboard(42)
+                self.assertEqual(result['state'], 'done')
+                self.assertIn('локально', result['limit_warning'].casefold())
+                self.assertEqual(report['usage']['local_assignments'], 1)
+                self.assertEqual(report['usage']['yandex_assignments'], 0)
+                self.assertEqual(report['usage']['llm_requests'], 0)
+            finally:
+                manager.close()
+
+    def test_exact_repeat_uses_private_plan_cache_before_yandex(self):
+        class PlanTutor:
+            calls = 0
+            model = 'test-model'
+            def public_status(self): return {'enabled': True}
+            def create_plan(self, question, level):
+                self.calls += 1
+                return {'plan': {'solution': 'Решение', 'hints': ['Шаг 1.', 'Шаг 2.', 'Шаг 3.'],
+                    'control_questions': ['Вопрос 1?', 'Вопрос 2?', 'Вопрос 3?'],
+                    'common_errors': [], 'answer_criterion': '', 'acceptable_answers': [],
+                    'final_explanation': 'Объяснение.'},
+                    'usage': {'input_tokens': 100, 'output_tokens': 100, 'actual': True}}
+        with tempfile.TemporaryDirectory() as temp:
+            usage = UsageStore(Path(temp) / 'usage.sqlite3')
+            tutor = PlanTutor()
+            manager = Dialogues(Runtime(temp), tutor, usage=usage)
+            try:
+                first = manager.start('Почему небо голубое?', 'средняя школа', user_id=43)
+                manager.jobs[first['id']]['thread'].join(2)
+                manager.recent.clear()
+                second = manager.start('Почему небо голубое?', 'средняя школа', user_id=43,
+                                       study_session=first['study_session'])
+                manager.jobs[second['id']]['thread'].join(2)
+                report = usage.dashboard(43)
+                self.assertEqual(manager.snapshot(second['id'], 43)['state'], 'done')
+                self.assertEqual(tutor.calls, 1)
+                self.assertEqual(report['usage']['yandex_assignments'], 1)
+                self.assertEqual(report['usage']['local_assignments'], 1)
+                self.assertEqual(report['usage']['llm_requests'], 1)
+            finally:
+                manager.close()
 
     def test_server_controls_attempts_and_keeps_text_without_clone(self):
         class FakeTutor:

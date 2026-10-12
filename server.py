@@ -341,35 +341,77 @@ class Handler(BaseHTTPRequestHandler):
                 if not isinstance(value, dict):
                     raise ValueError('Некорректный запрос помощнику.')
                 question = value.get('question')
-                estimated_input = estimate_tokens(question or '') + 250
-                estimated_output = 450
+                level = value.get('level')
+                history = value.get('history', [])
+                if not isinstance(question, str) or not question.strip() or len(question) > 4000:
+                    raise ValueError('Введите задание длиной до 4000 знаков.')
+                if level not in ('начальная школа', 'средняя школа', 'старшая школа'):
+                    raise ValueError('Неизвестный уровень объяснения.')
+                if (not isinstance(history, list) or len(history) > 12
+                        or any(not isinstance(item, dict)
+                               or item.get('role') not in ('user', 'assistant')
+                               or not isinstance(item.get('text'), str)
+                               or len(item['text']) > 4000 for item in history)
+                        or sum(len(item['text']) for item in history) + len(question) > 12000):
+                    raise ValueError('Некорректная история диалога.')
                 request_id = self.headers.get('X-Request-Id') or uuid.uuid4().hex
                 lesson_id = uuid.uuid4().hex
                 study = self.server.usage.start_study_session(user.id, user.role == 'admin')
-                reservation = self.server.usage.reserve(
-                    user.id, 'llm', request_id, lesson_id=lesson_id, study_session_id=study['id'],
-                    input_units=estimated_input, output_units=estimated_output,
-                    estimated_cost=self.server.usage.config.llm_cost(estimated_input, estimated_output),
-                    provider='YandexGPT', model=self.server.tutor.model, new_lesson=True,
-                    bypass_limits=user.role == 'admin')
-                if reservation['duplicate']:
-                    raise ValueError('Этот запрос уже обрабатывался. Отправьте новый вопрос.')
                 try:
-                    result = self.server.tutor.answer(question, value.get('history', []), value.get('level'))
-                except Exception:
-                    self.server.usage.fail(reservation['id'])
-                    self.server.usage.abandon_empty_lesson(user.id, lesson_id)
-                    self.server.usage.control_study_session(user.id, study['id'], 'stop', user.role == 'admin')
-                    raise
-                usage = result.get('usage', {})
-                input_tokens, output_tokens = usage.get('input_tokens', estimated_input), usage.get('output_tokens', estimated_output)
-                self.server.usage.complete(
-                    reservation['id'], input_units=input_tokens, output_units=output_tokens,
-                    cost=self.server.usage.config.llm_cost(input_tokens, output_tokens),
-                    actual_usage=usage.get('actual', False))
-                result['limit_warning'] = reservation['warning']
-                self.server.usage.control_study_session(user.id, study['id'], 'stop', user.role == 'admin')
-                return self.send(200, result)
+                    reply = self.server.tutor.local_reply(question)
+                    if reply:
+                        return self.send(200, {'answer': reply, 'source': 'local', 'limit_warning': ''})
+                    local = self.server.tutor.create_local_plan(question, level)
+                    if local:
+                        reservation = self.server.usage.reserve_local_lesson(
+                            user.id, request_id, lesson_id=lesson_id, study_session_id=study['id'],
+                            source='local', bypass_limits=user.role == 'admin')
+                        plan = local['plan']
+                        answer = f"{plan['hints'][0]} {plan['control_questions'][0]}".strip()
+                        self.server.usage.lesson_hint(user.id, lesson_id)
+                        return self.send(200, {'answer': answer, 'source': 'local',
+                                               'limit_warning': reservation['warning']})
+                    estimated_input = estimate_tokens(question or '') + 250
+                    estimated_output = 450
+                    reservation = self.server.usage.reserve(
+                        user.id, 'llm', request_id, lesson_id=lesson_id, study_session_id=study['id'],
+                        input_units=estimated_input, output_units=estimated_output,
+                        estimated_cost=self.server.usage.config.llm_cost(estimated_input, estimated_output),
+                        provider='YandexGPT', model=self.server.tutor.model, new_lesson=True,
+                        bypass_limits=user.role == 'admin')
+                    if reservation['duplicate']:
+                        raise ValueError('Этот запрос уже обрабатывался. Отправьте новый вопрос.')
+                    try:
+                        result = self.server.tutor.answer(
+                            question, history, level)
+                    except Exception:
+                        self.server.usage.fail(reservation['id'])
+                        self.server.usage.abandon_empty_lesson(user.id, lesson_id)
+                        fallback = self.server.usage.reserve_local_lesson(
+                            user.id, request_id + ':fallback', lesson_id=lesson_id,
+                            study_session_id=study['id'], source='fallback',
+                            bypass_limits=user.role == 'admin')
+                        plan = self.server.tutor.emergency_plan()['plan']
+                        answer = f"{plan['hints'][0]} {plan['control_questions'][0]}".strip()
+                        self.server.usage.lesson_hint(user.id, lesson_id)
+                        return self.send(200, {
+                            'answer': answer, 'source': 'fallback',
+                            'limit_warning': (fallback['warning'] or
+                                'Облачный помощник временно недоступен. Продолжаем локально без проверки точного ответа.'),
+                        })
+                    usage = result.get('usage', {})
+                    input_tokens = usage.get('input_tokens', estimated_input)
+                    output_tokens = usage.get('output_tokens', estimated_output)
+                    self.server.usage.complete(
+                        reservation['id'], input_units=input_tokens, output_units=output_tokens,
+                        cost=self.server.usage.config.llm_cost(input_tokens, output_tokens),
+                        actual_usage=usage.get('actual', False))
+                    result['source'] = 'yandex'
+                    result['limit_warning'] = reservation['warning']
+                    return self.send(200, result)
+                finally:
+                    self.server.usage.control_study_session(
+                        user.id, study['id'], 'stop', user.role == 'admin')
             if path == '/api/cancel':
                 self.server.runtime.cancel_generation()
                 return self.send(200, {'ok': True})

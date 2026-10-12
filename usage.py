@@ -115,6 +115,7 @@ class UsageStore:
                     id TEXT PRIMARY KEY,
                     user_id INTEGER NOT NULL,
                     study_session_id TEXT,
+                    source TEXT NOT NULL DEFAULT 'yandex',
                     started_at INTEGER NOT NULL,
                     updated_at INTEGER NOT NULL,
                     status TEXT NOT NULL DEFAULT 'active',
@@ -168,6 +169,8 @@ class UsageStore:
         lesson_columns = {row[1] for row in connection.execute("PRAGMA table_info(lessons)")}
         if "study_session_id" not in lesson_columns:
             connection.execute("ALTER TABLE lessons ADD COLUMN study_session_id TEXT")
+        if "source" not in lesson_columns:
+            connection.execute("ALTER TABLE lessons ADD COLUMN source TEXT NOT NULL DEFAULT 'yandex'")
         for table, create_sql, columns in (
             ("subscriptions",
              """CREATE TABLE subscriptions (
@@ -406,15 +409,16 @@ class UsageStore:
                 raise LimitExceeded("Время занятия закончилось. Начните новое занятие.")
         return {"elapsed_seconds": elapsed, "limit_seconds": None if unlimited else limit_seconds}
 
-    def ensure_lesson(self, user_id, lesson_id, study_session_id=None):
+    def ensure_lesson(self, user_id, lesson_id, study_session_id=None, source="yandex"):
         if not lesson_id:
             return
         now = int(time.time())
         with self._connect() as connection:
             connection.execute(
                 """INSERT OR IGNORE INTO lessons
-                   (id, user_id, study_session_id, started_at, updated_at) VALUES (?, ?, ?, ?, ?)""",
-                (lesson_id, user_id, study_session_id, now, now),
+                   (id, user_id, study_session_id, source, started_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (lesson_id, user_id, study_session_id, source, now, now),
             )
 
     def lesson_hint(self, user_id, lesson_id, difficult=False):
@@ -460,9 +464,12 @@ class UsageStore:
             (user_id, start, end),
         ).fetchone()
         assignments = connection.execute(
-            "SELECT COUNT(*) AS value FROM lessons WHERE user_id=? AND started_at>=? AND started_at<?",
+            """SELECT COUNT(*) AS value,
+                      COALESCE(SUM(CASE WHEN source='yandex' THEN 1 ELSE 0 END),0) AS yandex_value,
+                      COALESCE(SUM(CASE WHEN source!='yandex' THEN 1 ELSE 0 END),0) AS local_value
+               FROM lessons WHERE user_id=? AND started_at>=? AND started_at<?""",
             (user_id, start, end),
-        ).fetchone()["value"]
+        ).fetchone()
         sessions = connection.execute(
             """SELECT COUNT(DISTINCT study_session_id) AS value FROM lessons
                WHERE user_id=? AND study_session_id IS NOT NULL AND started_at>=? AND started_at<?""",
@@ -470,7 +477,9 @@ class UsageStore:
         ).fetchone()["value"]
         return {
             "sessions": sessions,
-            "assignments": assignments,
+            "assignments": assignments["value"],
+            "yandex_assignments": assignments["yandex_value"],
+            "local_assignments": assignments["local_value"],
             "llm_requests": event["llm_requests"],
             "stt_billed_seconds": event["stt_billed_seconds"],
             "tts_blocks": event["tts_blocks"],
@@ -494,6 +503,63 @@ class UsageStore:
         if operation == "stt":
             return "Лимит голосовых вопросов на этот месяц закончился. Напиши вопрос в поле справа."
         return "Подсказки на этот месяц закончились. Попроси взрослого открыть раздел «Для родителя»."
+
+    def reserve_local_lesson(self, user_id, request_id, *, lesson_id, study_session_id,
+                             source="local", bypass_limits=False):
+        """Count a zero-cost task while enforcing the same product limits as cloud tasks."""
+        if not request_id or not lesson_id or source not in ("local", "cache", "fallback"):
+            raise ValueError("Некорректная локальная задача.")
+        self.ensure_subscription(user_id)
+        now = int(time.time())
+        start, end = self._month_bounds(now)
+        with self.lock, self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            existing = connection.execute(
+                "SELECT 1 FROM lessons WHERE id=? AND user_id=?", (lesson_id, user_id)
+            ).fetchone()
+            if existing:
+                return {"duplicate": True, "warning": ""}
+            plan = self._active_plan(connection, user_id)
+            session = connection.execute(
+                "SELECT * FROM study_sessions WHERE id=? AND user_id=?", (study_session_id, user_id)
+            ).fetchone()
+            if not session or session["status"] != "active":
+                raise LimitExceeded("Занятие не активно. Начните или продолжите занятие.")
+            elapsed = int(session["active_seconds"]) + max(
+                0, now - int(session["active_started_at"] or now))
+            values = self.config.plan(plan)
+            if not bypass_limits and elapsed >= int(values["session_minutes"]) * 60:
+                raise LimitExceeded("Время занятия закончилось. Начните новое занятие.")
+            totals, limits = self._totals(connection, user_id, start, end), self._limits(plan)
+            projected = dict(totals)
+            projected["assignments"] += 1
+            session_has_lesson = connection.execute(
+                "SELECT 1 FROM lessons WHERE user_id=? AND study_session_id=? LIMIT 1",
+                (user_id, study_session_id),
+            ).fetchone()
+            if not session_has_lesson:
+                projected["sessions"] += 1
+            tasks = connection.execute(
+                "SELECT COUNT(*) AS value FROM lessons WHERE user_id=? AND study_session_id=?",
+                (user_id, study_session_id),
+            ).fetchone()["value"]
+            if not bypass_limits and tasks + 1 > int(values["assignments_per_session"]):
+                raise LimitExceeded("В этом занятии уже разобрано максимум новых задач. Начните новое занятие.")
+            relevant = ("sessions", "assignments")
+            if not bypass_limits and any(projected[name] > limits[name] for name in relevant):
+                raise LimitExceeded(self._friendly_limit("llm"))
+            warning = ""
+            if not bypass_limits and any(
+                    limits[name] and Decimal(projected[name]) / limits[name] >= self.config.warning_ratio
+                    for name in relevant):
+                warning = "Месячный лимит почти закончился. Родитель увидит остаток в своём отчёте."
+            connection.execute(
+                """INSERT INTO lessons
+                   (id,user_id,study_session_id,source,started_at,updated_at)
+                   VALUES (?,?,?,?,?,?)""",
+                (lesson_id, user_id, study_session_id, source, now, now),
+            )
+            return {"duplicate": False, "warning": warning}
 
     def reserve(self, user_id, operation, request_id, *, lesson_id=None, study_session_id=None, input_units=0,
                 output_units=0, duration_ms=0, billed_units=0, estimated_cost=0,
@@ -585,7 +651,8 @@ class UsageStore:
             if new_lesson and lesson_id:
                 connection.execute(
                     """INSERT OR IGNORE INTO lessons
-                       (id, user_id, study_session_id, started_at, updated_at) VALUES (?, ?, ?, ?, ?)""",
+                       (id, user_id, study_session_id, source, started_at, updated_at)
+                       VALUES (?, ?, ?, 'yandex', ?, ?)""",
                     (lesson_id, user_id, study_session_id, now, now),
                 )
             return {"id": event_id, "duplicate": False, "warning": warning}
@@ -682,10 +749,22 @@ class UsageStore:
                    GROUP BY user_id HAVING cost > 0 ORDER BY cost""",
                 (start, end),
             ).fetchall()
+            assignments = connection.execute(
+                """SELECT COUNT(*) AS total,
+                          COALESCE(SUM(CASE WHEN source='yandex' THEN 1 ELSE 0 END),0) AS yandex,
+                          COALESCE(SUM(CASE WHEN source!='yandex' THEN 1 ELSE 0 END),0) AS local
+                   FROM lessons WHERE started_at>=? AND started_at<?""",
+                (start, end),
+            ).fetchone()
         values = [row["cost"] for row in rows]
         def percentile(p):
             if not values:
                 return "0.0000"
             return micros_to_rubles(values[max(0, math.ceil(len(values) * p) - 1)])
         return {"active_users": len(values), "currency": "RUB", "p50": percentile(.50),
-                "p90": percentile(.90), "p99": percentile(.99)}
+                "p90": percentile(.90), "p99": percentile(.99),
+                "assignments": assignments["total"],
+                "local_assignments": assignments["local"],
+                "yandex_assignments": assignments["yandex"],
+                "local_share_percent": (round(assignments["local"] * 100 / assignments["total"], 1)
+                                        if assignments["total"] else 0)}

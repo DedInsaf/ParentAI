@@ -6,6 +6,7 @@ import urllib.error
 import urllib.request
 
 from usage import estimate_tokens
+from local_tutor import create_local_plan, emergency_plan, local_reply
 
 
 ENDPOINT = 'https://ai.api.cloud.yandex.net/foundationModels/v1/completion'
@@ -48,14 +49,29 @@ class Tutor:
                    os.getenv('PARENTAI_TUTOR_MODEL'))
 
     def public_status(self):
-        enabled = bool(self.api_key and self.folder_id)
+        cloud_enabled = bool(self.api_key and self.folder_id)
         return {
-            'enabled': enabled,
-            'provider': 'YandexGPT',
+            'enabled': True,
+            'local_enabled': True,
+            'cloud_enabled': cloud_enabled,
+            'provider': 'Локальный помощник + YandexGPT',
             'model': self.model,
-            'message': ('Помощник YandexGPT готов' if enabled else
-                        'Добавьте ключ YandexGPT и ID каталога в parentai.env'),
+            'message': ('Локальный помощник готов, YandexGPT подключён' if cloud_enabled else
+                        'Локальный помощник готов; сложным задачам нужен ключ YandexGPT'),
         }
+
+    @staticmethod
+    def local_reply(question):
+        return local_reply(question)
+
+    @staticmethod
+    def create_local_plan(question, level):
+        plan = create_local_plan(question, level)
+        return {'plan': plan, 'source': 'local'} if plan else None
+
+    @staticmethod
+    def emergency_plan():
+        return {'plan': emergency_plan(), 'source': 'fallback'}
 
     @staticmethod
     def _usage(result, request_text, answer_text):

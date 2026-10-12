@@ -161,10 +161,12 @@ class ServerTests(unittest.TestCase):
         dashboard = self.s.usage.dashboard(1)
         self.assertEqual(dashboard['usage']['external_cost_rubles'], '0.0000')
 
-    def test_tutor_is_protected_and_reports_missing_configuration(self):
+    def test_tutor_is_protected_and_uses_local_reply_without_configuration(self):
         payload=json.dumps({'question':'Помоги','history':[],'level':'средняя школа'}).encode()
         self.assertEqual(self.request('/api/tutor',payload)[0],403)
         headers={'Origin':self.s.origin,'X-App-Token':self.s.token,'Content-Type':'application/json'}
         code, body = self.request('/api/tutor',payload,headers)
-        self.assertEqual(code,400)
-        self.assertIn('не настроен',json.loads(body)['error'])
+        self.assertEqual(code,200)
+        result = json.loads(body)
+        self.assertEqual(result['source'],'local')
+        self.assertIn('условие',result['answer'].casefold())

@@ -13,9 +13,11 @@ class Response:
 
 
 class TutorTests(unittest.TestCase):
-    def test_disabled_status_does_not_expose_secrets(self):
+    def test_local_status_stays_enabled_without_exposing_secrets(self):
         value = Tutor().public_status()
-        self.assertFalse(value['enabled'])
+        self.assertTrue(value['enabled'])
+        self.assertTrue(value['local_enabled'])
+        self.assertFalse(value['cloud_enabled'])
         self.assertNotIn('key', json.dumps(value).lower())
 
     def test_bounded_yandex_request(self):
