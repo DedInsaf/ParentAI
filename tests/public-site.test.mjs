@@ -21,21 +21,33 @@ test('public landing shows exact monthly plan limits', () => {
   assert.match(html, /45 занятий[\s\S]*45 минут/);
   assert.match(html, /490 ₽/);
   assert.match(html, /990 ₽/);
-  assert.match(html, /Оплата пока не подключена/);
+  assert.match(html, /30 календарных дней/);
+  assert.match(html, /без автоматического продления/i);
 });
 
-test('payments stay disabled until the backend is ready', () => {
+test('purchase path is clickable but cannot charge before backend launch', () => {
   const html = read('index.html');
-  assert.equal((html.match(/type="button" disabled/g) ?? []).length, 3);
+  const checkout = read('checkout.html');
+  assert.match(html, /href="\/checkout\.html\?plan=plus"/);
+  assert.match(html, /href="\/checkout\.html\?plan=ultra"/);
+  assert.match(checkout, /data-payment-placeholder/);
+  assert.match(checkout, /Оплата временно недоступна/);
+  assert.match(checkout, /деньги не списывались/i);
   assert.doesNotMatch(html, /PLATEGA_|merchant|secret/i);
+  assert.doesNotMatch(checkout, /PLATEGA_|merchant|secret/i);
 });
 
 test('public site includes privacy, terms and deployment essentials', () => {
-  for (const name of ['privacy.html', 'terms.html', '404.html', 'robots.txt', 'sitemap.xml', '.htaccess']) {
+  for (const name of ['privacy.html', 'terms.html', 'support.html', 'checkout.html', '404.html', 'robots.txt', 'sitemap.xml', '.htaccess']) {
     assert.ok(fs.existsSync(path.join(root, name)), `${name} is missing`);
   }
-  assert.match(read('privacy.html'), /регистрация, оплата и приём заявок на сайте пока отключены/i);
-  assert.match(read('terms.html'), /реквизиты продавца, контакты поддержки/i);
+  assert.match(read('privacy.html'), /support@adym\.ru/i);
+  assert.match(read('privacy.html'), /Platega/i);
+  assert.match(read('terms.html'), /Пользовательское соглашение/i);
+  assert.match(read('terms.html'), /490 ₽ за 30 календарных дней/i);
+  assert.match(read('terms.html'), /990 ₽ за 30 календарных дней/i);
+  assert.match(read('support.html'), /support@adym\.ru/i);
+  assert.match(read('support.html'), /OPLAT/);
   assert.match(read('.htaccess'), /RewriteCond %\{HTTPS\} !=on/);
   assert.match(read('.htaccess'), /X-Forwarded-Proto.*!https/);
 });

@@ -3,4 +3,6 @@
   <url><loc>https://adym.ru/</loc><priority>1.0</priority></url>
   <url><loc>https://adym.ru/privacy.html</loc><priority>0.3</priority></url>
   <url><loc>https://adym.ru/terms.html</loc><priority>0.3</priority></url>
+  <url><loc>https://adym.ru/support.html</loc><priority>0.5</priority></url>
+  <url><loc>https://adym.ru/checkout.html</loc><priority>0.4</priority></url>
 </urlset>

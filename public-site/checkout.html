@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f7f2ea">
+  <meta name="description" content="Проверка заказа и покупка доступа к сервису Адым.">
+  <title>Оформление доступа — Адым</title>
+  <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/assets/site.css">
+  <script src="/assets/site.js" defer></script>
+</head>
+<body class="checkout-page">
+  <header class="site-header">
+    <div class="shell header-inner">
+      <a class="brand" href="/"><img src="/assets/logo.svg" width="46" height="46" alt=""><span><strong>Адым</strong><small>с татарского — «шаг»</small></span></a>
+      <a class="button secondary" href="/#plans">Изменить тариф</a>
+    </div>
+  </header>
+  <main class="checkout-main shell">
+    <section class="checkout-copy">
+      <span class="kicker">Оформление доступа</span>
+      <h1>Проверьте заказ</h1>
+      <p>Здесь показана полная стоимость и всё, что входит в выбранный тариф. Дополнительных обязательных платежей нет.</p>
+      <div class="checkout-safety"><span>✓</span><p><strong>Списаний сейчас нет.</strong><br>Подключение Platega проходит согласование с банком.</p></div>
+    </section>
+    <section class="order-card" aria-labelledby="order-title">
+      <span class="order-label">Ваш выбор</span>
+      <h2 id="order-title" data-checkout-name>Адым Плюс</h2>
+      <div class="order-price"><strong data-checkout-price>490 ₽</strong><small>один платёж за 30 календарных дней</small></div>
+      <p data-checkout-description>Для занятий несколько раз в неделю.</p>
+      <ul data-checkout-features>
+        <li>20 занятий по 30 минут</li>
+        <li>До 3 заданий за занятие</li>
+        <li>До 10 голосовых ответов за занятие</li>
+        <li>До 60 новых заданий за период</li>
+      </ul>
+      <div class="order-total"><span>Итого к оплате</span><strong data-checkout-total>490 ₽</strong></div>
+      <p class="order-renewal">Автоматического продления нет. По окончании 30 дней новый период можно приобрести вручную.</p>
+      <button class="button primary full" type="button" data-payment-placeholder>Перейти к оплате</button>
+      <p class="order-consent">Нажимая кнопку, пользователь подтверждает, что ознакомился с <a href="/terms.html">пользовательским соглашением</a> и <a href="/privacy.html">политикой конфиденциальности</a>.</p>
+    </section>
+  </main>
+  <section class="checkout-help shell"><p>Есть вопрос по тарифу или оплате?</p><a href="mailto:support@adym.ru">Написать в поддержку: support@adym.ru</a></section>
+  <footer class="site-footer"><div class="shell footer-inner"><a class="brand footer-brand" href="/"><img src="/assets/logo.svg" width="40" height="40" alt=""><span><strong>Адым</strong><small>шаг к самостоятельной учёбе</small></span></a><div class="footer-links"><a href="/privacy.html">Политика конфиденциальности</a><a href="/terms.html">Пользовательское соглашение</a><a href="/support.html">Поддержка</a></div><p>© <span id="year">2026</span> Адым. Кодовое слово для проверки: <strong>OPLAT</strong>.</p></div></footer>
+
+  <dialog class="payment-dialog" aria-labelledby="payment-title">
+    <button class="dialog-close" type="button" data-dialog-close aria-label="Закрыть">×</button>
+    <span class="dialog-icon">↗</span>
+    <h2 id="payment-title">Оплата временно недоступна</h2>
+    <p>Мы заканчиваем подключение Platega. Платёж не создавался, данные карты не запрашивались и деньги не списывались.</p>
+    <p>Если хотите узнать о запуске оплаты, напишите на <a href="mailto:support@adym.ru">support@adym.ru</a>.</p>
+    <button class="button primary full" type="button" data-dialog-close>Понятно</button>
+  </dialog>
+</body>
+</html>
