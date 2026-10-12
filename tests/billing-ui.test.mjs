@@ -16,3 +16,13 @@ test('subscription details stay in a compact header dialog instead of the setup 
   assert.match(styles, /\.billing-trigger\{/);
   assert.match(styles, /\.billing-dialog\{/);
 });
+
+test('plans use parent-friendly sessions and include Plus and Ultra', () => {
+  assert.doesNotMatch(html, /планов с подсказками/);
+  assert.match(html, /5<\/strong> занятий в месяц/);
+  assert.match(html, /Адым Плюс/);
+  assert.match(html, /Адым Ультра/);
+  assert.match(html, /Перерыв останавливает таймер занятия/);
+  assert.match(script, /remaining\.sessions/);
+  assert.match(script, /study-session/);
+});

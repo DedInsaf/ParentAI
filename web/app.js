@@ -24,7 +24,7 @@ const pendingActions = new Set();
 let online = false, recordCancelled = false, recordingStream, recordingAbort, referenceRejected = false, previewUrl, renderTime = 0;
 let referenceLoaded = false, voiceModeTouched = false;
 let lessonStarted = 0, lessonElapsed = 0, tutorBusy = false, lessonCameraEnabled = false, lessonPresenceEnabled = false;
-let activeCues=[], audioStarted=0, dialogId=null, helpEpoch=0;
+let activeCues=[], audioStarted=0, dialogId=null, studySessionId=null, lessonLimitSeconds=null, lessonLimitHandled=false, helpEpoch=0;
 let questionRecording=false, questionStop=false, questionCancel=false, questionAbort, questionStream;
 let currentJob=null;
 let previewYaw=0,showWireframe=false,scanEpoch=0;
@@ -155,7 +155,7 @@ function renderParentSummary(value) {
   $('summaryToday').textContent = `${Number(value.usage.today_cost_rubles).toFixed(2)} ₽`;
   $('summaryCost').textContent = `${Number(value.usage.external_cost_rubles).toFixed(2)} ₽`;
   $('summaryRemaining').textContent = value.plan.unlimited ? 'Без ограничений' :
-    `${value.remaining.assignments} заданий · ${value.remaining.llm_requests} планов · ${value.remaining.tts_blocks} голосовых ответов`;
+    `${value.remaining.sessions} занятий · ${value.remaining.assignments} новых задач`;
   $('summaryText').textContent = value.report.summary;
 }
 function renderSubscription(summary, billing) {
@@ -163,34 +163,43 @@ function renderSubscription(summary, billing) {
   const current = summary.plan.code;
   const free = billing.plans?.free || {};
   const paid = billing.plans?.paid || {};
+  const ultra = billing.plans?.ultra || {};
   const planTitle = summary.plan.unlimited ? 'Admin' : summary.plan.title;
   $('headerPlanName').textContent = planTitle;
   $('billingBtn').setAttribute('aria-label', `Тариф: ${planTitle}. Открыть информацию о подписке`);
   $('currentPlanHero').textContent = summary.plan.unlimited ? 'Admin · без ограничений' : `Сейчас: ${summary.plan.title}`;
-  $('freeAssignments').textContent = free.assignments ?? 5;
-  $('freePlans').textContent = free.llm_requests ?? 10;
-  $('freeVoice').textContent = free.tts_blocks ?? 3;
-  $('paidAssignments').textContent = paid.assignments ?? 60;
-  $('paidPlans').textContent = paid.llm_requests ?? 80;
-  $('paidVoice').textContent = paid.tts_blocks ?? 180;
+  for (const [prefix, plan, defaults] of [
+    ['free', free, [5,20,3,3]], ['paid', paid, [20,30,3,10]], ['ultra', ultra, [45,45,4,20]],
+  ]) {
+    $(`${prefix}Sessions`).textContent = plan.sessions ?? defaults[0];
+    $(`${prefix}Minutes`).textContent = plan.session_minutes ?? defaults[1];
+    $(`${prefix}Tasks`).textContent = plan.assignments_per_session ?? defaults[2];
+    $(`${prefix}Voice`).textContent = plan.yandex_voice_per_session ?? defaults[3];
+  }
   $('paidPrice').textContent = paid.monthly_price_rubles ?? 490;
+  $('ultraPrice').textContent = ultra.monthly_price_rubles ?? 990;
   $('freePlanCard').classList.toggle('is-current', current === 'free');
   $('paidPlanCard').classList.toggle('is-current', current === 'paid');
+  $('ultraPlanCard').classList.toggle('is-current', current === 'ultra');
   $('freePlanState').textContent = current === 'free' ? 'Текущий тариф' : 'Базовый тариф';
   $('freePlanBtn').textContent = current === 'free' ? 'Текущий тариф' : 'Free';
-  const button = $('buyPaidBtn');
+  const button = $('buyPaidBtn'), ultraButton = $('buyUltraBtn');
   const waiting = ['pending','subscription_activated'].includes(summary.payment?.status);
   button.disabled = summary.plan.unlimited || current === 'paid' || waiting || !billing.provider?.enabled;
+  ultraButton.disabled = summary.plan.unlimited || current === 'ultra' || waiting || !billing.provider?.enabled;
   button.textContent = summary.plan.unlimited ? 'У вас доступ без ограничений' : current === 'paid' ?
     'Подписка активна' : waiting ? 'Ожидаем подтверждение Platega' :
     `Оформить за ${paid.monthly_price_rubles ?? 490} ₽/месяц`;
+  ultraButton.textContent = summary.plan.unlimited ? 'У вас доступ без ограничений' : current === 'ultra' ?
+    'Подписка активна' : waiting ? 'Ожидаем подтверждение Platega' :
+    `Оформить за ${ultra.monthly_price_rubles ?? 990} ₽/месяц`;
   if (!billing.provider?.enabled && current === 'free') {
     $('billingMessage').textContent = 'Кнопка покупки готова. Чтобы принимать оплату, добавьте Merchant ID и API-ключ Platega в настройки сервера.';
   } else if (waiting) {
     $('billingMessage').textContent = 'Подписка создана в Platega и ожидает подтверждения. Нажмите кнопку ещё раз, чтобы вернуться к оплате.';
-    button.disabled = false;
-  } else if (current === 'paid') {
-    $('billingMessage').textContent = 'Paid beta активна. Platega управляет ежемесячным списанием и присылает уведомления на вашу почту.';
+    (summary.payment?.plan === 'ultra' ? ultraButton : button).disabled = false;
+  } else if (current === 'paid' || current === 'ultra') {
+    $('billingMessage').textContent = `${summary.plan.title} активен. Platega управляет ежемесячным списанием и присылает уведомления на вашу почту.`;
   } else if (summary.plan.unlimited) {
     $('billingMessage').textContent = 'Администратор тестирует все возможности продукта без тарифных ограничений.';
   } else {
@@ -490,6 +499,10 @@ async function start() {
     stopCamera();
     $('monitorStatus').textContent = 'Камера выключена родителем';
   }
+  let study;
+  try { study = await api('study-session', JSON.stringify({action:'start'})); }
+  catch(error){stopCamera();throw error;}
+  studySessionId=study.id;lessonLimitSeconds=study.limit_seconds;lessonLimitHandled=false;dialogId=null;
   stopAudio(); running = true; paused = false; presence.reset(); lessonElapsed = 0; lessonStarted = performance.now(); showLesson();
   if(lessonCameraEnabled) startLessonPresence();
   else $('monitorStatus').textContent='Камера выключена родителем';
@@ -500,11 +513,11 @@ async function start() {
 }
 async function pause() {
   stopAudio(); cancelTutor();stopHandsFree();
-  if (!paused) { lessonElapsed += performance.now() - lessonStarted; paused = true; lessonPresenceEnabled=false;document.body.classList.add('on-break');stopCamera();setListenerState('off','Перерыв. Камера и микрофон выключены.'); $('pauseBtn').textContent = 'Продолжить занятие'; $('monitorStatus').textContent = 'Перерыв · камера выключена'; }
-  else { if (lessonCameraEnabled) await enableCamera(); presence.reset(); paused = false;document.body.classList.remove('on-break'); lessonStarted = performance.now(); $('pauseBtn').textContent = 'Сделать перерыв';if(lessonCameraEnabled)startLessonPresence();startHandsFree().catch(fail); }
+  if (!paused) { await api('study-session',JSON.stringify({action:'pause',id:studySessionId}));lessonElapsed += performance.now() - lessonStarted; paused = true; lessonPresenceEnabled=false;document.body.classList.add('on-break');stopCamera();setListenerState('off','Перерыв. Камера и микрофон выключены.'); $('pauseBtn').textContent = 'Продолжить занятие'; $('monitorStatus').textContent = 'Перерыв · камера выключена'; }
+  else { await api('study-session',JSON.stringify({action:'resume',id:studySessionId}));if (lessonCameraEnabled) await enableCamera(); presence.reset(); paused = false;document.body.classList.remove('on-break'); lessonStarted = performance.now(); $('pauseBtn').textContent = 'Сделать перерыв';if(lessonCameraEnabled)startLessonPresence();startHandsFree().catch(fail); }
   controls();
 }
-function stop() { stopHandsFree();api('voice-release',new Uint8Array()).catch(()=>{});running = false; paused = false;lessonCameraEnabled=false;lessonPresenceEnabled=false;document.body.classList.remove('on-break'); stopAudio(); stopCamera(); cancelTutor(); presence.reset(); $('pauseBtn').textContent = 'Сделать перерыв'; $('monitorStatus').textContent = 'Занятие завершено · камера выключена'; showSetup(); controls(); }
+function stop(message='Занятие завершено · камера выключена') { const session=studySessionId;studySessionId=null;if(session)api('study-session',JSON.stringify({action:'stop',id:session})).catch(()=>{});stopHandsFree();api('voice-release',new Uint8Array()).catch(()=>{});running = false; paused = false;dialogId=null;lessonCameraEnabled=false;lessonPresenceEnabled=false;document.body.classList.remove('on-break'); stopAudio(); stopCamera(); cancelTutor(); presence.reset(); $('pauseBtn').textContent = 'Сделать перерыв'; $('monitorStatus').textContent = message; showSetup(); controls(); }
 function startLessonPresence() {
   lessonPresenceEnabled=!!detector;
   $('monitorStatus').textContent=lessonPresenceEnabled?'Камера включена · ищем лицо':'Камера включена · запускаем проверку лица';
@@ -564,7 +577,11 @@ function tick(now) {
   }
   if (running) {
     const elapsed = lessonElapsed + (paused ? 0 : now - lessonStarted), seconds = Math.floor(elapsed/1000);
-    $('lessonClock').textContent = `${String(Math.floor(seconds/60)).padStart(2,'0')}:${String(seconds%60).padStart(2,'0')}`;
+    const limit = Number.isFinite(lessonLimitSeconds) ? lessonLimitSeconds : null;
+    const left = limit === null ? null : Math.max(0, limit-seconds);
+    const shown = left === null ? seconds : left;
+    $('lessonClock').textContent = `${left === null ? '' : 'осталось '}${String(Math.floor(shown/60)).padStart(2,'0')}:${String(shown%60).padStart(2,'0')}`;
+    if(left === 0 && !lessonLimitHandled){lessonLimitHandled=true;stop('Время занятия закончилось · можно начать следующее');fail(new Error('Время занятия закончилось. Перерыв в лимит не входил.'));}
   }
 }
 function showLesson() {
@@ -661,7 +678,7 @@ async function answerQuestion(question) {
   try {
     await context().resume();$('tutorStatus').textContent='Думаю, как помочь…';
     const started=await api('dialog',JSON.stringify({question,level:$('schoolLevel').value,session:dialogId,
-      voice:$('replyVoice').value,request_id:requestId()}));
+      study_session:studySessionId,voice:$('replyVoice').value,request_id:requestId()}));
     if(epoch!==helpEpoch){await api('dialog-cancel',JSON.stringify({id:started.id}));return;}
     dialogId=started.session;currentJob=started.id;
     const deadline=performance.now()+660000;
@@ -966,20 +983,22 @@ $('logoutBtn').addEventListener('click', async () => {
   try { await authRequest('logout', {}); }
   finally { location.reload(); }
 });
-$('buyPaidBtn').addEventListener('click', async () => {
+async function buyPlan(plan, buttonId) {
   clearError();
-  pendingActions.add('buyPaidBtn'); controls();
+  pendingActions.add(buttonId); controls();
   try {
-    const checkout = await api('billing/checkout', JSON.stringify({plan:'paid'}), true, 30000);
+    const checkout = await api('billing/checkout', JSON.stringify({plan}), true, 30000);
     const target = new URL(checkout.redirect);
     if (target.protocol !== 'https:' || target.hostname !== 'pay.platega.io') throw new Error('Получена небезопасная ссылка оплаты.');
     location.assign(target.href);
   } catch (error) {
     fail(error);
   } finally {
-    pendingActions.delete('buyPaidBtn'); controls();
+    pendingActions.delete(buttonId); controls();
   }
-});
+}
+$('buyPaidBtn').addEventListener('click', () => buyPlan('paid','buyPaidBtn'));
+$('buyUltraBtn').addEventListener('click', () => buyPlan('ultra','buyUltraBtn'));
 
 try {
   const response = await fetch('/api/session');

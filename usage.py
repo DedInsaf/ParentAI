@@ -40,9 +40,9 @@ class BillingConfig:
         value = json.loads(source.read_text(encoding="utf-8"))
         if value.get("currency") != "RUB" or not isinstance(value.get("plans"), dict):
             raise ValueError("Некорректная конфигурация тарифов.")
-        for name in ("free", "paid"):
+        for name in ("free", "paid", "ultra"):
             if name not in value["plans"]:
-                raise ValueError("В конфигурации нужны тарифы Free и Paid.")
+                raise ValueError("В конфигурации нужны тарифы Бесплатный, Плюс и Ультра.")
         return cls(value)
 
     @property
@@ -95,13 +95,26 @@ class UsageStore:
                 """
                 CREATE TABLE IF NOT EXISTS subscriptions (
                     user_id INTEGER PRIMARY KEY,
-                    plan TEXT NOT NULL CHECK(plan IN ('free', 'paid')),
+                    plan TEXT NOT NULL CHECK(plan IN ('free', 'paid', 'ultra')),
                     status TEXT NOT NULL CHECK(status IN ('active', 'paused', 'cancelled')),
                     updated_at INTEGER NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS study_sessions (
+                    id TEXT PRIMARY KEY,
+                    user_id INTEGER NOT NULL,
+                    started_at INTEGER NOT NULL,
+                    active_started_at INTEGER,
+                    active_seconds INTEGER NOT NULL DEFAULT 0,
+                    updated_at INTEGER NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'active'
+                        CHECK(status IN ('active', 'paused', 'complete'))
+                );
+                CREATE INDEX IF NOT EXISTS study_sessions_user_started
+                    ON study_sessions(user_id, started_at);
                 CREATE TABLE IF NOT EXISTS lessons (
                     id TEXT PRIMARY KEY,
                     user_id INTEGER NOT NULL,
+                    study_session_id TEXT,
                     started_at INTEGER NOT NULL,
                     updated_at INTEGER NOT NULL,
                     status TEXT NOT NULL DEFAULT 'active',
@@ -135,7 +148,7 @@ class UsageStore:
                     provider_id TEXT PRIMARY KEY,
                     user_id INTEGER NOT NULL,
                     provider TEXT NOT NULL,
-                    plan TEXT NOT NULL CHECK(plan IN ('paid')),
+                    plan TEXT NOT NULL CHECK(plan IN ('paid', 'ultra')),
                     amount_rubles INTEGER NOT NULL,
                     currency TEXT NOT NULL,
                     status TEXT NOT NULL,
@@ -147,6 +160,43 @@ class UsageStore:
                     ON payment_subscriptions(user_id, created_at);
                 """
             )
+            self._migrate_schema(connection)
+
+    @staticmethod
+    def _migrate_schema(connection):
+        """Expand old two-plan databases without discarding subscriptions or usage."""
+        lesson_columns = {row[1] for row in connection.execute("PRAGMA table_info(lessons)")}
+        if "study_session_id" not in lesson_columns:
+            connection.execute("ALTER TABLE lessons ADD COLUMN study_session_id TEXT")
+        for table, create_sql, columns in (
+            ("subscriptions",
+             """CREATE TABLE subscriptions (
+                    user_id INTEGER PRIMARY KEY,
+                    plan TEXT NOT NULL CHECK(plan IN ('free', 'paid', 'ultra')),
+                    status TEXT NOT NULL CHECK(status IN ('active', 'paused', 'cancelled')),
+                    updated_at INTEGER NOT NULL)""",
+             "user_id,plan,status,updated_at"),
+            ("payment_subscriptions",
+             """CREATE TABLE payment_subscriptions (
+                    provider_id TEXT PRIMARY KEY, user_id INTEGER NOT NULL,
+                    provider TEXT NOT NULL, plan TEXT NOT NULL CHECK(plan IN ('paid', 'ultra')),
+                    amount_rubles INTEGER NOT NULL, currency TEXT NOT NULL, status TEXT NOT NULL,
+                    redirect_url TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)""",
+             "provider_id,user_id,provider,plan,amount_rubles,currency,status,redirect_url,created_at,updated_at"),
+        ):
+            row = connection.execute(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name=?", (table,)
+            ).fetchone()
+            if row and "ultra" not in (row["sql"] or "").casefold():
+                legacy = table + "_before_ultra"
+                connection.execute(f"ALTER TABLE {table} RENAME TO {legacy}")
+                connection.execute(create_sql)
+                connection.execute(f"INSERT INTO {table} ({columns}) SELECT {columns} FROM {legacy}")
+                connection.execute(f"DROP TABLE {legacy}")
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS payment_user_created ON payment_subscriptions(user_id, created_at)")
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS lessons_study_session ON lessons(study_session_id)")
 
     @staticmethod
     def _month_bounds(now=None):
@@ -173,7 +223,7 @@ class UsageStore:
             )
 
     def set_subscription(self, user_id, plan, status="active"):
-        if plan not in ("free", "paid") or status not in ("active", "paused", "cancelled"):
+        if plan not in ("free", "paid", "ultra") or status not in ("active", "paused", "cancelled"):
             raise ValueError("Некорректный тариф или статус подписки.")
         with self._connect() as connection:
             connection.execute(
@@ -195,6 +245,10 @@ class UsageStore:
             "code": name,
             "title": value["title"],
             "monthly_price_rubles": int(value["monthly_price_rubles"]),
+            "sessions": int(value["sessions"]),
+            "session_minutes": int(value["session_minutes"]),
+            "assignments_per_session": int(value["assignments_per_session"]),
+            "yandex_voice_per_session": int(value["yandex_voice_per_session"]),
             "assignments": int(value["assignments"]),
             "llm_requests": int(value["llm_requests"]),
             "stt_billed_seconds": int(value["stt_billed_seconds"]),
@@ -205,20 +259,22 @@ class UsageStore:
         threshold = int(time.time()) - max_age
         with self._connect() as connection:
             row = connection.execute(
-                """SELECT provider_id, redirect_url, status FROM payment_subscriptions
+                """SELECT provider_id, plan, redirect_url, status FROM payment_subscriptions
                    WHERE user_id=? AND (status='subscription_activated'
                          OR (status='pending' AND created_at>=?))
                    ORDER BY created_at DESC LIMIT 1""", (user_id, threshold)).fetchone()
         return (dict(row) if row else None)
 
-    def record_checkout(self, user_id, provider_id, redirect_url, amount_rubles):
+    def record_checkout(self, user_id, provider_id, redirect_url, amount_rubles, plan="paid"):
+        if plan not in ("paid", "ultra"):
+            raise ValueError("Некорректный платный тариф.")
         now = int(time.time())
         with self._connect() as connection:
             connection.execute(
                 """INSERT INTO payment_subscriptions
                    (provider_id,user_id,provider,plan,amount_rubles,currency,status,redirect_url,created_at,updated_at)
-                   VALUES (?,?,'platega','paid',?,'RUB','pending',?,?,?)""",
-                (provider_id, user_id, int(amount_rubles), redirect_url, now, now))
+                   VALUES (?,?,'platega',?,?,'RUB','pending',?,?,?)""",
+                (provider_id, user_id, plan, int(amount_rubles), redirect_url, now, now))
 
     def payment_callback(self, provider_id, status, amount, currency):
         if not isinstance(provider_id, str) or not isinstance(status, str):
@@ -227,7 +283,7 @@ class UsageStore:
         with self.lock, self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
             row = connection.execute(
-                "SELECT user_id,amount_rubles,currency FROM payment_subscriptions WHERE provider_id=?",
+                "SELECT user_id,plan,amount_rubles,currency FROM payment_subscriptions WHERE provider_id=?",
                 (provider_id,)).fetchone()
             if not row:
                 raise ValueError("Подписка Platega не найдена.")
@@ -243,31 +299,122 @@ class UsageStore:
                 (normalized.lower(), now, provider_id))
             if normalized == "CONFIRMED":
                 connection.execute(
-                    """INSERT INTO subscriptions(user_id,plan,status,updated_at) VALUES (?,'paid','active',?)
-                       ON CONFLICT(user_id) DO UPDATE SET plan='paid',status='active',updated_at=excluded.updated_at""",
-                    (row["user_id"], now))
+                    """INSERT INTO subscriptions(user_id,plan,status,updated_at) VALUES (?,?,'active',?)
+                       ON CONFLICT(user_id) DO UPDATE SET plan=excluded.plan,status='active',updated_at=excluded.updated_at""",
+                    (row["user_id"], row["plan"], now))
             elif normalized in {"CANCELED", "CANCELLED", "CHARGEBACKED", "SUBSCRIPTION_CANCELLED"}:
                 connection.execute(
-                    """INSERT INTO subscriptions(user_id,plan,status,updated_at) VALUES (?,'paid','cancelled',?)
-                       ON CONFLICT(user_id) DO UPDATE SET plan='paid',status='cancelled',updated_at=excluded.updated_at""",
-                    (row["user_id"], now))
+                    """INSERT INTO subscriptions(user_id,plan,status,updated_at) VALUES (?,?,'cancelled',?)
+                       ON CONFLICT(user_id) DO UPDATE SET plan=excluded.plan,status='cancelled',updated_at=excluded.updated_at""",
+                    (row["user_id"], row["plan"], now))
         return {"user_id": row["user_id"], "status": normalized}
 
     def latest_payment(self, user_id):
         with self._connect() as connection:
             row = connection.execute(
-                """SELECT provider,status,created_at,updated_at FROM payment_subscriptions
+                """SELECT provider,plan,status,created_at,updated_at FROM payment_subscriptions
                    WHERE user_id=? ORDER BY created_at DESC LIMIT 1""", (user_id,)).fetchone()
         return dict(row) if row else None
 
-    def ensure_lesson(self, user_id, lesson_id):
+    def _active_plan(self, connection, user_id):
+        row = connection.execute(
+            "SELECT plan,status FROM subscriptions WHERE user_id=?", (user_id,)
+        ).fetchone()
+        return row["plan"] if row and row["status"] == "active" else "free"
+
+    def start_study_session(self, user_id, unlimited=False):
+        """Start a timed study session. Empty sessions do not consume a monthly slot."""
+        self.ensure_subscription(user_id)
+        now = int(time.time())
+        session_id = uuid.uuid4().hex
+        with self.lock, self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            plan = self._active_plan(connection, user_id)
+            minutes = int(self.config.plan(plan)["session_minutes"])
+            previous = connection.execute(
+                """SELECT id,status,active_started_at,active_seconds FROM study_sessions
+                   WHERE user_id=? AND status IN ('active','paused')""", (user_id,)
+            ).fetchall()
+            for row in previous:
+                elapsed = int(row["active_seconds"])
+                if row["status"] == "active" and row["active_started_at"] is not None:
+                    elapsed += max(0, now - int(row["active_started_at"]))
+                connection.execute(
+                    """UPDATE study_sessions SET status='complete',active_seconds=?,
+                       active_started_at=NULL,updated_at=? WHERE id=?""",
+                    (elapsed, now, row["id"]),
+                )
+            connection.execute(
+                """DELETE FROM study_sessions WHERE user_id=? AND status='complete'
+                   AND updated_at<? AND id NOT IN
+                       (SELECT DISTINCT study_session_id FROM lessons WHERE study_session_id IS NOT NULL)""",
+                (user_id, now - 86400),
+            )
+            connection.execute(
+                """INSERT INTO study_sessions
+                   (id,user_id,started_at,active_started_at,active_seconds,updated_at,status)
+                   VALUES (?,?,?,?,0,?,'active')""",
+                (session_id, user_id, now, now, now),
+            )
+        return {"id": session_id, "limit_seconds": None if unlimited else minutes * 60}
+
+    def control_study_session(self, user_id, session_id, action, unlimited=False):
+        if action not in ("pause", "resume", "stop"):
+            raise ValueError("Неизвестное действие с занятием.")
+        now = int(time.time())
+        with self.lock, self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                "SELECT * FROM study_sessions WHERE id=? AND user_id=?", (session_id, user_id)
+            ).fetchone()
+            if not row:
+                raise ValueError("Занятие не найдено. Начните новое занятие.")
+            active_seconds = int(row["active_seconds"])
+            if row["status"] == "active" and row["active_started_at"] is not None:
+                active_seconds += max(0, now - int(row["active_started_at"]))
+            plan = self._active_plan(connection, user_id)
+            limit_seconds = int(self.config.plan(plan)["session_minutes"]) * 60
+            if action == "resume" and not unlimited and active_seconds >= limit_seconds:
+                raise LimitExceeded("Время занятия закончилось. Начните новое занятие.")
+            status = "complete" if action == "stop" else ("paused" if action == "pause" else "active")
+            active_started_at = now if status == "active" else None
+            connection.execute(
+                """UPDATE study_sessions SET status=?,active_seconds=?,active_started_at=?,updated_at=?
+                   WHERE id=? AND user_id=?""",
+                (status, active_seconds, active_started_at, now, session_id, user_id),
+            )
+        return {"id": session_id, "status": status,
+                "elapsed_seconds": active_seconds,
+                "limit_seconds": None if unlimited else limit_seconds}
+
+    def validate_study_session(self, user_id, session_id, unlimited=False):
+        if not session_id:
+            raise ValueError("Сначала начните занятие.")
+        now = int(time.time())
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM study_sessions WHERE id=? AND user_id=?", (session_id, user_id)
+            ).fetchone()
+            if not row or row["status"] == "complete":
+                raise ValueError("Занятие завершено. Начните новое занятие.")
+            if row["status"] == "paused":
+                raise ValueError("Сначала продолжите занятие после перерыва.")
+            plan = self._active_plan(connection, user_id)
+            limit_seconds = int(self.config.plan(plan)["session_minutes"]) * 60
+            elapsed = int(row["active_seconds"]) + max(0, now - int(row["active_started_at"] or now))
+            if not unlimited and elapsed >= limit_seconds:
+                raise LimitExceeded("Время занятия закончилось. Начните новое занятие.")
+        return {"elapsed_seconds": elapsed, "limit_seconds": None if unlimited else limit_seconds}
+
+    def ensure_lesson(self, user_id, lesson_id, study_session_id=None):
         if not lesson_id:
             return
         now = int(time.time())
         with self._connect() as connection:
             connection.execute(
-                "INSERT OR IGNORE INTO lessons(id, user_id, started_at, updated_at) VALUES (?, ?, ?, ?)",
-                (lesson_id, user_id, now, now),
+                """INSERT OR IGNORE INTO lessons
+                   (id, user_id, study_session_id, started_at, updated_at) VALUES (?, ?, ?, ?, ?)""",
+                (lesson_id, user_id, study_session_id, now, now),
             )
 
     def lesson_hint(self, user_id, lesson_id, difficult=False):
@@ -316,7 +463,13 @@ class UsageStore:
             "SELECT COUNT(*) AS value FROM lessons WHERE user_id=? AND started_at>=? AND started_at<?",
             (user_id, start, end),
         ).fetchone()["value"]
+        sessions = connection.execute(
+            """SELECT COUNT(DISTINCT study_session_id) AS value FROM lessons
+               WHERE user_id=? AND study_session_id IS NOT NULL AND started_at>=? AND started_at<?""",
+            (user_id, start, end),
+        ).fetchone()["value"]
         return {
+            "sessions": sessions,
             "assignments": assignments,
             "llm_requests": event["llm_requests"],
             "stt_billed_seconds": event["stt_billed_seconds"],
@@ -327,6 +480,7 @@ class UsageStore:
     def _limits(self, plan):
         value = self.config.plan(plan)
         return {
+            "sessions": int(value["sessions"]),
             "assignments": int(value["assignments"]),
             "llm_requests": int(value["llm_requests"]),
             "stt_billed_seconds": int(value["stt_billed_seconds"]),
@@ -341,7 +495,7 @@ class UsageStore:
             return "Лимит голосовых вопросов на этот месяц закончился. Напиши вопрос в поле справа."
         return "Подсказки на этот месяц закончились. Попроси взрослого открыть раздел «Для родителя»."
 
-    def reserve(self, user_id, operation, request_id, *, lesson_id=None, input_units=0,
+    def reserve(self, user_id, operation, request_id, *, lesson_id=None, study_session_id=None, input_units=0,
                 output_units=0, duration_ms=0, billed_units=0, estimated_cost=0,
                 provider="", model="", new_lesson=False, bypass_limits=False):
         if operation not in OPERATIONS or not request_id:
@@ -359,10 +513,33 @@ class UsageStore:
                 return {"id": existing["id"], "duplicate": True, "warning": ""}
             row = connection.execute("SELECT plan, status FROM subscriptions WHERE user_id=?", (user_id,)).fetchone()
             plan = row["plan"] if row and row["status"] == "active" else "free"
+            if study_session_id:
+                session = connection.execute(
+                    "SELECT * FROM study_sessions WHERE id=? AND user_id=?", (study_session_id, user_id)
+                ).fetchone()
+                if not session or session["status"] != "active":
+                    raise LimitExceeded("Занятие не активно. Начните или продолжите занятие.")
+                elapsed = int(session["active_seconds"]) + max(
+                    0, now - int(session["active_started_at"] or now))
+                if not bypass_limits and elapsed >= int(self.config.plan(plan)["session_minutes"]) * 60:
+                    raise LimitExceeded("Время занятия закончилось. Начните новое занятие.")
             totals, limits = self._totals(connection, user_id, start, end), self._limits(plan)
             projected = dict(totals)
             if new_lesson:
                 projected["assignments"] += 1
+                session_has_lesson = connection.execute(
+                    "SELECT 1 FROM lessons WHERE user_id=? AND study_session_id=? LIMIT 1",
+                    (user_id, study_session_id),
+                ).fetchone() if study_session_id else None
+                if study_session_id and not session_has_lesson:
+                    projected["sessions"] += 1
+                if study_session_id:
+                    tasks = connection.execute(
+                        "SELECT COUNT(*) AS value FROM lessons WHERE user_id=? AND study_session_id=?",
+                        (user_id, study_session_id),
+                    ).fetchone()["value"]
+                    if not bypass_limits and tasks + 1 > int(self.config.plan(plan)["assignments_per_session"]):
+                        raise LimitExceeded("В этом занятии уже разобрано максимум новых задач. Начните новое занятие.")
             projected["external_cost_micros"] += max(0, int(estimated_cost))
             if operation == "llm":
                 projected["llm_requests"] += 1
@@ -370,8 +547,22 @@ class UsageStore:
                 projected["stt_billed_seconds"] += max(0, int(billed_units))
             else:
                 projected["tts_blocks"] += max(0, int(billed_units))
+                if study_session_id and not bypass_limits:
+                    voice_used = connection.execute(
+                        """SELECT COALESCE(SUM(usage_events.billed_units),0) AS value
+                           FROM usage_events JOIN lessons ON lessons.id=usage_events.lesson_id
+                           WHERE usage_events.user_id=? AND lessons.study_session_id=?
+                             AND usage_events.operation='tts'
+                             AND usage_events.state IN ('pending','complete')""",
+                        (user_id, study_session_id),
+                    ).fetchone()["value"]
+                    if voice_used + max(0, int(billed_units)) > int(
+                            self.config.plan(plan)["yandex_voice_per_session"]):
+                        raise LimitExceeded(
+                            "Лимит ответов голосом Яндекса на это занятие закончился. "
+                            "Подсказка останется на экране; голос родителя доступен без этого лимита.")
             relevant = {
-                "llm": ("assignments", "llm_requests", "external_cost_micros"),
+                "llm": ("sessions", "assignments", "llm_requests", "external_cost_micros"),
                 "stt": ("stt_billed_seconds", "external_cost_micros"),
                 "tts": ("tts_blocks", "external_cost_micros"),
             }[operation]
@@ -393,8 +584,9 @@ class UsageStore:
             )
             if new_lesson and lesson_id:
                 connection.execute(
-                    "INSERT OR IGNORE INTO lessons(id, user_id, started_at, updated_at) VALUES (?, ?, ?, ?)",
-                    (lesson_id, user_id, now, now),
+                    """INSERT OR IGNORE INTO lessons
+                       (id, user_id, study_session_id, started_at, updated_at) VALUES (?, ?, ?, ?, ?)""",
+                    (lesson_id, user_id, study_session_id, now, now),
                 )
             return {"id": event_id, "duplicate": False, "warning": warning}
 
@@ -448,13 +640,19 @@ class UsageStore:
                 (user_id,),
             ).fetchall()
         limits = self._limits(plan)
+        plan_config = self.config.plan(plan)
         remaining = ({key: None for key in limits} if unlimited else
                      {key: max(0, limits[key] - totals[key]) for key in limits})
         return {
-            "plan": ({"code": "admin", "title": "Admin", "status": "active", "unlimited": True}
+            "plan": ({"code": "admin", "title": "Admin", "status": "active", "unlimited": True,
+                      "session_minutes": None, "assignments_per_session": None,
+                      "yandex_voice_per_session": None}
                      if unlimited else
-                     {"code": plan, "title": self.config.plan(plan)["title"],
-                      "status": sub["status"], "unlimited": False}),
+                     {"code": plan, "title": plan_config["title"],
+                      "status": sub["status"], "unlimited": False,
+                      "session_minutes": int(plan_config["session_minutes"]),
+                      "assignments_per_session": int(plan_config["assignments_per_session"]),
+                      "yandex_voice_per_session": int(plan_config["yandex_voice_per_session"])}),
             "period": datetime.fromtimestamp(start).astimezone().strftime("%Y-%m"),
             "usage": {**totals, "external_cost_rubles": micros_to_rubles(totals["external_cost_micros"]),
                       "today_cost_rubles": micros_to_rubles(day_cost)},

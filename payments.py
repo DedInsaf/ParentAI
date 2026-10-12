@@ -36,7 +36,7 @@ class PlategaClient:
                 and hmac.compare_digest(merchant_id, self.merchant_id)
                 and hmac.compare_digest(secret, self.secret))
 
-    def create_subscription(self, amount_rubles):
+    def create_subscription(self, amount_rubles, plan_title="Адым Плюс"):
         if not self.enabled:
             raise ValueError("Оплата ещё не подключена. Добавьте данные магазина Platega.")
         amount = int(amount_rubles)
@@ -50,7 +50,7 @@ class PlategaClient:
                 "interval": 3,
                 "intervalCount": 1,
             },
-            "description": "Адым Paid beta — ежемесячная подписка",
+            "description": f"{plan_title} — ежемесячная подписка",
         }, ensure_ascii=False).encode("utf-8")
         request = urllib.request.Request(
             PLATEGA_SUBSCRIPTION_ENDPOINT, data=body, method="POST", headers={

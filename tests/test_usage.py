@@ -15,12 +15,21 @@ def config(assignments=2, llm=2, tts=2, cost='10'):
             'tts_v3_per_250_chars': '0.1626',
         },
         'plans': {
-            'free': {'title': 'Free', 'monthly_price_rubles': 0, 'assignments': assignments,
+            'free': {'title': 'Free', 'monthly_price_rubles': 0, 'sessions': assignments,
+                     'session_minutes': 20, 'assignments_per_session': assignments,
+                     'yandex_voice_per_session': tts, 'assignments': assignments,
                      'llm_requests': llm, 'stt_billed_seconds': 30, 'tts_blocks': tts,
                      'external_cost_rubles': cost},
-            'paid': {'title': 'Paid', 'monthly_price_rubles': 299, 'assignments': 100,
+            'paid': {'title': 'Paid', 'monthly_price_rubles': 299, 'sessions': 100,
+                     'session_minutes': 30, 'assignments_per_session': 10,
+                     'yandex_voice_per_session': 100, 'assignments': 100,
                      'llm_requests': 100, 'stt_billed_seconds': 1000, 'tts_blocks': 100,
                      'external_cost_rubles': '85'},
+            'ultra': {'title': 'Ultra', 'monthly_price_rubles': 599, 'sessions': 200,
+                      'session_minutes': 45, 'assignments_per_session': 20,
+                      'yandex_voice_per_session': 200, 'assignments': 200,
+                      'llm_requests': 200, 'stt_billed_seconds': 2000, 'tts_blocks': 200,
+                      'external_cost_rubles': '170'},
         },
     })
 
@@ -94,6 +103,58 @@ class UsageTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'Сумма'):
             self.store.payment_callback(provider_id, 'CONFIRMED', 300, 'RUB')
 
+    def test_timed_session_groups_tasks_and_applies_voice_limit(self):
+        study = self.store.start_study_session(21)
+        self.assertEqual(study['limit_seconds'], 20 * 60)
+        for index in range(2):
+            event = self.store.reserve(
+                21, 'llm', f'plan-{index}', lesson_id=f'lesson-{index}',
+                study_session_id=study['id'], new_lesson=True,
+                estimated_cost=self.store.config.llm_cost(10, 10))
+            self.store.complete(event['id'], cost=0)
+        report = self.store.dashboard(21)
+        self.assertEqual(report['usage']['sessions'], 1)
+        self.assertEqual(report['usage']['assignments'], 2)
+        for index in range(2):
+            event = self.store.reserve(
+                21, 'tts', f'voice-{index}', lesson_id='lesson-0',
+                study_session_id=study['id'], billed_units=1, estimated_cost=0)
+            self.store.complete(event['id'], billed_units=1, cost=0)
+        with self.assertRaises(LimitExceeded):
+            self.store.reserve(21, 'tts', 'voice-over', lesson_id='lesson-0',
+                               study_session_id=study['id'], billed_units=1, estimated_cost=0)
+        paused = self.store.control_study_session(21, study['id'], 'pause')
+        self.assertEqual(paused['status'], 'paused')
+        resumed = self.store.control_study_session(21, study['id'], 'resume')
+        self.assertEqual(resumed['status'], 'active')
+
+    def test_ultra_checkout_activates_ultra(self):
+        provider_id = '22222222-2222-4222-8222-222222222222'
+        self.store.record_checkout(22, provider_id, 'https://pay.platega.io/subscription/2', 599, 'ultra')
+        self.store.payment_callback(provider_id, 'CONFIRMED', 599, 'RUB')
+        self.assertEqual(self.store.subscription(22)['plan'], 'ultra')
+
+    def test_old_two_plan_database_migrates_without_losing_subscription(self):
+        path = self.temp.name + '/legacy.sqlite3'
+        with sqlite3.connect(path) as connection:
+            connection.executescript("""
+                CREATE TABLE subscriptions (
+                    user_id INTEGER PRIMARY KEY,
+                    plan TEXT NOT NULL CHECK(plan IN ('free', 'paid')),
+                    status TEXT NOT NULL CHECK(status IN ('active', 'paused', 'cancelled')),
+                    updated_at INTEGER NOT NULL);
+                INSERT INTO subscriptions VALUES (31, 'paid', 'active', 1);
+                CREATE TABLE payment_subscriptions (
+                    provider_id TEXT PRIMARY KEY, user_id INTEGER NOT NULL, provider TEXT NOT NULL,
+                    plan TEXT NOT NULL CHECK(plan IN ('paid')), amount_rubles INTEGER NOT NULL,
+                    currency TEXT NOT NULL, status TEXT NOT NULL, redirect_url TEXT NOT NULL,
+                    created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
+            """)
+        migrated = UsageStore(path, config())
+        self.assertEqual(migrated.subscription(31)['plan'], 'paid')
+        migrated.set_subscription(31, 'ultra')
+        self.assertEqual(migrated.subscription(31)['plan'], 'ultra')
+
     def test_product_pricing_matches_pro_model_and_paid_guardrail(self):
         config = BillingConfig.load()
         self.assertEqual(config.values['llm_model'], 'yandexgpt-5.1')
@@ -101,6 +162,8 @@ class UsageTests(unittest.TestCase):
         self.assertEqual(config.plan('paid')['monthly_price_rubles'], 490)
         self.assertEqual(config.plan('paid')['assignments'], 60)
         self.assertEqual(config.plan('paid')['external_cost_rubles'], '150.00')
+        self.assertEqual(config.plan('ultra')['monthly_price_rubles'], 990)
+        self.assertEqual(config.plan('free')['tts_blocks'], 15)
 
 
 if __name__ == '__main__':

@@ -71,8 +71,8 @@ class ServerTests(unittest.TestCase):
         redirect='https://pay.platega.io/subscription/11111111'
         class FakePlatega:
             def public_status(self):return {'provider':'Platega','enabled':True,'method':'recurring_sbp'}
-            def create_subscription(self,amount):
-                self.amount=amount
+            def create_subscription(self,amount,plan_title):
+                self.amount=amount; self.plan_title=plan_title
                 return {'provider_id':provider_id,'redirect':redirect,'status':'pending'}
             def valid_callback(self,merchant,secret):return merchant=='merchant' and secret=='secret'
         self.s.platega=FakePlatega()

@@ -77,7 +77,7 @@ class AppServer(ThreadingHTTPServer):
             duration = audio_duration_ms(payload)
             speech_status = self.speech.public_status()
             local_speech = bool(speech_status.get('local'))
-            billed_seconds = max(15, math.ceil(duration / 15000) * 15)
+            billed_seconds = 0 if local_speech else max(15, math.ceil(duration / 15000) * 15)
             reservation = self.usage.reserve(
                 user_id, 'stt', request_id, duration_ms=duration, billed_units=billed_seconds,
                 estimated_cost=0 if local_speech else self.usage.config.stt_cost(billed_seconds),
@@ -274,23 +274,37 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(200, {'ok': True}, headers={'Set-Cookie': self.clear_session_cookie()})
             if path == '/api/billing/checkout':
                 value = json.loads(payload)
-                if not isinstance(value, dict) or value.get('plan') != 'paid':
+                plan = value.get('plan') if isinstance(value, dict) else None
+                if plan not in ('paid', 'ultra'):
                     raise ValueError('Неизвестный тариф подписки.')
                 if user.role == 'admin':
                     raise ValueError('У администратора уже есть тестовый доступ без ограничений.')
-                if self.server.usage.subscription(user.id)['plan'] == 'paid':
-                    raise ValueError('Тариф Paid beta уже подключён.')
+                if self.server.usage.subscription(user.id)['plan'] == plan:
+                    raise ValueError('Этот тариф уже подключён.')
                 with self.server.payment_locks[user.id]:
                     pending = self.server.usage.pending_checkout(user.id)
                     if pending:
+                        if pending['plan'] != plan:
+                            raise ValueError('Сначала завершите уже начатое оформление подписки.')
                         return self.send(200, {'provider':'Platega', 'redirect':pending['redirect_url'],
                                                'status':'pending', 'duplicate':True})
-                    amount = self.server.usage.catalog()['paid']['monthly_price_rubles']
-                    checkout = self.server.platega.create_subscription(amount)
+                    catalog = self.server.usage.catalog()[plan]
+                    amount = catalog['monthly_price_rubles']
+                    checkout = self.server.platega.create_subscription(amount, catalog['title'])
                     self.server.usage.record_checkout(
-                        user.id, checkout['provider_id'], checkout['redirect'], amount)
+                        user.id, checkout['provider_id'], checkout['redirect'], amount, plan)
                 return self.send(201, {'provider':'Platega', 'redirect':checkout['redirect'],
                                        'status':'pending', 'duplicate':False})
+            if path == '/api/study-session':
+                value = json.loads(payload)
+                if not isinstance(value, dict):
+                    raise ValueError('Некорректное управление занятием.')
+                action = value.get('action')
+                if action == 'start':
+                    return self.send(201, self.server.usage.start_study_session(
+                        user.id, user.role == 'admin'))
+                return self.send(200, self.server.usage.control_study_session(
+                    user.id, value.get('id'), action, user.role == 'admin'))
             if path == '/api/avatar-model':
                 return self.send(200, save_model(self.server.runtime, payload))
             if path == '/api/avatar':
@@ -312,8 +326,10 @@ class Handler(BaseHTTPRequestHandler):
                 if not isinstance(value, dict):
                     raise ValueError('Некорректный запрос.')
                 return self.send(202, self.server.dialogues.start(
-                    value.get('question'), value.get('level'), value.get('session'),
-                    value.get('voice','parent'), user.id, value.get('request_id'), user.role == 'admin'))
+                    value.get('question'), value.get('level'), session=value.get('session'),
+                    voice=value.get('voice','parent'), user_id=user.id,
+                    request_id=value.get('request_id'), unlimited=user.role == 'admin',
+                    study_session=value.get('study_session')))
             if path == '/api/dialog-cancel':
                 value = json.loads(payload)
                 if not isinstance(value, dict) or not isinstance(value.get('id'), str):
@@ -329,8 +345,10 @@ class Handler(BaseHTTPRequestHandler):
                 estimated_output = 450
                 request_id = self.headers.get('X-Request-Id') or uuid.uuid4().hex
                 lesson_id = uuid.uuid4().hex
+                study = self.server.usage.start_study_session(user.id, user.role == 'admin')
                 reservation = self.server.usage.reserve(
-                    user.id, 'llm', request_id, lesson_id=lesson_id, input_units=estimated_input, output_units=estimated_output,
+                    user.id, 'llm', request_id, lesson_id=lesson_id, study_session_id=study['id'],
+                    input_units=estimated_input, output_units=estimated_output,
                     estimated_cost=self.server.usage.config.llm_cost(estimated_input, estimated_output),
                     provider='YandexGPT', model=self.server.tutor.model, new_lesson=True,
                     bypass_limits=user.role == 'admin')
@@ -341,6 +359,7 @@ class Handler(BaseHTTPRequestHandler):
                 except Exception:
                     self.server.usage.fail(reservation['id'])
                     self.server.usage.abandon_empty_lesson(user.id, lesson_id)
+                    self.server.usage.control_study_session(user.id, study['id'], 'stop', user.role == 'admin')
                     raise
                 usage = result.get('usage', {})
                 input_tokens, output_tokens = usage.get('input_tokens', estimated_input), usage.get('output_tokens', estimated_output)
@@ -349,6 +368,7 @@ class Handler(BaseHTTPRequestHandler):
                     cost=self.server.usage.config.llm_cost(input_tokens, output_tokens),
                     actual_usage=usage.get('actual', False))
                 result['limit_warning'] = reservation['warning']
+                self.server.usage.control_study_session(user.id, study['id'], 'stop', user.role == 'admin')
                 return self.send(200, result)
             if path == '/api/cancel':
                 self.server.runtime.cancel_generation()

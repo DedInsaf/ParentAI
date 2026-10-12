@@ -14,10 +14,11 @@
     <h1 id="authTitle">Шаг к самостоятельной учёбе</h1>
     <p>Войдите в свой аккаунт, чтобы подготовить образ и голос родителя для занятий.</p>
     <div class="auth-plans" aria-label="Тарифы Адым">
-      <div><span>Free</span><strong>0 ₽</strong><small>5 заданий в месяц</small></div>
-      <div class="auth-plan-paid"><span>Paid beta</span><strong>490 ₽<small>/месяц</small></strong><small>60 заданий и больше голосовых ответов</small></div>
+      <div><span>Бесплатный</span><strong>0 ₽</strong><small>5 занятий по 20 минут</small></div>
+      <div class="auth-plan-paid"><span>Адым Плюс</span><strong>490 ₽<small>/месяц</small></strong><small>20 занятий по 30 минут</small></div>
+      <div class="auth-plan-ultra"><span>Адым Ультра</span><strong>990 ₽<small>/месяц</small></strong><small>45 занятий по 45 минут</small></div>
     </div>
-    <button id="authPaidBtn" type="button" class="auth-paid-button">Создать аккаунт и оформить Paid beta</button>
+    <button id="authPaidBtn" type="button" class="auth-paid-button">Создать аккаунт и выбрать тариф</button>
     <div class="auth-privacy"><span aria-hidden="true">♡</span><div><strong>Ваши данные остаются здесь</strong><p>Пароль хранится только в виде защищённого хеша. Снимки и голос не покидают устройство.</p></div></div>
   </section>
   <section class="card auth-card" aria-label="Вход и регистрация">
@@ -48,7 +49,7 @@
   <span class="privacy-chip">Камера ребёнка остаётся на устройстве</span>
   <button id="billingBtn" type="button" class="billing-trigger" aria-haspopup="dialog" aria-controls="billingDialog">
     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7.5A2.5 2.5 0 0 1 6.5 5h11A2.5 2.5 0 0 1 20 7.5v9a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 16.5v-9Z"/><path d="M4 9h16M16 14h1"/></svg>
-    <span><small>Тариф</small><strong id="headerPlanName">Free</strong></span>
+    <span><small>Тариф</small><strong id="headerPlanName">Бесплатный</strong></span>
   </button>
   <div class="account"><span id="accountLogin"></span><button id="logoutBtn" type="button" class="quiet">Выйти</button></div>
   <div id="lessonToolbar" class="lesson-toolbar" hidden><button id="pauseBtn" class="secondary" disabled>Сделать перерыв</button><button id="stopBtn" class="quiet" disabled>Закончить</button></div>
@@ -57,22 +58,29 @@
   <div class="billing-dialog-shell">
     <div class="subscription-heading">
       <div><span class="eyebrow">ТАРИФ И ПОДПИСКА</span><h2 id="subscriptionTitle">Выберите подходящий тариф</h2><p>Лимиты прозрачны, а текущий тариф всегда доступен в шапке приложения.</p></div>
-      <div class="billing-dialog-actions"><span id="currentPlanHero" class="plan-badge">Free</span><button id="closeBillingBtn" type="button" class="dialog-close" aria-label="Закрыть окно тарифов">×</button></div>
+      <div class="billing-dialog-actions"><span id="currentPlanHero" class="plan-badge">Бесплатный</span><button id="closeBillingBtn" type="button" class="dialog-close" aria-label="Закрыть окно тарифов">×</button></div>
     </div>
     <div class="plan-comparison">
       <article id="freePlanCard" class="plan-card">
-        <div class="plan-card-title"><div><span class="plan-name">Free</span><strong>0 ₽</strong></div><span id="freePlanState" class="plan-state">Текущий тариф</span></div>
+        <div class="plan-card-title"><div><span class="plan-name">Бесплатный</span><strong>0 ₽</strong></div><span id="freePlanState" class="plan-state">Текущий тариф</span></div>
         <p>Чтобы спокойно попробовать Адым.</p>
-        <ul><li><strong id="freeAssignments">5</strong> заданий в месяц</li><li><strong id="freePlans">10</strong> планов с подсказками</li><li><strong id="freeVoice">3</strong> голосовых ответа</li></ul>
+        <ul><li><strong id="freeSessions">5</strong> занятий в месяц</li><li>до <strong id="freeMinutes">20</strong> минут каждое</li><li>до <strong id="freeTasks">3</strong> новых задач за занятие</li><li><strong id="freeVoice">3</strong> ответа голосом Яндекса за занятие</li><li>голос родителя — без отдельного лимита</li></ul>
         <button id="freePlanBtn" type="button" class="secondary full" disabled>Текущий тариф</button>
       </article>
       <article id="paidPlanCard" class="plan-card featured">
-        <div class="plan-card-title"><div><span class="plan-name">Paid beta</span><strong><span id="paidPrice">490</span> ₽<small>/месяц</small></strong></div><span class="best-choice">Для первых семей</span></div>
-        <p>Больше заданий и голосового общения без неожиданных остановок.</p>
-        <ul><li><strong id="paidAssignments">60</strong> заданий в месяц</li><li><strong id="paidPlans">80</strong> планов с подсказками</li><li><strong id="paidVoice">180</strong> голосовых ответов</li></ul>
+        <div class="plan-card-title"><div><span class="plan-name">Адым Плюс</span><strong><span id="paidPrice">490</span> ₽<small>/месяц</small></strong></div><span class="best-choice">Для регулярных занятий</span></div>
+        <p>Комфортный режим на учебный месяц.</p>
+        <ul><li><strong id="paidSessions">20</strong> занятий в месяц</li><li>до <strong id="paidMinutes">30</strong> минут каждое</li><li>до <strong id="paidTasks">3</strong> новых задач за занятие</li><li><strong id="paidVoice">10</strong> ответов голосом Яндекса за занятие</li><li>голос родителя — без отдельного лимита</li></ul>
         <button id="buyPaidBtn" type="button" class="full">Оформить подписку через Platega</button>
       </article>
+      <article id="ultraPlanCard" class="plan-card ultra">
+        <div class="plan-card-title"><div><span class="plan-name">Адым Ультра</span><strong><span id="ultraPrice">990</span> ₽<small>/месяц</small></strong></div><span class="best-choice">Всё включено</span></div>
+        <p>Максимум времени и общения для большой учебной нагрузки.</p>
+        <ul><li><strong id="ultraSessions">45</strong> занятий в месяц</li><li>до <strong id="ultraMinutes">45</strong> минут каждое</li><li>до <strong id="ultraTasks">4</strong> новых задач за занятие</li><li><strong id="ultraVoice">20</strong> ответов голосом Яндекса за занятие</li><li>голос родителя — без отдельного лимита</li></ul>
+        <button id="buyUltraBtn" type="button" class="full">Оформить Ультра через Platega</button>
+      </article>
     </div>
+    <p class="plan-explainer"><strong>Что считается новой задачей?</strong> Новое условие из домашней работы. Уточнения, попытки ответа и последовательные подсказки внутри этой задачи ничего дополнительно не списывают. Перерыв останавливает таймер занятия.</p>
     <p id="billingMessage" class="billing-message" role="status">Оплата подписки проходит на защищённой странице Platega через СБП. Списание повторяется раз в месяц; отменить подписку можно по ссылке из письма Platega.</p>
   </div>
 </dialog>
@@ -124,10 +132,10 @@
     <label class="toggle-row ready-mic"><input id="readyHandsFree" type="checkbox" checked><span>Включить микрофон при начале занятия<small>Можно говорить без кнопки. В браузере нужно разрешить доступ.</small></span></label>
     <label class="toggle-row ready-camera"><input id="readyCamera" type="checkbox" checked><span>Включить камеру во время занятия<small>Включена по умолчанию на любом тарифе. Видео обрабатывается только на этом устройстве и не сохраняется.</small></span></label>
     <div id="readyCameraPreview" class="ready-camera-preview" hidden><div class="section-title"><strong>Проверка камеры</strong><button id="closeReadyCameraBtn" type="button" class="quiet">Выключить</button></div><div id="readyCameraSlot"></div><p id="readyCameraStatus" class="helper" role="status">Подключаем камеру…</p></div>
-    <p id="readyMicHint" class="helper">Вопросы голосом распознаёт Яндекс. Камера и образец голоса родителя остаются здесь.</p>
+    <p id="readyMicHint" class="helper">Голосовые вопросы распознаются на этом устройстве. Камера и образец голоса родителя тоже остаются здесь.</p>
     <button id="startBtn" class="next-step start-button" disabled>Начать занятие →</button><p id="startHint" class="helper"></p>
     <section class="parent-summary" aria-labelledby="parentSummaryTitle">
-      <div class="section-title"><h3 id="parentSummaryTitle">Для родителя</h3><span id="planName" class="status-chip">Free</span></div>
+      <div class="section-title"><h3 id="parentSummaryTitle">Для родителя</h3><span id="planName" class="status-chip">Бесплатный</span></div>
       <div class="summary-grid">
         <div><strong id="summaryAssignments">0</strong><span>заданий</span></div>
         <div><strong id="summaryHints">0</strong><span>подсказок</span></div>
@@ -135,7 +143,7 @@
         <div><strong id="summaryDifficult">0</strong><span>со сложностями</span></div>
       </div>
       <p id="summaryText" class="helper">Пока нет завершённых заданий.</p>
-      <p class="summary-cost"><span>Расход: сегодня <strong id="summaryToday">0,00 ₽</strong>, за месяц <strong id="summaryCost">0,00 ₽</strong></span><span>Осталось: <strong id="summaryRemaining">5 заданий</strong></span></p>
+      <p class="summary-cost"><span>Расход: сегодня <strong id="summaryToday">0,00 ₽</strong>, за месяц <strong id="summaryCost">0,00 ₽</strong></span><span>Осталось: <strong id="summaryRemaining">5 занятий</strong></span></p>
       <p class="muted">Сохраняются только счётчики и итог занятия — без полного разговора, фото и аудиозаписей.</p>
     </section>
     <p class="photo-next"><strong>Следующий сценарий: фото задания.</strong> Интерфейс и серверный контракт будут добавлены после выбора OCR-провайдера и отдельного согласования его стоимости.</p>
@@ -158,7 +166,7 @@
     <section class="card tutor"><div class="section-title"><h2>Что не получается?</h2><span class="hint-chip">Подсказка за подсказкой</span></div><p id="tutorStatus" role="status">Можно спросить голосом или написать здесь.</p>
       <div id="tutorMessages" role="log" aria-label="Обсуждение задания"></div>
       <form id="tutorForm"><label for="assignment">Твой вопрос или задание</label><textarea id="assignment" rows="3" maxlength="4000" placeholder="Например: не понимаю, как решить 2x + 3 = 11"></textarea><div class="buttons"><button id="askBtn" type="submit">Дай подсказку</button><button id="cancelHelpBtn" class="secondary" type="button" hidden>Отменить</button><button id="clearHelpBtn" class="quiet" type="button">Новое задание</button></div></form>
-      <details class="lesson-settings"><summary>Настройки с родителем</summary><label for="schoolLevel">Как объяснять</label><select id="schoolLevel"><option value="начальная школа">1–4 класс</option><option value="средняя школа">5–9 класс</option><option value="старшая школа">10–11 класс</option></select><label for="replyVoice">Каким голосом отвечать</label><select id="replyVoice"><option value="parent" selected>Голос родителя · основной</option><option value="yandex">Обычный голос Яндекса · выбрать вручную</option></select><p class="muted">Адым по умолчанию отвечает голосом родителя. Голос Яндекса используется только после явного ручного выбора. Для XTTS нужна лицензия, подходящая вашему сценарию использования.</p><p class="muted" id="tutorPrivacy">В режиме без кнопки микрофон включён во время занятия. Короткие фрагменты речи отправляются в SpeechKit, а текст нового задания один раз — в YandexGPT для подготовки плана подсказок. Во время ответа речь не распознаётся. Шумы фильтруются, но речь телевизора иногда может пройти фильтр. Только при ручном выборе голоса Яндекса сокращённый текст ответа также отправляется в SpeechKit для озвучивания. Камера ребёнка и образец голоса родителя остаются на устройстве. Снимки родителя для аватара обрабатываются и хранятся только на этом устройстве.</p></details>
+      <details class="lesson-settings"><summary>Настройки с родителем</summary><label for="schoolLevel">Как объяснять</label><select id="schoolLevel"><option value="начальная школа">1–4 класс</option><option value="средняя школа">5–9 класс</option><option value="старшая школа">10–11 класс</option></select><label for="replyVoice">Каким голосом отвечать</label><select id="replyVoice"><option value="parent" selected>Голос родителя · основной</option><option value="yandex">Обычный голос Яндекса · выбрать вручную</option></select><p class="muted">Адым по умолчанию отвечает голосом родителя. Голос Яндекса используется только после явного ручного выбора. Для XTTS нужна лицензия, подходящая вашему сценарию использования.</p><p class="muted" id="tutorPrivacy">В режиме без кнопки микрофон включён во время занятия, а речь распознаётся локально на этом устройстве. Текст каждой новой задачи один раз отправляется в YandexGPT для подготовки последовательных подсказок. Уточнения и попытки ответа по этой же задаче не создают новый платный план. Во время ответа речь не распознаётся. Только при ручном выборе голоса Яндекса сокращённый текст ответа отправляется в SpeechKit для озвучивания. Камера ребёнка, аудиозаписи и образец голоса родителя остаются на устройстве.</p></details>
     </section>
     <section class="card child-camera"><div class="section-title"><h2>Ты в кадре</h2><span class="privacy-chip small">Только здесь</span></div><div id="lessonCameraSlot"></div><p id="monitorStatus" role="status">Готово к занятию</p><button id="retryCameraBtn" type="button" class="secondary" hidden>Включить камеру</button><p class="helper">Смотри в тетрадь, думай, пробуй. Я подожду.</p></section>
   </aside>

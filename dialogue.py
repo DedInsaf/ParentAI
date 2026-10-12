@@ -62,8 +62,8 @@ class Dialogues:
             raise ValueError('Слишком много быстрых запросов. Сделай короткий перерыв.')
         recent.append(now)
 
-    def start(self, question, level, session=None, voice=DEFAULT_REPLY_VOICE, user_id=0, request_id=None,
-              unlimited=False):
+    def start(self, question, level, session=None, voice=DEFAULT_REPLY_VOICE,
+              user_id=0, request_id=None, unlimited=False, study_session=None):
         if voice not in ("parent", "yandex"):
             raise ValueError("Неизвестный голос ответа.")
         if not isinstance(question, str) or not question.strip() or len(question) > 4000:
@@ -74,13 +74,21 @@ class Dialogues:
         if not self.tutor.public_status()['enabled']:
             raise ValueError('Настройте YandexGPT в parentai.env.')
         request_id = request_id if isinstance(request_id, str) and 8 <= len(request_id) <= 100 else uuid.uuid4().hex
+        if self.usage and user_id:
+            if not study_session and session:
+                with self.lock:
+                    study_session = (self.sessions.get(session) or {}).get('study_session')
+            if not study_session:
+                study_session = self.usage.start_study_session(user_id, unlimited)['id']
+            self.usage.validate_study_session(user_id, study_session, unlimited)
         with self.lock:
             if self.closed.is_set():
                 raise ValueError('Приложение закрывается.')
             duplicate = self.requests.get((user_id, request_id))
             if duplicate and duplicate in self.jobs:
                 job = self.jobs[duplicate]
-                return {'id': job['id'], 'session': job['session'], 'duplicate': True}
+                return {'id': job['id'], 'session': job['session'],
+                        'study_session': job.get('study_session'), 'duplicate': True}
             now = time.monotonic()
             self._rate_limit(user_id, now)
             for key, job in list(self.jobs.items()):
@@ -99,21 +107,25 @@ class Dialogues:
                 item = self.sessions.get(session)
                 if not item or item['user_id'] != user_id:
                     raise ValueError('Диалог истёк. Нажмите «Новое задание».')
+                if item.get('study_session') != study_session:
+                    raise ValueError('Эта задача относится к другому занятию. Начните новую задачу.')
             session = session or uuid.uuid4().hex
             self.sessions.setdefault(session, dict(history=[], attempt=0, updated=now, plan=None,
-                                                   user_id=user_id, difficult=False))
+                                                   user_id=user_id, study_session=study_session,
+                                                   difficult=False))
             attempt = self.sessions[session]['attempt']
             key = uuid.uuid4().hex
             job = dict(id=key, session=session, state='thinking', created=now, user_id=user_id,
                        request_id=request_id, cancel=threading.Event(), voice=voice, answer='', warning='',
-                       limit_warning='', cues=[], chunks=[], unlimited=bool(unlimited))
+                       limit_warning='', cues=[], chunks=[], unlimited=bool(unlimited),
+                       study_session=study_session)
             self.jobs[key] = job
             self.requests[(user_id, request_id)] = key
             thread = threading.Thread(target=self._run,
                                       args=(job, question.strip(), level, attempt), daemon=True)
             job['thread'] = thread
             thread.start()
-            return {'id': key, 'session': session, 'duplicate': False}
+            return {'id': key, 'session': session, 'study_session': study_session, 'duplicate': False}
 
     def _owned(self, key, user_id):
         job = self.jobs.get(key)
@@ -153,6 +165,7 @@ class Dialogues:
         input_tokens, output_tokens = estimate_tokens(question) + 300, 850
         reservation = self.usage.reserve(
             job['user_id'], 'llm', job['request_id'] + ':plan', lesson_id=job['session'],
+            study_session_id=job['study_session'],
             input_units=input_tokens, output_units=output_tokens,
             estimated_cost=self.usage.config.llm_cost(input_tokens, output_tokens),
             provider='YandexGPT', model=getattr(self.tutor, 'model', ''), new_lesson=True,
@@ -239,6 +252,7 @@ class Dialogues:
             blocks = max(1, (len(spoken) + 249) // 250)
             reservation = self.usage.reserve(
                 job['user_id'], 'tts', job['request_id'] + ':tts', lesson_id=job['session'],
+                study_session_id=job['study_session'],
                 input_units=len(spoken), billed_units=blocks,
                 estimated_cost=self.usage.config.tts_cost(blocks), provider='Yandex SpeechKit', model='general-v3',
                 bypass_limits=job['unlimited'])

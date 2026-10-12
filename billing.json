@@ -1,6 +1,6 @@
 {
   "currency": "RUB",
-  "pricing_source_updated": "2026-10-11",
+  "pricing_source_updated": "2026-10-12",
   "llm_model": "yandexgpt-5.1",
   "pricing_source": "https://aistudio.yandex.ru/ru/docs/ai-studio/pricing",
   "warning_ratio": "0.80",
@@ -12,22 +12,43 @@
   },
   "plans": {
     "free": {
-      "title": "Free",
+      "title": "Бесплатный",
       "monthly_price_rubles": 0,
-      "assignments": 5,
-      "llm_requests": 10,
+      "sessions": 5,
+      "session_minutes": 20,
+      "assignments_per_session": 3,
+      "yandex_voice_per_session": 3,
+      "assignments": 15,
+      "llm_requests": 20,
       "stt_billed_seconds": 150,
-      "tts_blocks": 3,
-      "external_cost_rubles": "10.00"
+      "tts_blocks": 15,
+      "external_cost_rubles": "25.00"
     },
     "paid": {
-      "title": "Paid beta",
+      "title": "Адым Плюс",
       "monthly_price_rubles": 490,
+      "sessions": 20,
+      "session_minutes": 30,
+      "assignments_per_session": 3,
+      "yandex_voice_per_session": 10,
       "assignments": 60,
       "llm_requests": 80,
       "stt_billed_seconds": 3600,
-      "tts_blocks": 180,
+      "tts_blocks": 200,
       "external_cost_rubles": "150.00"
+    },
+    "ultra": {
+      "title": "Адым Ультра",
+      "monthly_price_rubles": 990,
+      "sessions": 45,
+      "session_minutes": 45,
+      "assignments_per_session": 4,
+      "yandex_voice_per_session": 20,
+      "assignments": 180,
+      "llm_requests": 220,
+      "stt_billed_seconds": 9000,
+      "tts_blocks": 900,
+      "external_cost_rubles": "450.00"
     }
   }
 }
