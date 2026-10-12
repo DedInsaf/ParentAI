@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" role="img" aria-label="Логотип Адым">
+  <rect width="48" height="48" rx="17" fill="#ead9c5"/>
+  <path d="M14 27c0-7.2 4.5-13 10-13s10 5.8 10 13" fill="none" stroke="#3f6759" stroke-width="3.2" stroke-linecap="round"/>
+  <circle cx="19" cy="25" r="1.6" fill="#3f6759"/><circle cx="29" cy="25" r="1.6" fill="#3f6759"/>
+  <path d="M19.5 31q4.5 4 9 0" fill="none" stroke="#3f6759" stroke-width="2.2" stroke-linecap="round"/>
+</svg>
