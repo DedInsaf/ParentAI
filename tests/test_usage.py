@@ -128,22 +128,6 @@ class UsageTests(unittest.TestCase):
         resumed = self.store.control_study_session(21, study['id'], 'resume')
         self.assertEqual(resumed['status'], 'active')
 
-    def test_local_lesson_uses_product_limit_without_cloud_cost(self):
-        study = self.store.start_study_session(23)
-        result = self.store.reserve_local_lesson(
-            23, 'local-request', lesson_id='local-lesson', study_session_id=study['id'])
-        self.assertFalse(result['duplicate'])
-        report = self.store.dashboard(23)
-        self.assertEqual(report['usage']['assignments'], 1)
-        self.assertEqual(report['usage']['local_assignments'], 1)
-        self.assertEqual(report['usage']['yandex_assignments'], 0)
-        self.assertEqual(report['usage']['llm_requests'], 0)
-        self.assertEqual(report['usage']['external_cost_rubles'], '0.0000')
-        metrics = self.store.cost_metrics()
-        self.assertEqual(metrics['local_assignments'], 1)
-        self.assertEqual(metrics['yandex_assignments'], 0)
-        self.assertEqual(metrics['local_share_percent'], 100.0)
-
     def test_ultra_checkout_activates_ultra(self):
         provider_id = '22222222-2222-4222-8222-222222222222'
         self.store.record_checkout(22, provider_id, 'https://pay.platega.io/subscription/2', 599, 'ultra')

@@ -1,7 +1,5 @@
 """Private lesson plans, local hint progression and cancellable voice replies."""
-from collections import defaultdict, deque, OrderedDict
-import copy
-import hashlib
+from collections import defaultdict, deque
 import re
 import shutil
 import tempfile
@@ -48,7 +46,6 @@ class Dialogues:
         self.fast_voice, self.usage = fast_voice, usage
         self.lock = threading.RLock()
         self.sessions, self.jobs, self.requests = {}, {}, {}
-        self.plan_cache = OrderedDict()
         self.recent = defaultdict(deque)
         self.storage = tempfile.TemporaryDirectory(prefix='parentai-dialog-')
         self.closed = threading.Event()
@@ -102,9 +99,6 @@ class Dialogues:
             for key, item in list(self.sessions.items()):
                 if now - item['updated'] > 1800:
                     del self.sessions[key]
-            for key, item in list(self.plan_cache.items()):
-                if now - item['created'] > 6 * 3600:
-                    del self.plan_cache[key]
             if any(j['user_id'] == user_id and j['state'] in ('thinking', 'speaking') for j in self.jobs.values()):
                 raise ValueError('Сначала дождись ответа или отмени запрос.')
             if len(self.jobs) >= 100:
@@ -180,37 +174,6 @@ class Dialogues:
         job['limit_warning'] = reservation['warning']
         return reservation['id']
 
-    def _reserve_local_plan(self, job, source):
-        if not self.usage or not job['user_id']:
-            return
-        reservation = self.usage.reserve_local_lesson(
-            job['user_id'], job['request_id'] + ':' + source, lesson_id=job['session'],
-            study_session_id=job['study_session'], source=source,
-            bypass_limits=job['unlimited'])
-        job['limit_warning'] = reservation['warning']
-
-    @staticmethod
-    def _cache_key(user_id, level, question):
-        digest = hashlib.sha256(" ".join(question.casefold().split()).encode('utf-8')).hexdigest()
-        return user_id, level, digest
-
-    def _cached_plan(self, job, question, level):
-        key = self._cache_key(job['user_id'], level, question)
-        with self.lock:
-            cached = self.plan_cache.get(key)
-            if not cached:
-                return None
-            self.plan_cache.move_to_end(key)
-            return copy.deepcopy(cached['plan'])
-
-    def _remember_plan(self, job, question, level, plan):
-        key = self._cache_key(job['user_id'], level, question)
-        with self.lock:
-            self.plan_cache[key] = {'created': time.monotonic(), 'plan': copy.deepcopy(plan)}
-            self.plan_cache.move_to_end(key)
-            while len(self.plan_cache) > 256:
-                self.plan_cache.popitem(last=False)
-
     def _complete_plan_usage(self, event_id, usage):
         if not event_id or not self.usage:
             return
@@ -242,51 +205,24 @@ class Dialogues:
     def _answer(self, job, question, level):
         session = self.sessions[job['session']]
         if session['plan'] is None and hasattr(self.tutor, 'create_plan'):
-            reply = self.tutor.local_reply(question) if hasattr(self.tutor, 'local_reply') else None
-            if reply:
-                session['history'] = (session['history'] + [
-                    {'role': 'user', 'text': question}, {'role': 'assistant', 'text': reply}])[-6:]
-                session['updated'] = time.monotonic()
-                return reply
-            result = (self.tutor.create_local_plan(question, level)
-                      if hasattr(self.tutor, 'create_local_plan') else None)
-            if result:
-                self._reserve_local_plan(job, 'local')
-            else:
-                cached = self._cached_plan(job, question, level)
-                if cached:
-                    result = {'plan': cached, 'source': 'cache'}
-                    self._reserve_local_plan(job, 'cache')
-            if not result:
-                event_id = self._reserve_plan(job, question)
-                usage_completed = False
-                try:
-                    result = self.tutor.create_plan(question, level)
-                    self._complete_plan_usage(event_id, result.get('usage', {}))
+            event_id = self._reserve_plan(job, question)
+            usage_completed = False
+            try:
+                result = self.tutor.create_plan(question, level)
+                self._complete_plan_usage(event_id, result.get('usage', {}))
+                usage_completed = True
+                if job['cancel'].is_set() or self.closed.is_set():
+                    raise InterruptedError()
+            except Exception as exc:
+                provider_usage = getattr(exc, 'usage', None)
+                if event_id and self.usage and provider_usage and not usage_completed:
+                    self._complete_plan_usage(event_id, provider_usage)
                     usage_completed = True
-                    self._remember_plan(job, question, level, result['plan'])
-                    if job['cancel'].is_set() or self.closed.is_set():
-                        raise InterruptedError()
-                except InterruptedError:
-                    raise
-                except Exception as exc:
-                    provider_usage = getattr(exc, 'usage', None)
-                    if event_id and self.usage and provider_usage and not usage_completed:
-                        self._complete_plan_usage(event_id, provider_usage)
-                        usage_completed = True
-                    if event_id and self.usage and not usage_completed:
-                        self.usage.fail(event_id)
-                        self.usage.abandon_empty_lesson(job['user_id'], job['session'])
-                    if not hasattr(self.tutor, 'emergency_plan'):
-                        raise
-                    result = self.tutor.emergency_plan()
-                    if not usage_completed:
-                        self._reserve_local_plan(job, 'fallback')
-                    job['limit_warning'] = (
-                        job['limit_warning'] or
-                        'Облачный помощник временно недоступен. Продолжаем локально без проверки точного ответа.')
+                if event_id and self.usage and not usage_completed:
+                    self.usage.fail(event_id)
+                    self.usage.abandon_empty_lesson(job['user_id'], job['session'])
+                raise
             session['plan'] = result['plan']
-            session['source'] = result.get('source', 'yandex')
             answer, finished, independent, difficult = self._from_plan(session, question)
         elif session['plan'] is not None:
             answer, finished, independent, difficult = self._from_plan(session, question)
