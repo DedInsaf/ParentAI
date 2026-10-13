@@ -29,16 +29,20 @@ class AppServer(ThreadingHTTPServer):
     def __init__(self, runtime, port=0):
         self.runtime = runtime
         self.tutor = Tutor.from_environment(ROOT)
-        # PRODUCT INVARIANT: speech recognition is local by default. It keeps a
-        # child's audio on the family computer, has zero provider cost, and does
-        # not stop working during a Yandex outage. Cloud STT is explicit opt-in.
+        # PRODUCT INVARIANT: speech recognition is local-first by default. If
+        # the installed model cannot handle a fragment and a SpeechKit key is
+        # configured, the bounded fragment gets one cloud fallback path.
         stt_engine = os.getenv('PARENTAI_STT_ENGINE', 'local').strip().lower()
+        speechkit_key = os.getenv('YANDEX_SPEECHKIT_API_KEY') or os.getenv('YANDEX_API_KEY')
+        local_speech = LocalSpeechRecognizer(
+            os.getenv('PARENTAI_STT_MODEL', 'openai/whisper-small'),
+            runtime.data / 'models' / 'huggingface')
+        yandex_speech = SpeechRecognizer(speechkit_key)
         if stt_engine == 'yandex':
-            self.speech = SpeechRecognizer(os.getenv('YANDEX_SPEECHKIT_API_KEY') or os.getenv('YANDEX_API_KEY'))
+            self.speech, self.speech_fallbacks = yandex_speech, [local_speech]
         else:
-            self.speech = LocalSpeechRecognizer(
-                os.getenv('PARENTAI_STT_MODEL', 'openai/whisper-small'),
-                runtime.data / 'models' / 'huggingface')
+            self.speech = local_speech
+            self.speech_fallbacks = [yandex_speech] if speechkit_key else []
         self.fast_voice=SpeechSynthesizer(os.getenv('YANDEX_TTS_API_KEY') or os.getenv('YANDEX_SPEECHKIT_API_KEY') or os.getenv('YANDEX_API_KEY'))
         self.auth = AuthStore(runtime.data / 'users.sqlite3')
         self.usage = UsageStore(runtime.data / 'usage.sqlite3')
@@ -75,25 +79,51 @@ class AppServer(ThreadingHTTPServer):
                 raise ValueError('Слишком много голосовых вопросов подряд. Сделай короткий перерыв.')
             recent.append(now)
             duration = audio_duration_ms(payload)
-            speech_status = self.speech.public_status()
-            local_speech = bool(speech_status.get('local'))
-            billed_seconds = 0 if local_speech else max(15, math.ceil(duration / 15000) * 15)
-            reservation = self.usage.reserve(
-                user_id, 'stt', request_id, duration_ms=duration, billed_units=billed_seconds,
-                estimated_cost=0 if local_speech else self.usage.config.stt_cost(billed_seconds),
-                provider=speech_status.get('provider', ''),
-                model=speech_status.get('model', 'general-v1'), bypass_limits=unlimited)
-            try:
-                text = self.speech.recognize(payload)
-            except Exception:
-                self.usage.fail(reservation['id'])
-                raise
-            self.usage.complete(reservation['id'], duration_ms=duration, billed_units=billed_seconds,
-                                cost=0 if local_speech else self.usage.config.stt_cost(billed_seconds),
-                                actual_usage=not local_speech)
-            result = {'text': text, 'limit_warning': reservation['warning']}
+            errors, warning = [], ''
+            engines = [self.speech, *getattr(self, 'speech_fallbacks', [])]
+            for index, engine in enumerate(engines):
+                speech_status = engine.public_status()
+                if not speech_status.get('enabled'):
+                    errors.append(f"{speech_status.get('provider', 'Распознавание')}: не настроено")
+                    continue
+                local_speech = bool(speech_status.get('local'))
+                billed_seconds = 0 if local_speech else max(15, math.ceil(duration / 15000) * 15)
+                operation_id = request_id if index == 0 else f'{request_id}-fallback-{index}'
+                reservation = self.usage.reserve(
+                    user_id, 'stt', operation_id, duration_ms=duration, billed_units=billed_seconds,
+                    estimated_cost=0 if local_speech else self.usage.config.stt_cost(billed_seconds),
+                    provider=speech_status.get('provider', ''),
+                    model=speech_status.get('model', 'general-v1'), bypass_limits=unlimited)
+                try:
+                    text = engine.recognize(payload)
+                except Exception as exc:
+                    self.usage.fail(reservation['id'])
+                    errors.append(f"{speech_status.get('provider', 'Распознавание')}: {exc}")
+                    continue
+                self.usage.complete(
+                    reservation['id'], duration_ms=duration, billed_units=billed_seconds,
+                    cost=0 if local_speech else self.usage.config.stt_cost(billed_seconds),
+                    actual_usage=not local_speech)
+                warning = reservation['warning']
+                break
+            else:
+                detail = '; '.join(errors) or 'ни один способ распознавания не настроен'
+                raise ValueError(f'Не удалось распознать вопрос. {detail}')
+            result = {'text': text, 'limit_warning': warning,
+                      'speech_provider': speech_status.get('provider', '')}
             self.speech_cache[cache_key] = (now, result)
             return result
+
+    def speech_status(self):
+        statuses = [engine.public_status()
+                    for engine in [self.speech, *getattr(self, 'speech_fallbacks', [])]]
+        enabled = [item for item in statuses if item.get('enabled')]
+        if not enabled:
+            return {**statuses[0], 'enabled': False, 'fallback': None}
+        primary = enabled[0]
+        fallback = enabled[1].get('provider') if len(enabled) > 1 else None
+        return {**primary, 'enabled': True, 'fallback': fallback,
+                'providers': [item.get('provider') for item in enabled]}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -211,7 +241,7 @@ class Handler(BaseHTTPRequestHandler):
                 value = self.server.runtime.avatar()
             else:
                 value = {**self.server.runtime.snapshot(), 'tutor': self.server.tutor.public_status(),
-                         'speech': self.server.speech.public_status(),'fast_voice':self.server.fast_voice.public_status()}
+                         'speech': self.server.speech_status(),'fast_voice':self.server.fast_voice.public_status()}
                 value['voice_engine']=self.server.runtime.voice_engine.status()
                 value['scanner']=scanner_status()
                 value['usage']=self.server.usage.dashboard(user.id, user.role == 'admin')

@@ -161,6 +161,25 @@ class ServerTests(unittest.TestCase):
         dashboard = self.s.usage.dashboard(1)
         self.assertEqual(dashboard['usage']['external_cost_rubles'], '0.0000')
 
+    def test_speech_falls_back_to_second_engine_and_accounts_actual_provider(self):
+        class BrokenLocal:
+            def public_status(self):
+                return {'enabled':True,'provider':'Локальный Whisper','model':'test','local':True}
+            def recognize(self, payload):
+                raise ValueError('локальная модель временно недоступна')
+        class WorkingCloud:
+            def public_status(self):
+                return {'enabled':True,'provider':'Yandex SpeechKit'}
+            def recognize(self, payload):
+                return 'Резерв распознал вопрос'
+        self.s.speech = BrokenLocal()
+        self.s.speech_fallbacks = [WorkingCloud()]
+        result = self.s.recognize(1, recording(), 'fallback-speech-request')
+        self.assertEqual(result['text'], 'Резерв распознал вопрос')
+        self.assertEqual(result['speech_provider'], 'Yandex SpeechKit')
+        self.assertEqual(self.s.speech_status()['fallback'], 'Yandex SpeechKit')
+        self.assertGreater(float(self.s.usage.dashboard(1)['usage']['external_cost_rubles']), 0)
+
     def test_tutor_is_protected_and_reports_missing_configuration(self):
         payload=json.dumps({'question':'Помоги','history':[],'level':'средняя школа'}).encode()
         self.assertEqual(self.request('/api/tutor',payload)[0],403)

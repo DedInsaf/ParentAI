@@ -11,7 +11,7 @@ import numpy as np
 from scipy.io import wavfile
 from dialogue import DEFAULT_REPLY_VOICE,Dialogues
 from runtime import Runtime
-from speech import LocalSpeechRecognizer, SpeechRecognizer, stt_pcm
+from speech import LocalSpeechRecognizer, SpeechRecognizer, SpeechSynthesizer, stt_pcm
 from lipsync import timeline, viseme
 
 
@@ -37,6 +37,15 @@ class SpeechTests(unittest.TestCase):
         self.assertEqual(recognizer.public_status()['external_cost'], 0)
         self.assertEqual(seen['audio']['sampling_rate'], 16000)
         self.assertEqual(seen['options'], {'language': 'ru', 'task': 'transcribe'})
+
+    def test_local_whisper_resolves_installed_snapshot_without_model_id_lookup(self):
+        with tempfile.TemporaryDirectory() as temp:
+            snapshot = Path(temp) / 'models--openai--whisper-small' / 'snapshots' / 'revision'
+            snapshot.mkdir(parents=True)
+            for name in ('config.json', 'preprocessor_config.json', 'model.safetensors'):
+                (snapshot / name).write_bytes(b'installed')
+            recognizer = LocalSpeechRecognizer(cache_dir=temp)
+            self.assertEqual(recognizer._local_model_path(), snapshot)
 
     def test_pcm_resampling_and_rejections(self):
         pcm = stt_pcm(recording())
@@ -86,6 +95,45 @@ class SpeechTests(unittest.TestCase):
             return Response()
         recognizer = SpeechRecognizer('test-key', flaky, sleeper=delays.append)
         self.assertEqual(recognizer.recognize(recording()), 'Слышу вопрос')
+        self.assertEqual(len(calls), 3)
+        self.assertEqual(delays, [.4, 1.0])
+
+    def test_speechkit_retries_network_and_bad_gateway_failures(self):
+        calls, delays = [], []
+        class Response:
+            def __enter__(self): return self
+            def __exit__(self, *_): pass
+            def read(self, limit): return json.dumps({'result': 'Резерв работает'}).encode()
+        def flaky(request, timeout):
+            calls.append(request)
+            if len(calls) == 1:
+                raise urllib.error.URLError('temporary route failure')
+            if len(calls) == 2:
+                raise urllib.error.HTTPError(request.full_url, 502, 'bad gateway', {}, io.BytesIO())
+            return Response()
+        recognizer = SpeechRecognizer('test-key', flaky, sleeper=delays.append)
+        self.assertEqual(recognizer.recognize(recording()), 'Резерв работает')
+        self.assertEqual(len(calls), 3)
+        self.assertEqual(delays, [.4, 1.0])
+
+    def test_speechkit_tts_retries_transient_failure(self):
+        calls, delays = [], []
+        class Response:
+            def __enter__(self): return self
+            def __exit__(self, *_): pass
+            def read(self, limit):
+                audio = recording(rate=16000)
+                return json.dumps({'result': {'audioChunk': {
+                    'data': base64.b64encode(audio).decode()}}}).encode()
+        def flaky(request, timeout):
+            calls.append(request)
+            if len(calls) < 3:
+                raise urllib.error.HTTPError(request.full_url, 503, 'unavailable', {}, io.BytesIO())
+            return Response()
+        with tempfile.TemporaryDirectory() as temp:
+            result = SpeechSynthesizer('test-key', flaky, delays.append).synthesize(
+                'Попробуй ещё раз.', Path(temp) / 'answer.wav')
+        self.assertGreater(result['duration_ms'], 0)
         self.assertEqual(len(calls), 3)
         self.assertEqual(delays, [.4, 1.0])
 
@@ -223,7 +271,6 @@ class StreamedVoiceTests(unittest.TestCase):
             finally:manager.close();runtime.close()
 
     def test_standard_yandex_voice_does_not_require_or_transmit_parent_reference(self):
-        from speech import SpeechSynthesizer
         seen={}
         class Response:
             def __enter__(self):return self

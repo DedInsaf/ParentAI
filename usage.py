@@ -331,6 +331,14 @@ class UsageStore:
             connection.execute("BEGIN IMMEDIATE")
             plan = self._active_plan(connection, user_id)
             minutes = int(self.config.plan(plan)["session_minutes"])
+            if not unlimited:
+                start, end = self._month_bounds(now)
+                used_sessions = self._totals(connection, user_id, start, end)["sessions"]
+                if used_sessions >= int(self.config.plan(plan)["sessions"]):
+                    raise LimitExceeded(
+                        "Лимит занятий на этот месяц закончился. "
+                        "Попросите взрослого открыть раздел «Для родителя»."
+                    )
             previous = connection.execute(
                 """SELECT id,status,active_started_at,active_seconds FROM study_sessions
                    WHERE user_id=? AND status IN ('active','paused')""", (user_id,)
@@ -356,7 +364,8 @@ class UsageStore:
                    VALUES (?,?,?,?,0,?,'active')""",
                 (session_id, user_id, now, now, now),
             )
-        return {"id": session_id, "limit_seconds": None if unlimited else minutes * 60}
+        return {"id": session_id, "status": "active", "elapsed_seconds": 0,
+                "limit_seconds": None if unlimited else minutes * 60}
 
     def control_study_session(self, user_id, session_id, action, unlimited=False):
         if action not in ("pause", "resume", "stop"):
@@ -369,11 +378,24 @@ class UsageStore:
             ).fetchone()
             if not row:
                 raise ValueError("Занятие не найдено. Начните новое занятие.")
+            if row["status"] == "complete":
+                if action == "stop":
+                    plan = self._active_plan(connection, user_id)
+                    limit_seconds = int(self.config.plan(plan)["session_minutes"]) * 60
+                    return {"id": session_id, "status": "complete",
+                            "elapsed_seconds": int(row["active_seconds"]),
+                            "limit_seconds": None if unlimited else limit_seconds}
+                raise ValueError("Занятие уже завершено. Начните новое занятие.")
             active_seconds = int(row["active_seconds"])
             if row["status"] == "active" and row["active_started_at"] is not None:
                 active_seconds += max(0, now - int(row["active_started_at"]))
             plan = self._active_plan(connection, user_id)
             limit_seconds = int(self.config.plan(plan)["session_minutes"]) * 60
+            if (action == "pause" and row["status"] == "paused") or (
+                    action == "resume" and row["status"] == "active"):
+                return {"id": session_id, "status": row["status"],
+                        "elapsed_seconds": active_seconds,
+                        "limit_seconds": None if unlimited else limit_seconds}
             if action == "resume" and not unlimited and active_seconds >= limit_seconds:
                 raise LimitExceeded("Время занятия закончилось. Начните новое занятие.")
             status = "complete" if action == "stop" else ("paused" if action == "pause" else "active")

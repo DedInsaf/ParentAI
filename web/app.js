@@ -100,7 +100,9 @@ function controls() {
   $('handsFree').disabled=!status.speech?.enabled && !listener;
   $('voiceQuestionBtn').textContent = questionRecording ? 'Закончить вопрос' : 'Записать вопрос';
   $('readyHandsFree').disabled=running || !status.speech?.enabled;
-  $('readyMicHint').textContent=status.speech?.enabled?'После начала микрофон будет заметен над аватаром. Его можно выключить в любой момент.':'Голосовые вопросы пока не подключены. Можно написать вопрос; родителю нужно настроить SpeechKit.';
+  $('readyMicHint').textContent=status.speech?.enabled
+    ?`После начала микрофон будет заметен над аватаром. Распознавание: ${status.speech.provider}${status.speech.fallback?` · резерв: ${status.speech.fallback}`:''}.`
+    :'Голосовые вопросы пока не подключены. Можно написать вопрос; родителю нужно установить локальную модель или настроить SpeechKit.';
   $('stopSpeechBtn').hidden=!playing;
   $('readyHandsFree').checked=$('handsFree').checked;
   $('faceNextHint').textContent=!mesh?'После создания аватара можно перейти к голосу.':'';
@@ -503,7 +505,7 @@ async function start() {
   try { study = await api('study-session', JSON.stringify({action:'start'})); }
   catch(error){stopCamera();throw error;}
   studySessionId=study.id;lessonLimitSeconds=study.limit_seconds;lessonLimitHandled=false;dialogId=null;
-  stopAudio(); running = true; paused = false; presence.reset(); lessonElapsed = 0; lessonStarted = performance.now(); showLesson();
+  stopAudio(); running = true; paused = false; presence.reset(); lessonElapsed = Number(study.elapsed_seconds||0)*1000; lessonStarted = performance.now(); showLesson();
   if(lessonCameraEnabled) startLessonPresence();
   else $('monitorStatus').textContent='Камера выключена родителем';
   controls();
@@ -513,8 +515,20 @@ async function start() {
 }
 async function pause() {
   stopAudio(); cancelTutor();stopHandsFree();
-  if (!paused) { await api('study-session',JSON.stringify({action:'pause',id:studySessionId}));lessonElapsed += performance.now() - lessonStarted; paused = true; lessonPresenceEnabled=false;document.body.classList.add('on-break');stopCamera();setListenerState('off','Перерыв. Камера и микрофон выключены.'); $('pauseBtn').textContent = 'Продолжить занятие'; $('monitorStatus').textContent = 'Перерыв · камера выключена'; }
-  else { await api('study-session',JSON.stringify({action:'resume',id:studySessionId}));if (lessonCameraEnabled) await enableCamera(); presence.reset(); paused = false;document.body.classList.remove('on-break'); lessonStarted = performance.now(); $('pauseBtn').textContent = 'Сделать перерыв';if(lessonCameraEnabled)startLessonPresence();startHandsFree().catch(fail); }
+  if (!paused) {
+    const session=await api('study-session',JSON.stringify({action:'pause',id:studySessionId}));
+    lessonElapsed=Number(session.elapsed_seconds||0)*1000;lessonLimitSeconds=session.limit_seconds;
+    paused = true; lessonPresenceEnabled=false;document.body.classList.add('on-break');stopCamera();setListenerState('off','Перерыв. Камера и микрофон выключены.'); $('pauseBtn').textContent = 'Продолжить занятие'; $('monitorStatus').textContent = 'Перерыв · камера выключена';
+  } else {
+    // Reconnect the camera before resuming the server clock. If permission or
+    // the device fails, the paid lesson time remains paused.
+    if (lessonCameraEnabled) await enableCamera();
+    let session;
+    try { session=await api('study-session',JSON.stringify({action:'resume',id:studySessionId})); }
+    catch(error){if(lessonCameraEnabled)stopCamera();throw error;}
+    lessonElapsed=Number(session.elapsed_seconds||0)*1000;lessonLimitSeconds=session.limit_seconds;
+    presence.reset(); paused = false;document.body.classList.remove('on-break'); lessonStarted = performance.now(); $('pauseBtn').textContent = 'Сделать перерыв';if(lessonCameraEnabled)startLessonPresence();startHandsFree().catch(fail);
+  }
   controls();
 }
 function stop(message='Занятие завершено · камера выключена') { const session=studySessionId;studySessionId=null;if(session)api('study-session',JSON.stringify({action:'stop',id:session})).catch(()=>{});stopHandsFree();api('voice-release',new Uint8Array()).catch(()=>{});running = false; paused = false;dialogId=null;lessonCameraEnabled=false;lessonPresenceEnabled=false;document.body.classList.remove('on-break'); stopAudio(); stopCamera(); cancelTutor(); presence.reset(); $('pauseBtn').textContent = 'Сделать перерыв'; $('monitorStatus').textContent = message; showSetup(); controls(); }
@@ -620,7 +634,10 @@ async function showReadyCameraPreview() {
     await enableCamera();
     $('readyCameraStatus').textContent='Камера работает. Это изображение остаётся на устройстве.';
   } catch(error) {
-    closeReadyCameraPreview(true);
+    // A temporary permission/device error must not silently opt the lesson out
+    // of camera use. Keep the parent's choice and retry when Start is pressed.
+    stopCamera();
+    $('readyCameraStatus').textContent='Камера пока не подключилась. Проверьте разрешение — при начале занятия попробуем ещё раз.';
     throw error;
   }
 }

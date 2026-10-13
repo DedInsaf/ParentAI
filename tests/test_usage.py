@@ -1,5 +1,6 @@
 import sqlite3
 import tempfile
+import time
 import unittest
 
 from usage import BillingConfig, LimitExceeded, UsageStore, rubles_to_micros
@@ -127,6 +128,75 @@ class UsageTests(unittest.TestCase):
         self.assertEqual(paused['status'], 'paused')
         resumed = self.store.control_study_session(21, study['id'], 'resume')
         self.assertEqual(resumed['status'], 'active')
+
+    def test_every_plan_has_its_own_enforced_session_duration(self):
+        for user_id, plan, minutes in ((41, 'free', 20), (42, 'paid', 30), (43, 'ultra', 45)):
+            with self.subTest(plan=plan):
+                self.store.set_subscription(user_id, plan)
+                study = self.store.start_study_session(user_id)
+                self.assertEqual(study['status'], 'active')
+                self.assertEqual(study['elapsed_seconds'], 0)
+                self.assertEqual(study['limit_seconds'], minutes * 60)
+                with sqlite3.connect(self.store.path) as connection:
+                    connection.execute(
+                        'UPDATE study_sessions SET active_started_at=? WHERE id=?',
+                        (int(time.time()) - minutes * 60, study['id']))
+                with self.assertRaisesRegex(LimitExceeded, 'Время занятия закончилось'):
+                    self.store.validate_study_session(user_id, study['id'])
+
+    def test_admin_session_is_not_time_limited(self):
+        study = self.store.start_study_session(44, unlimited=True)
+        self.assertIsNone(study['limit_seconds'])
+        with sqlite3.connect(self.store.path) as connection:
+            connection.execute(
+                'UPDATE study_sessions SET active_started_at=? WHERE id=?',
+                (int(time.time()) - 24 * 60 * 60, study['id']))
+        self.assertIsNone(self.store.validate_study_session(44, study['id'], unlimited=True)['limit_seconds'])
+
+    def test_monthly_session_limit_is_rejected_before_empty_session_is_created(self):
+        for index in range(2):
+            study = self.store.start_study_session(45)
+            event = self.store.reserve(
+                45, 'llm', f'monthly-session-{index}', lesson_id=f'monthly-lesson-{index}',
+                study_session_id=study['id'], new_lesson=True, estimated_cost=0)
+            self.store.complete(event['id'], cost=0)
+            self.store.control_study_session(45, study['id'], 'stop')
+        with self.assertRaisesRegex(LimitExceeded, 'Лимит занятий'):
+            self.store.start_study_session(45)
+
+    def test_completed_session_cannot_be_resumed(self):
+        study = self.store.start_study_session(46)
+        self.store.control_study_session(46, study['id'], 'stop')
+        with self.assertRaisesRegex(ValueError, 'уже завершено'):
+            self.store.control_study_session(46, study['id'], 'resume')
+        stopped = self.store.control_study_session(46, study['id'], 'stop')
+        self.assertEqual(stopped['status'], 'complete')
+
+    def test_real_plan_session_and_assignment_boundaries(self):
+        product = UsageStore(self.temp.name + '/product.sqlite3', BillingConfig.load())
+        for user_id, plan in ((51, 'free'), (52, 'paid'), (53, 'ultra')):
+            limits = product.config.plan(plan)
+            product.set_subscription(user_id, plan)
+            for session_index in range(limits['sessions']):
+                study = product.start_study_session(user_id)
+                for task_index in range(limits['assignments_per_session']):
+                    event = product.reserve(
+                        user_id, 'llm', f'{plan}-{session_index}-{task_index}',
+                        lesson_id=f'{plan}-lesson-{session_index}-{task_index}',
+                        study_session_id=study['id'], new_lesson=True, estimated_cost=0)
+                    product.complete(event['id'], cost=0)
+                if session_index == 0:
+                    with self.assertRaisesRegex(LimitExceeded, 'максимум новых задач'):
+                        product.reserve(
+                            user_id, 'llm', f'{plan}-too-many',
+                            lesson_id=f'{plan}-lesson-too-many',
+                            study_session_id=study['id'], new_lesson=True, estimated_cost=0)
+                product.control_study_session(user_id, study['id'], 'stop')
+            summary = product.dashboard(user_id)
+            self.assertEqual(summary['usage']['sessions'], limits['sessions'])
+            self.assertEqual(summary['usage']['assignments'], limits['assignments'])
+            with self.assertRaisesRegex(LimitExceeded, 'Лимит занятий'):
+                product.start_study_session(user_id)
 
     def test_ultra_checkout_activates_ultra(self):
         provider_id = '22222222-2222-4222-8222-222222222222'

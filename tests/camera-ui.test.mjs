@@ -12,6 +12,14 @@ test('camera is enabled by default with an immediate local preview on every plan
   assert.match(script, /readyCamera'\)\.addEventListener\('change'/);
   assert.match(script, /showReadyCameraPreview\(\)/);
   assert.match(script, /await enableCamera\(\)/);
+  assert.match(script, /Камера пока не подключилась/);
+  assert.doesNotMatch(script, /catch\(error\) \{\s*closeReadyCameraPreview\(true\)/);
+});
+
+test('resume reconnects camera before restarting the metered lesson clock', () => {
+  const resume = script.slice(script.indexOf('async function pause()'), script.indexOf('function stop('));
+  assert.ok(resume.indexOf('await enableCamera()') < resume.indexOf("action:'resume'"));
+  assert.match(resume, /lessonElapsed=Number\(session\.elapsed_seconds\|\|0\)\*1000/);
 });
 
 test('lesson can reconnect camera and does not require a face before opening', () => {
