@@ -64,23 +64,23 @@
       <article id="freePlanCard" class="plan-card">
         <div class="plan-card-title"><div><span class="plan-name">Бесплатный</span><strong>0 ₽</strong></div><span id="freePlanState" class="plan-state">Текущий тариф</span></div>
         <p>Чтобы спокойно попробовать Адым.</p>
-        <ul><li><strong id="freeSessions">5</strong> занятий в месяц</li><li>до <strong id="freeMinutes">20</strong> минут каждое</li><li>до <strong id="freeTasks">3</strong> новых задач за занятие</li><li><strong id="freeVoice">3</strong> ответа голосом Яндекса за занятие</li><li>голос родителя — без отдельного лимита</li></ul>
+        <ul><li><strong id="freeSessions">5</strong> занятий в месяц</li><li>до <strong id="freeMinutes">20</strong> минут каждое</li><li>до <strong id="freeTasks">3</strong> новых задач за занятие</li><li>голосовые вопросы локально — без лимита; резерв SpeechKit — <strong id="freeSpeechFallback">2,5 мин</strong>/месяц</li><li><strong id="freeVoice">3</strong> ответа голосом Яндекса за занятие</li><li>голос родителя — без отдельного лимита</li></ul>
         <button id="freePlanBtn" type="button" class="secondary full" disabled>Текущий тариф</button>
       </article>
       <article id="paidPlanCard" class="plan-card featured">
         <div class="plan-card-title"><div><span class="plan-name">Адым Плюс</span><strong><span id="paidPrice">490</span> ₽<small>/месяц</small></strong></div><span class="best-choice">Для регулярных занятий</span></div>
         <p>Комфортный режим на учебный месяц.</p>
-        <ul><li><strong id="paidSessions">20</strong> занятий в месяц</li><li>до <strong id="paidMinutes">30</strong> минут каждое</li><li>до <strong id="paidTasks">3</strong> новых задач за занятие</li><li><strong id="paidVoice">10</strong> ответов голосом Яндекса за занятие</li><li>голос родителя — без отдельного лимита</li></ul>
+        <ul><li><strong id="paidSessions">20</strong> занятий в месяц</li><li>до <strong id="paidMinutes">30</strong> минут каждое</li><li>до <strong id="paidTasks">3</strong> новых задач за занятие</li><li>голосовые вопросы локально — без лимита; резерв SpeechKit — <strong id="paidSpeechFallback">60 мин</strong>/месяц</li><li><strong id="paidVoice">10</strong> ответов голосом Яндекса за занятие</li><li>голос родителя — без отдельного лимита</li></ul>
         <button id="buyPaidBtn" type="button" class="full">Оформить подписку через Platega</button>
       </article>
       <article id="ultraPlanCard" class="plan-card ultra">
         <div class="plan-card-title"><div><span class="plan-name">Адым Ультра</span><strong><span id="ultraPrice">990</span> ₽<small>/месяц</small></strong></div><span class="best-choice">Всё включено</span></div>
         <p>Максимум времени и общения для большой учебной нагрузки.</p>
-        <ul><li><strong id="ultraSessions">45</strong> занятий в месяц</li><li>до <strong id="ultraMinutes">45</strong> минут каждое</li><li>до <strong id="ultraTasks">4</strong> новых задач за занятие</li><li><strong id="ultraVoice">20</strong> ответов голосом Яндекса за занятие</li><li>голос родителя — без отдельного лимита</li></ul>
+        <ul><li><strong id="ultraSessions">45</strong> занятий в месяц</li><li>до <strong id="ultraMinutes">45</strong> минут каждое</li><li>до <strong id="ultraTasks">4</strong> новых задач за занятие</li><li>голосовые вопросы локально — без лимита; резерв SpeechKit — <strong id="ultraSpeechFallback">150 мин</strong>/месяц</li><li><strong id="ultraVoice">20</strong> ответов голосом Яндекса за занятие</li><li>голос родителя — без отдельного лимита</li></ul>
         <button id="buyUltraBtn" type="button" class="full">Оформить Ультра через Platega</button>
       </article>
     </div>
-    <p class="plan-explainer"><strong>Что считается новой задачей?</strong> Новое условие из домашней работы. Уточнения, попытки ответа и последовательные подсказки внутри этой задачи ничего дополнительно не списывают. Перерыв останавливает таймер занятия.</p>
+    <p class="plan-explainer"><strong>Что считается новой задачей?</strong> Новое условие из домашней работы. Уточнения, попытки ответа и последовательные подсказки внутри этой задачи ничего дополнительно не списывают. Перерыв останавливает таймер занятия. SpeechKit для распознавания расходуется только тогда, когда локальный Whisper не справился.</p>
     <p id="billingMessage" class="billing-message" role="status">Оплата подписки проходит на защищённой странице Platega через СБП. Списание повторяется раз в месяц; отменить подписку можно по ссылке из письма Platega.</p>
   </div>
 </dialog>

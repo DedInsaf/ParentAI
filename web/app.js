@@ -16,7 +16,7 @@ const requestId = () => globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Ma
 let token, currentUser, authenticated = false, appStarted = false;
 let status = {}, stream, detector, avatarTopology, THREE, renderer, scene, camera, mesh, avatarGroup, modelAvatar;
 let audioContext, analyser, audioSource, pcm, playing = false, recording = false, scanning = false;
-let running = false, paused = false, lastFrame = -1, lastDetect = 0, lastResult = null, lastSeenFrame = 0;
+let running = false, paused = false, pausePending = false, lastFrame = -1, lastDetect = 0, lastResult = null, lastSeenFrame = 0;
 let lastMediaTimestamp = -1;
 let avatarDependenciesPromise,dependenciesPromise, detectError = false, connecting = false, playbackId = 0, audioKind = '';
 const presence = new Presence();
@@ -89,7 +89,7 @@ function controls() {
   $('generateBtn').textContent = $('voiceMode').value === 'direct' ? 'Сохранить напоминание' : 'Создать голос';
   $('testVoiceBtn').disabled = !online || !(status.phrases?.length) || recording || running;
   $('startBtn').disabled = !online || transition || !mesh || !(status.phrases?.length) || running || scanning || recording || voiceBusy();
-  $('pauseBtn').disabled = !running || transition;
+  $('pauseBtn').disabled = !running || transition || (paused && (!online || pausePending));
   $('stopBtn').disabled = !running;
   $('retryCameraBtn').hidden = !running || paused || cameraLive();
   $('retryCameraBtn').disabled = !running || paused || pendingActions.has('retryCameraBtn');
@@ -120,7 +120,13 @@ function controls() {
 }
 async function poll() {
   try {
-    status = await api('status'); online = true;
+    status = await api('status');
+    if(pausePending&&running&&paused&&studySessionId){
+      const session=await api('study-session',JSON.stringify({action:'pause',id:studySessionId}));
+      lessonElapsed=Number(session.elapsed_seconds||0)*1000;lessonLimitSeconds=session.limit_seconds;
+      pausePending=false;$('monitorStatus').textContent='Перерыв · связь восстановлена, таймер остановлен';
+    }
+    online = true;
     $('connection').textContent = 'Подключено';
     $('ttsStatus').textContent = `Клонирование: ${status.voice_engine?.message || status.tts}`;
     $('assetsStatus').textContent = `Распознавание: ${status.assets}`;
@@ -144,7 +150,7 @@ async function poll() {
     }
   } catch {
     online = false; $('connection').textContent = 'Нет связи · переподключение…';
-    if (running && !paused) await pause();
+    if (running && !paused) { try { await pause(); } catch {} }
   } finally { controls(); }
 }
 function renderParentSummary(value) {
@@ -171,12 +177,14 @@ function renderSubscription(summary, billing) {
   $('billingBtn').setAttribute('aria-label', `Тариф: ${planTitle}. Открыть информацию о подписке`);
   $('currentPlanHero').textContent = summary.plan.unlimited ? 'Admin · без ограничений' : `Сейчас: ${summary.plan.title}`;
   for (const [prefix, plan, defaults] of [
-    ['free', free, [5,20,3,3]], ['paid', paid, [20,30,3,10]], ['ultra', ultra, [45,45,4,20]],
+    ['free', free, [5,20,3,3,150]], ['paid', paid, [20,30,3,10,3600]], ['ultra', ultra, [45,45,4,20,9000]],
   ]) {
     $(`${prefix}Sessions`).textContent = plan.sessions ?? defaults[0];
     $(`${prefix}Minutes`).textContent = plan.session_minutes ?? defaults[1];
     $(`${prefix}Tasks`).textContent = plan.assignments_per_session ?? defaults[2];
     $(`${prefix}Voice`).textContent = plan.yandex_voice_per_session ?? defaults[3];
+    const fallbackSeconds=plan.stt_billed_seconds ?? defaults[4],fallbackMinutes=fallbackSeconds/60;
+    $(`${prefix}SpeechFallback`).textContent=`${Number.isInteger(fallbackMinutes)?fallbackMinutes:String(fallbackMinutes).replace('.',',')} мин`;
   }
   $('paidPrice').textContent = paid.monthly_price_rubles ?? 490;
   $('ultraPrice').textContent = ultra.monthly_price_rubles ?? 990;
@@ -187,13 +195,14 @@ function renderSubscription(summary, billing) {
   $('freePlanBtn').textContent = current === 'free' ? 'Текущий тариф' : 'Free';
   const button = $('buyPaidBtn'), ultraButton = $('buyUltraBtn');
   const waiting = ['pending','subscription_activated'].includes(summary.payment?.status);
-  button.disabled = summary.plan.unlimited || current === 'paid' || waiting || !billing.provider?.enabled;
-  ultraButton.disabled = summary.plan.unlimited || current === 'ultra' || waiting || !billing.provider?.enabled;
+  const hasPaidPlan = current === 'paid' || current === 'ultra';
+  button.disabled = summary.plan.unlimited || hasPaidPlan || waiting || !billing.provider?.enabled;
+  ultraButton.disabled = summary.plan.unlimited || hasPaidPlan || waiting || !billing.provider?.enabled;
   button.textContent = summary.plan.unlimited ? 'У вас доступ без ограничений' : current === 'paid' ?
-    'Подписка активна' : waiting ? 'Ожидаем подтверждение Platega' :
+    'Подписка активна' : hasPaidPlan ? 'Смена тарифа — через поддержку' : waiting ? 'Ожидаем подтверждение Platega' :
     `Оформить за ${paid.monthly_price_rubles ?? 490} ₽/месяц`;
   ultraButton.textContent = summary.plan.unlimited ? 'У вас доступ без ограничений' : current === 'ultra' ?
-    'Подписка активна' : waiting ? 'Ожидаем подтверждение Platega' :
+    'Подписка активна' : hasPaidPlan ? 'Смена тарифа — через поддержку' : waiting ? 'Ожидаем подтверждение Platega' :
     `Оформить за ${ultra.monthly_price_rubles ?? 990} ₽/месяц`;
   if (!billing.provider?.enabled && current === 'free') {
     $('billingMessage').textContent = 'Кнопка покупки готова. Чтобы принимать оплату, добавьте Merchant ID и API-ключ Platega в настройки сервера.';
@@ -201,14 +210,18 @@ function renderSubscription(summary, billing) {
     $('billingMessage').textContent = 'Подписка создана в Platega и ожидает подтверждения. Нажмите кнопку ещё раз, чтобы вернуться к оплате.';
     (summary.payment?.plan === 'ultra' ? ultraButton : button).disabled = false;
   } else if (current === 'paid' || current === 'ultra') {
-    $('billingMessage').textContent = `${summary.plan.title} активен. Platega управляет ежемесячным списанием и присылает уведомления на вашу почту.`;
+    $('billingMessage').textContent = `${summary.plan.title} активен. Чтобы сменить тариф без двойного списания, сначала отмените текущую подписку через Platega или напишите в поддержку.`;
   } else if (summary.plan.unlimited) {
     $('billingMessage').textContent = 'Администратор тестирует все возможности продукта без тарифных ограничений.';
   } else {
     $('billingMessage').textContent = 'Оплата проходит на защищённой странице Platega через СБП. Списание повторяется раз в месяц; отменить подписку можно по ссылке из письма Platega.';
   }
 }
-async function pollLoop() { if (!authenticated) return; await poll(); if (authenticated) setTimeout(pollLoop, 2000); }
+async function pollLoop() {
+  if (!authenticated) return;
+  try { await poll(); }
+  finally { if (authenticated) setTimeout(pollLoop, 2000); }
+}
 
 async function avatarDependencies(){
   if(!avatarDependenciesPromise)avatarDependenciesPromise=(async()=>{
@@ -504,7 +517,7 @@ async function start() {
   let study;
   try { study = await api('study-session', JSON.stringify({action:'start'})); }
   catch(error){stopCamera();throw error;}
-  studySessionId=study.id;lessonLimitSeconds=study.limit_seconds;lessonLimitHandled=false;dialogId=null;
+  studySessionId=study.id;lessonLimitSeconds=study.limit_seconds;lessonLimitHandled=false;pausePending=false;dialogId=null;
   stopAudio(); running = true; paused = false; presence.reset(); lessonElapsed = Number(study.elapsed_seconds||0)*1000; lessonStarted = performance.now(); showLesson();
   if(lessonCameraEnabled) startLessonPresence();
   else $('monitorStatus').textContent='Камера выключена родителем';
@@ -516,8 +529,16 @@ async function start() {
 async function pause() {
   stopAudio(); cancelTutor();stopHandsFree();
   if (!paused) {
-    const session=await api('study-session',JSON.stringify({action:'pause',id:studySessionId}));
-    lessonElapsed=Number(session.elapsed_seconds||0)*1000;lessonLimitSeconds=session.limit_seconds;
+    const localElapsed=lessonElapsed+performance.now()-lessonStarted;
+    try {
+      const session=await api('study-session',JSON.stringify({action:'pause',id:studySessionId}));
+      lessonElapsed=Number(session.elapsed_seconds||0)*1000;lessonLimitSeconds=session.limit_seconds;pausePending=false;
+    } catch(error) {
+      lessonElapsed=localElapsed;
+      paused = true;pausePending=true; lessonPresenceEnabled=false;document.body.classList.add('on-break');stopCamera();setListenerState('off','Перерыв. Камера и микрофон выключены.'); $('pauseBtn').textContent = 'Продолжить занятие'; $('monitorStatus').textContent = 'Перерыв локально · ждём связь с приложением';
+      controls();
+      throw error;
+    }
     paused = true; lessonPresenceEnabled=false;document.body.classList.add('on-break');stopCamera();setListenerState('off','Перерыв. Камера и микрофон выключены.'); $('pauseBtn').textContent = 'Продолжить занятие'; $('monitorStatus').textContent = 'Перерыв · камера выключена';
   } else {
     // Reconnect the camera before resuming the server clock. If permission or
@@ -531,7 +552,7 @@ async function pause() {
   }
   controls();
 }
-function stop(message='Занятие завершено · камера выключена') { const session=studySessionId;studySessionId=null;if(session)api('study-session',JSON.stringify({action:'stop',id:session})).catch(()=>{});stopHandsFree();api('voice-release',new Uint8Array()).catch(()=>{});running = false; paused = false;dialogId=null;lessonCameraEnabled=false;lessonPresenceEnabled=false;document.body.classList.remove('on-break'); stopAudio(); stopCamera(); cancelTutor(); presence.reset(); $('pauseBtn').textContent = 'Сделать перерыв'; $('monitorStatus').textContent = message; showSetup(); controls(); }
+function stop(message='Занятие завершено · камера выключена',notifyServer=true) { const session=studySessionId;studySessionId=null;if(session&&notifyServer)api('study-session',JSON.stringify({action:'stop',id:session})).catch(()=>{});stopHandsFree();api('voice-release',new Uint8Array()).catch(()=>{});running = false; paused = false;pausePending=false;dialogId=null;lessonCameraEnabled=false;lessonPresenceEnabled=false;document.body.classList.remove('on-break'); stopAudio(); stopCamera(); cancelTutor(); presence.reset(); $('pauseBtn').textContent = 'Сделать перерыв'; $('monitorStatus').textContent = message; showSetup(); controls(); }
 function startLessonPresence() {
   lessonPresenceEnabled=!!detector;
   $('monitorStatus').textContent=lessonPresenceEnabled?'Камера включена · ищем лицо':'Камера включена · запускаем проверку лица';
@@ -866,8 +887,11 @@ $('tutorForm').addEventListener('submit', askTutor);
 $('cancelHelpBtn').addEventListener('click', cancelTutor);
 $('clearHelpBtn').addEventListener('click', () => { cancelTutor(); dialogId=null;followupUntil=0; $('tutorMessages').replaceChildren(); $('assignment').value = ''; });
 window.addEventListener('popstate', () => { if (running) stop(); });
-document.addEventListener('visibilitychange', () => { if (document.hidden) { recordCancelled = true; recordingAbort?.abort(); stopTracks(recordingStream);if(scanning)cancelScan();window.speechSynthesis?.cancel();stopHandsFree();stopCamera(); } if (document.hidden && running && !paused) { pause(); $('monitorStatus').textContent = 'Перерыв · окно скрыто'; } });
-window.addEventListener('beforeunload', () => { stopHandsFree();stopTracks(questionStream);stopTracks(recordingStream);stopAudio(); stopCamera(); scannerAbort?.abort();restoringAbort?.abort();modelAvatar?.dispose();detector?.close(); audioContext?.close(); });
+document.addEventListener('visibilitychange', () => { if (document.hidden) { recordCancelled = true; recordingAbort?.abort(); stopTracks(recordingStream);if(scanning)cancelScan();window.speechSynthesis?.cancel();stopHandsFree();stopCamera(); } if (document.hidden && running && !paused) { pause().catch(()=>{}); $('monitorStatus').textContent = 'Перерыв · окно скрыто'; } });
+window.addEventListener('beforeunload', () => {
+  if(running&&!paused&&studySessionId)fetch('/api/study-session',{method:'POST',keepalive:true,headers:{'X-App-Token':token,'Content-Type':'application/json'},body:JSON.stringify({action:'pause',id:studySessionId})}).catch(()=>{});
+  stopHandsFree();stopTracks(questionStream);stopTracks(recordingStream);stopAudio(); stopCamera(); scannerAbort?.abort();restoringAbort?.abort();modelAvatar?.dispose();detector?.close(); audioContext?.close();
+});
 async function restoreAvatar() {
   const restoringEpoch=scanEpoch,abort=new AbortController();restoringAbort=abort;
   try {
@@ -997,7 +1021,15 @@ for (const [formId, path] of [['loginForm', 'login'], ['registerForm', 'register
 }
 $('logoutBtn').addEventListener('click', async () => {
   $('logoutBtn').disabled = true;
-  try { await authRequest('logout', {}); }
+  try {
+    if(running&&studySessionId){
+      const session=studySessionId;
+      try { await api('study-session',JSON.stringify({action:'stop',id:session})); }
+      catch {}
+      stop('Занятие завершено · камера выключена',false);
+    }
+    await authRequest('logout', {});
+  }
   finally { location.reload(); }
 });
 async function buyPlan(plan, buttonId) {

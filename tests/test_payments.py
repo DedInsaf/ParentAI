@@ -45,6 +45,16 @@ class PlategaTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'небезопасную'):
             PlategaClient('merchant', 'secret', lambda *_args, **_kwargs: Response()).create_subscription(299)
 
+    def test_provider_transaction_limit_is_enforced_before_network_request(self):
+        called = False
+        def opener(*_args, **_kwargs):
+            nonlocal called
+            called = True
+        client = PlategaClient('merchant', 'secret', opener)
+        with self.assertRaisesRegex(ValueError, 'стоимость'):
+            client.create_subscription(10_001)
+        self.assertFalse(called)
+
 
 if __name__ == '__main__':
     unittest.main()

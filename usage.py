@@ -302,7 +302,8 @@ class UsageStore:
                     """INSERT INTO subscriptions(user_id,plan,status,updated_at) VALUES (?,?,'active',?)
                        ON CONFLICT(user_id) DO UPDATE SET plan=excluded.plan,status='active',updated_at=excluded.updated_at""",
                     (row["user_id"], row["plan"], now))
-            elif normalized in {"CANCELED", "CANCELLED", "CHARGEBACKED", "SUBSCRIPTION_CANCELLED"}:
+            elif normalized in {"CANCELED", "CANCELLED", "CHARGEBACKED",
+                                "SUBSCRIPTION_CANCELED", "SUBSCRIPTION_CANCELLED"}:
                 connection.execute(
                     """INSERT INTO subscriptions(user_id,plan,status,updated_at) VALUES (?,?,'cancelled',?)
                        ON CONFLICT(user_id) DO UPDATE SET plan=excluded.plan,status='cancelled',updated_at=excluded.updated_at""",
@@ -323,7 +324,7 @@ class UsageStore:
         return row["plan"] if row and row["status"] == "active" else "free"
 
     def start_study_session(self, user_id, unlimited=False):
-        """Start a timed study session. Empty sessions do not consume a monthly slot."""
+        """Start or restore a timed session. Empty sessions do not consume a slot."""
         self.ensure_subscription(user_id)
         now = int(time.time())
         session_id = uuid.uuid4().hex
@@ -331,6 +332,34 @@ class UsageStore:
             connection.execute("BEGIN IMMEDIATE")
             plan = self._active_plan(connection, user_id)
             minutes = int(self.config.plan(plan)["session_minutes"])
+            limit_seconds = minutes * 60
+            previous = connection.execute(
+                """SELECT id,status,active_started_at,active_seconds,updated_at
+                   FROM study_sessions WHERE user_id=? AND status IN ('active','paused')
+                   ORDER BY updated_at DESC""", (user_id,)
+            ).fetchall()
+            restored = None
+            for row in previous:
+                elapsed = int(row["active_seconds"])
+                if row["status"] == "active" and row["active_started_at"] is not None:
+                    elapsed += max(0, now - int(row["active_started_at"]))
+                if restored is None and (unlimited or elapsed < limit_seconds):
+                    restored = {"id": row["id"], "elapsed_seconds": elapsed}
+                    connection.execute(
+                        """UPDATE study_sessions SET status='active',active_seconds=?,
+                           active_started_at=?,updated_at=? WHERE id=?""",
+                        (elapsed, now, now, row["id"]),
+                    )
+                else:
+                    connection.execute(
+                        """UPDATE study_sessions SET status='complete',active_seconds=?,
+                           active_started_at=NULL,updated_at=? WHERE id=?""",
+                        (elapsed, now, row["id"]),
+                    )
+            if restored:
+                return {"id": restored["id"], "status": "active", "restored": True,
+                        "elapsed_seconds": restored["elapsed_seconds"],
+                        "limit_seconds": None if unlimited else limit_seconds}
             if not unlimited:
                 start, end = self._month_bounds(now)
                 used_sessions = self._totals(connection, user_id, start, end)["sessions"]
@@ -339,19 +368,6 @@ class UsageStore:
                         "Лимит занятий на этот месяц закончился. "
                         "Попросите взрослого открыть раздел «Для родителя»."
                     )
-            previous = connection.execute(
-                """SELECT id,status,active_started_at,active_seconds FROM study_sessions
-                   WHERE user_id=? AND status IN ('active','paused')""", (user_id,)
-            ).fetchall()
-            for row in previous:
-                elapsed = int(row["active_seconds"])
-                if row["status"] == "active" and row["active_started_at"] is not None:
-                    elapsed += max(0, now - int(row["active_started_at"]))
-                connection.execute(
-                    """UPDATE study_sessions SET status='complete',active_seconds=?,
-                       active_started_at=NULL,updated_at=? WHERE id=?""",
-                    (elapsed, now, row["id"]),
-                )
             connection.execute(
                 """DELETE FROM study_sessions WHERE user_id=? AND status='complete'
                    AND updated_at<? AND id NOT IN
@@ -364,8 +380,9 @@ class UsageStore:
                    VALUES (?,?,?,?,0,?,'active')""",
                 (session_id, user_id, now, now, now),
             )
-        return {"id": session_id, "status": "active", "elapsed_seconds": 0,
-                "limit_seconds": None if unlimited else minutes * 60}
+        return {"id": session_id, "status": "active", "restored": False,
+                "elapsed_seconds": 0,
+                "limit_seconds": None if unlimited else limit_seconds}
 
     def control_study_session(self, user_id, session_id, action, unlimited=False):
         if action not in ("pause", "resume", "stop"):

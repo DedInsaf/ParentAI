@@ -34,3 +34,12 @@ test('face detection failure does not switch off a working lesson camera', () =>
   assert.match(script, /Камера включена · проверка лица временно недоступна/);
   assert.match(script, /if\(lessonPresenceEnabled\)\{/);
 });
+
+test('lesson pauses safely on connection loss, tab hiding and page reload', () => {
+  assert.match(script, /finally \{ if \(authenticated\) setTimeout\(pollLoop, 2000\); \}/);
+  assert.match(script, /pause\(\)\.catch\(\(\)=>\{\}\)/);
+  assert.match(script, /keepalive:true/);
+  assert.match(script, /action:'pause',id:studySessionId/);
+  assert.match(script, /pausePending&&running&&paused&&studySessionId/);
+  assert.match(script, /таймер остановлен/);
+});

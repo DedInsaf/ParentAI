@@ -23,6 +23,10 @@ test('plans use parent-friendly sessions and include Plus and Ultra', () => {
   assert.match(html, /Адым Плюс/);
   assert.match(html, /Адым Ультра/);
   assert.match(html, /Перерыв останавливает таймер занятия/);
+  assert.match(html, /резерв SpeechKit/);
+  assert.match(script, /stt_billed_seconds/);
+  assert.match(script, /Смена тарифа — через поддержку/);
+  assert.match(script, /двойного списания/);
   assert.match(script, /remaining\.sessions/);
   assert.match(script, /study-session/);
 });

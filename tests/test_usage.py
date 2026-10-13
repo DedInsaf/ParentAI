@@ -101,6 +101,9 @@ class UsageTests(unittest.TestCase):
         self.assertEqual(self.store.subscription(12)['plan'], 'paid')
         self.store.payment_callback(provider_id, 'SUBSCRIPTION_CANCELLED', 299, 'RUB')
         self.assertEqual(self.store.subscription(12)['plan'], 'free')
+        self.store.payment_callback(provider_id, 'CONFIRMED', 299, 'RUB')
+        self.store.payment_callback(provider_id, 'SUBSCRIPTION_CANCELED', 299, 'RUB')
+        self.assertEqual(self.store.subscription(12)['plan'], 'free')
         with self.assertRaisesRegex(ValueError, 'Сумма'):
             self.store.payment_callback(provider_id, 'CONFIRMED', 300, 'RUB')
 
@@ -171,6 +174,34 @@ class UsageTests(unittest.TestCase):
             self.store.control_study_session(46, study['id'], 'resume')
         stopped = self.store.control_study_session(46, study['id'], 'stop')
         self.assertEqual(stopped['status'], 'complete')
+
+    def test_page_reload_restores_current_session_without_spending_another_slot(self):
+        study = self.store.start_study_session(47)
+        event = self.store.reserve(
+            47, 'llm', 'reload-task', lesson_id='reload-lesson',
+            study_session_id=study['id'], new_lesson=True, estimated_cost=0)
+        self.store.complete(event['id'], cost=0)
+        paused = self.store.control_study_session(47, study['id'], 'pause')
+        restored = self.store.start_study_session(47)
+        self.assertEqual(restored['id'], study['id'])
+        self.assertTrue(restored['restored'])
+        self.assertEqual(restored['status'], 'active')
+        self.assertEqual(self.store.dashboard(47)['usage']['sessions'], 1)
+
+    def test_expired_session_is_completed_and_replaced(self):
+        self.store.set_subscription(48, 'paid')
+        study = self.store.start_study_session(48)
+        with sqlite3.connect(self.store.path) as connection:
+            connection.execute(
+                'UPDATE study_sessions SET active_started_at=? WHERE id=?',
+                (int(time.time()) - 31 * 60, study['id']))
+        replacement = self.store.start_study_session(48)
+        self.assertNotEqual(replacement['id'], study['id'])
+        self.assertFalse(replacement['restored'])
+        with sqlite3.connect(self.store.path) as connection:
+            status = connection.execute(
+                'SELECT status FROM study_sessions WHERE id=?', (study['id'],)).fetchone()[0]
+        self.assertEqual(status, 'complete')
 
     def test_real_plan_session_and_assignment_boundaries(self):
         product = UsageStore(self.temp.name + '/product.sqlite3', BillingConfig.load())

@@ -40,7 +40,7 @@ class PlategaClient:
         if not self.enabled:
             raise ValueError("Оплата ещё не подключена. Добавьте данные магазина Platega.")
         amount = int(amount_rubles)
-        if amount <= 0:
+        if not 0 < amount <= 10_000:
             raise ValueError("Некорректная стоимость подписки.")
         body = json.dumps({
             "paymentMethod": 6,

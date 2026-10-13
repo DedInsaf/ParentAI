@@ -3,6 +3,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from http.cookies import CookieError, SimpleCookie
 from email.utils import formatdate
 import json
+import logging
 import mimetypes
 from pathlib import Path
 import secrets
@@ -21,6 +22,9 @@ from auth import AuthStore, SESSION_LIFETIME
 from usage import LimitExceeded, UsageStore, estimate_tokens
 from payments import PlategaClient
 import os
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 class AppServer(ThreadingHTTPServer):
@@ -309,8 +313,14 @@ class Handler(BaseHTTPRequestHandler):
                     raise ValueError('Неизвестный тариф подписки.')
                 if user.role == 'admin':
                     raise ValueError('У администратора уже есть тестовый доступ без ограничений.')
-                if self.server.usage.subscription(user.id)['plan'] == plan:
+                current_plan = self.server.usage.subscription(user.id)['plan']
+                if current_plan == plan:
                     raise ValueError('Этот тариф уже подключён.')
+                if current_plan in ('paid', 'ultra'):
+                    raise ValueError(
+                        'Сначала отмените действующую подписку через Platega или обратитесь в поддержку. '
+                        'Это защищает от двух одновременных списаний.'
+                    )
                 with self.server.payment_locks[user.id]:
                     pending = self.server.usage.pending_checkout(user.id)
                     if pending:
@@ -414,5 +424,6 @@ class Handler(BaseHTTPRequestHandler):
             self.send(429, {'error': str(exc), 'limit': True})
         except ValueError as exc:
             self.send(400, {'error': str(exc)})
-        except Exception as exc:
-            self.send(500, {'error': str(exc)})
+        except Exception:
+            LOGGER.exception('Необработанная ошибка API %s', path)
+            self.send(500, {'error': 'Внутренняя ошибка приложения. Повторите попытку.'})

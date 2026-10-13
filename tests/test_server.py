@@ -90,6 +90,22 @@ class ServerTests(unittest.TestCase):
         status=json.loads(self.request('/api/status',headers={'X-App-Token':self.s.token})[1])
         self.assertTrue(status['billing']['provider']['enabled'])
 
+    def test_checkout_does_not_create_a_second_recurring_subscription(self):
+        class FakePlatega:
+            called = False
+            def public_status(self): return {'provider':'Platega','enabled':True}
+            def create_subscription(self, _amount, _title):
+                self.called = True
+                raise AssertionError('Platega must not be called')
+        self.s.platega = FakePlatega()
+        self.s.usage.set_subscription(1, 'paid')
+        headers={'Origin':self.s.origin,'X-App-Token':self.s.token,'Content-Type':'application/json'}
+        code, body = self.request(
+            '/api/billing/checkout', json.dumps({'plan':'ultra'}).encode(), headers)
+        self.assertEqual(code, 400)
+        self.assertIn('двух одновременных списаний', json.loads(body)['error'])
+        self.assertFalse(self.s.platega.called)
+
     def test_login_accepts_login_or_email_and_logout_revokes_session(self):
         headers={'Origin':self.s.origin,'X-App-Token':self.s.token,'Content-Type':'application/json'}
         for identifier in ('test-user','TEST@EXAMPLE.COM'):
