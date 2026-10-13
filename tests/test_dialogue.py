@@ -47,6 +47,14 @@ class SpeechTests(unittest.TestCase):
             recognizer = LocalSpeechRecognizer(cache_dir=temp)
             self.assertEqual(recognizer._local_model_path(), snapshot)
 
+    def test_local_whisper_can_warm_before_the_first_question(self):
+        calls = []
+        recognizer = LocalSpeechRecognizer(pipeline_factory=lambda: calls.append('loaded') or (lambda *_a, **_k: {}))
+        recognizer.warm()
+        self.assertEqual(calls, ['loaded'])
+        self.assertFalse(recognizer.loading)
+        self.assertEqual(recognizer.public_status()['message'], 'готов')
+
     def test_pcm_resampling_and_rejections(self):
         pcm = stt_pcm(recording())
         self.assertEqual(len(pcm), 32000)

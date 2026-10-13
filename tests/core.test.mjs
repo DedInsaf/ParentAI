@@ -6,17 +6,20 @@ test('coordinates use matching physical units on a wide camera',()=>{
   assert.ok(Math.abs(p[1]/p[0]+720/1280)<1e-6);
   assert.equal(p[2],-.1);
 });
-test('absence, return debounce, cooldown, break reset',()=>{
+test('absence prompts for the camera, calls again after five minutes, and resets on return',()=>{
   const p=new Presence();
-  assert.equal(p.update(false,1).remind,false);
-  assert.equal(p.update(false,9).remind,true);
-  assert.equal(p.update(false,10).remind,false);
-  assert.equal(p.update(true,11).state,'returning');
-  assert.equal(p.update(false,12).state,'missing');
-  assert.equal(p.update(false,13).state,'missing');
-  assert.equal(p.update(false,21).remind,false);
-  assert.equal(p.update(false,39).remind,true);
-  p.update(true,40); assert.equal(p.update(true,42).state,'present');
+  assert.equal(p.update(false,1).reminder,null);
+  assert.equal(p.update(false,5).state,'missing');
+  assert.equal(p.update(false,6).reminder,'camera');p.acknowledgeReminder('camera',6);
+  assert.equal(p.update(false,65).reminder,null);
+  assert.equal(p.update(false,66).reminder,'camera');p.acknowledgeReminder('camera',66);
+  assert.equal(p.update(false,301).reminder,'away');p.acknowledgeReminder('away',301);
+  assert.equal(p.update(false,302).reminder,null);
+  assert.equal(p.update(true,310).state,'returning');
+  assert.equal(p.update(true,312).state,'present');
+  assert.equal(p.update(false,320).state,'missing');
+  assert.equal(p.update(false,321).state,'missing');
+  assert.equal(p.update(false,325).reminder,'camera');
   p.reset(); assert.equal(p.state,'present');
 });
 test('WAV PCM16 header, length, sample rate and clipping',()=>{

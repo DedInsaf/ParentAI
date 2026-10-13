@@ -30,7 +30,7 @@ LOGGER = logging.getLogger(__name__)
 class AppServer(ThreadingHTTPServer):
     daemon_threads = True
 
-    def __init__(self, runtime, port=0):
+    def __init__(self, runtime, port=0, warm_speech=True):
         self.runtime = runtime
         self.tutor = Tutor.from_environment(ROOT)
         # PRODUCT INVARIANT: speech recognition is local-first by default. If
@@ -50,6 +50,7 @@ class AppServer(ThreadingHTTPServer):
         self.fast_voice=SpeechSynthesizer(os.getenv('YANDEX_TTS_API_KEY') or os.getenv('YANDEX_SPEECHKIT_API_KEY') or os.getenv('YANDEX_API_KEY'))
         self.auth = AuthStore(runtime.data / 'users.sqlite3')
         self.usage = UsageStore(runtime.data / 'usage.sqlite3')
+        self.usage.recover_interrupted_events()
         self.platega = PlategaClient(os.getenv('PLATEGA_MERCHANT_ID'), os.getenv('PLATEGA_SECRET'))
         self.dialogues = Dialogues(runtime,self.tutor,self.fast_voice,self.usage)
         self.speech_lock = threading.RLock()
@@ -59,6 +60,8 @@ class AppServer(ThreadingHTTPServer):
         self.token = secrets.token_urlsafe(32)
         super().__init__(('127.0.0.1', port), Handler)
         self.origin = f'http://127.0.0.1:{self.server_port}'
+        if warm_speech and local_speech.public_status().get('enabled'):
+            threading.Thread(target=local_speech.warm, name='speech-warmup', daemon=True).start()
 
     def server_close(self):
         self.dialogues.close()

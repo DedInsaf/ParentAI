@@ -43,3 +43,18 @@ test('lesson pauses safely on connection loss, tab hiding and page reload', () =
   assert.match(script, /pausePending&&running&&paused&&studySessionId/);
   assert.match(script, /таймер остановлен/);
 });
+
+test('avatar gives a camera reminder and a stronger five-minute call', () => {
+  assert.match(script, /camera:'Вернись, пожалуйста, в кадр/);
+  assert.match(script, /away:'Ты уже пять минут не в кадре/);
+  assert.match(script, /current\.reminder/);
+  assert.match(script, /speakBrowserPrompt/);
+});
+
+test('voice question is visible, accepts ordinary speech and stops after silence', () => {
+  assert.match(script, /Услышал: «\$\{heard\}»/);
+  assert.match(script, /\|\|\/\[а-яёa-z0-9\]\{2\}\//u);
+  assert.match(script, /detectedUtterance=utterance;questionStop=true/);
+  assert.match(html, /слово «помоги» больше не обязательно/);
+  assert.match(html, /сама закончится после короткой паузы/);
+});

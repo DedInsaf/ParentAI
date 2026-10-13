@@ -162,6 +162,8 @@ class RuntimeTests(unittest.TestCase):
         with patch.object(self.r, '_synthesize', side_effect=synth): self.r._generate()
         saved = (Path(self.temp.name)/'manifest.json').read_bytes()
         self.assertEqual(len(self.r.manifest), len(PHRASES))
+        self.assertEqual([item['purpose'] for item in self.r.manifest],
+                         ['lesson', 'lesson', 'camera', 'away'])
         with patch.object(self.r, '_synthesize', side_effect=RuntimeError('test failure')):
             self.r._generate()
         self.assertEqual((Path(self.temp.name)/'manifest.json').read_bytes(), saved)

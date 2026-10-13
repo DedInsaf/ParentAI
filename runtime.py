@@ -15,8 +15,13 @@ from portrait import validate_anchors
 
 ROOT = Path(__file__).resolve().parent
 DATA = ROOT / 'data'
-PHRASES = ['Давай вернёмся к заданию. У тебя получится.', 'Я рядом. Продолжим заниматься?',
-           'Если нужна помощь, позови меня.', 'Сделаем ещё один маленький шаг.']
+PHRASES = [
+    'Давай вернёмся к заданию. У тебя получится.',
+    'Я рядом. Продолжим заниматься?',
+    'Вернись, пожалуйста, в кадр, чтобы я видел, что ты рядом.',
+    'Ты уже давно отошёл. Возвращайся, пожалуйста, продолжим занятие вместе.',
+]
+PHRASE_PURPOSES = ['lesson', 'lesson', 'camera', 'away']
 TTS_MODEL = 'tts_models/multilingual/multi-dataset/xtts_v2'
 BUSY = ('generating', 'cancelling')
 
@@ -250,9 +255,11 @@ class Runtime:
             if self.reference_mode == 'direct':
                 shutil.copyfile(self.data / 'reference.wav', bank / 'phrase-0.wav')
                 texts = ['Напоминание голосом родителя']
+                purposes = ['manual']
             else:
                 self._synthesize(bank)
                 texts = PHRASES
+                purposes = PHRASE_PURPOSES
             manifest = []
             from scipy.io import wavfile
             import numpy as np
@@ -261,7 +268,8 @@ class Runtime:
                 rate, audio = wavfile.read(filename)
                 if len(audio) < rate * .3 or not np.any(audio) or not np.isfinite(audio).all():
                     raise RuntimeError('Получилось пустое аудио. Повторите создание голоса.')
-                manifest.append({'text': phrase, 'file': f'{bank.name}/{filename.name}'})
+                manifest.append({'text': phrase, 'file': f'{bank.name}/{filename.name}',
+                                 'purpose': purposes[i]})
             with self.lock:
                 if self.cancel.is_set() or self.stop.is_set():
                     raise InterruptedError('Создание голоса отменено')

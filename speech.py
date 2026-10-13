@@ -72,16 +72,32 @@ class LocalSpeechRecognizer:
         self.pipeline_factory = pipeline_factory
         self.pipeline = None
         self.lock = threading.RLock()
+        self.loading = False
+        self.load_error = ''
 
     def public_status(self):
         dependencies = (importlib.util.find_spec('torch') is not None and
                         importlib.util.find_spec('transformers') is not None)
         available = bool(self.pipeline_factory or self.pipeline) or (
             dependencies and self._model_is_cached())
+        message = ('прогревается' if self.loading else
+                   (f'ошибка прогрева: {self.load_error}' if self.load_error else
+                    ('готов' if available else
+                     'локальная модель не установлена; доступен резервный SpeechKit')))
         return {'enabled': available, 'provider': 'Локальный Whisper',
                 'model': self.model, 'local': True, 'external_cost': 0,
-                'message': ('готов' if available else
-                            'локальная модель не установлена; доступен резервный SpeechKit')}
+                'message': message}
+
+    def warm(self):
+        """Load the installed model before the child's first question."""
+        self.loading = True
+        try:
+            self._pipeline()
+            self.load_error = ''
+        except ValueError as exc:
+            self.load_error = str(exc)
+        finally:
+            self.loading = False
 
     def _model_is_cached(self):
         if not self.cache_dir:

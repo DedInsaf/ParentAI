@@ -182,6 +182,7 @@ body.in-lesson #readyHint:empty{display:none}
 .lesson-tip button{flex-shrink:0;font-size:12px;padding:8px 10px}
 .lesson-actions{gap:8px;margin-top:14px}
 .lesson-actions button{font-size:13px;padding:10px 14px}
+.lesson-action-hint{margin:7px 2px 0;color:var(--muted);font-size:12px;line-height:1.45}
 .child-camera video{height:150px}
 .child-camera h2{font-size:17px}
 .in-lesson .face-guide,.in-lesson .scan-overlay{display:none}

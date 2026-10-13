@@ -22,6 +22,12 @@ test('sustained speech yields one bounded utterance after the pause; noise is no
   assert.ok(utterance.length>rate*.7 && utterance.length<rate*2);
   assert.equal(send(gate,100,0),undefined);
 });
+test('quiet laptop microphone speech is still detected',()=>{
+  const gate=new SpeechGate(rate);send(gate,30,.001);
+  send(gate,35,.006);
+  const utterance=send(gate,40,0);
+  assert.ok(utterance instanceof Float32Array);
+});
 test('suppression discards a partially recorded question and resumes cleanly',()=>{
   const gate=new SpeechGate(rate);send(gate,25,.12);gate.push(frame(.12),true);
   assert.equal(send(gate,50,0),undefined);
@@ -29,6 +35,7 @@ test('suppression discards a partially recorded question and resumes cleanly',()
 });
 test('question routing distinguishes Russian requests and follow-up answers from unrelated speech',()=>{
   for(const text of ['Как решить это уравнение?','папа помоги','Не понимаю задание','Это правильно?','Помоги?'])assert.equal(isDirectedSpeech(text),true,text);
+  for(const text of ['Реши три плюс пять','два плюс два','Какое слово вставить'])assert.equal(isDirectedSpeech(text),true,text);
   for(const text of ['','Музыка играет тихо','Реклама закончилась'])assert.equal(isDirectedSpeech(text),false,text);
   assert.equal(isDirectedSpeech('получилось пять',true),true);
   assert.equal(isDirectedSpeech('5',true),true);

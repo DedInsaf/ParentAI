@@ -16,6 +16,7 @@ const requestId = () => globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Ma
 let token, currentUser, authenticated = false, appStarted = false;
 let status = {}, stream, detector, avatarTopology, THREE, renderer, scene, camera, mesh, avatarGroup, modelAvatar;
 let audioContext, analyser, audioSource, pcm, playing = false, recording = false, scanning = false;
+let browserUtterance = null, browserSpeechStarted = 0;
 let running = false, paused = false, pausePending = false, lastFrame = -1, lastDetect = 0, lastResult = null, lastSeenFrame = 0;
 let lastMediaTimestamp = -1;
 let avatarDependenciesPromise,dependenciesPromise, detectError = false, connecting = false, playbackId = 0, audioKind = '';
@@ -142,7 +143,7 @@ async function poll() {
     if(!status.xtts_enabled&&$('voiceMode').value==='clone'){$('voiceMode').value='direct';updateVoiceMode();}
     renderParentSummary(status.usage);
     renderSubscription(status.usage, status.billing);
-    if (!tutorBusy && !questionRecording) $('tutorStatus').textContent = status.tutor?.enabled?'Скажи «помоги» или напиши вопрос. Будем пробовать по шагам.':'Помощник ещё не подключён. Попроси родителя настроить Яндекс.';
+    if (!tutorBusy && !questionRecording && !listenerPending) $('tutorStatus').textContent = status.tutor?.enabled?'Задай вопрос голосом или напиши его. Будем пробовать по шагам.':'Помощник ещё не подключён. Попроси родителя настроить Яндекс.';
     if (!recording) $('voiceHint').textContent = status.error || status.progress || (status.phrases.length ? 'Сохранённый голос готов. Можно начать занятие.' : 'Выберите способ записи голоса.');
     if (status.reference && !referenceLoaded && !recording) {
       $('reference').src = '/audio/reference.wav'; $('reference').hidden = false; referenceLoaded = true;
@@ -424,6 +425,7 @@ function installModel(model) {
 function context() { return audioContext ||= new AudioContext(); }
 function stopAudio() {
   playbackId++;activeCues=[];
+  if(browserUtterance){browserUtterance=null;window.speechSynthesis?.cancel();}
   for(const source of audioSources) {try{source.stop();}catch{} source.disconnect();}
   audioSources.clear();audioSource=null;analyser?.disconnect();analyser=null;
   playing=false;audioKind='';audioNext=0;echoUntil=performance.now()+1000;controls();
@@ -431,12 +433,26 @@ function stopAudio() {
 async function playVoice(kind='manual') {
   if(!status.phrases?.length) throw new Error('Сначала создайте голос.');
   stopAudio();const playId=playbackId,ctx=context();await ctx.resume();if(playId!==playbackId)return;
-  const item=status.phrases[Math.floor(Math.random()*status.phrases.length)];
+  const matching=status.phrases.filter(item=>item.purpose===kind),pool=matching.length?matching:status.phrases;
+  const item=pool[Math.floor(Math.random()*pool.length)];
   const res=await fetch('/audio/'+item.file);
   if(!res.ok) throw new Error('Аудиофайл недоступен');
   const buffer=await ctx.decodeAudioData(await res.arrayBuffer());
   if(playId!==playbackId)return;
-  beginAudio(buffer,item.text,kind);
+  return beginAudio(buffer,item.text,kind);
+}
+async function speakBrowserPrompt(text,kind) {
+  if(!window.speechSynthesis)return playVoice(kind);
+  stopAudio();const id=playbackId;
+  return new Promise(resolve=>{
+    const utterance=new SpeechSynthesisUtterance(text);utterance.lang='ru-RU';utterance.rate=.92;
+    const local=window.speechSynthesis.getVoices().find(voice=>voice.lang.startsWith('ru')&&voice.localService);
+    if(local)utterance.voice=local;
+    const finish=()=>{if(browserUtterance===utterance){browserUtterance=null;playing=false;audioKind='';echoUntil=performance.now()+1000;controls();}resolve();};
+    utterance.onend=finish;utterance.onerror=finish;browserUtterance=utterance;browserSpeechStarted=performance.now();
+    playing=true;audioKind=kind;$('phraseText').textContent=text;$('lessonSpeech').textContent=text;controls();
+    try{window.speechSynthesis.speak(utterance);}catch{browserUtterance=null;playing=false;audioKind='';resolve(playVoice(kind));}
+  });
 }
 function beginAudio(buffer,text,kind,cues=[]) {
   const ctx=context(),id=playbackId;
@@ -576,11 +592,19 @@ async function reconnectLessonCamera() {
     lessonCameraEnabled=false;lessonPresenceEnabled=false;stopCamera();$('monitorStatus').textContent='Камера не подключена';throw error;
   } finally {controls();}
 }
+const presencePrompts={
+  camera:'Вернись, пожалуйста, в кадр, чтобы я видел, что ты рядом.',
+  away:'Ты уже пять минут не в кадре. Возвращайся, пожалуйста, продолжим занятие вместе.',
+};
 let reminderPending = false;
-async function reminder() {
+async function reminder(kind) {
   if (reminderPending) return;
   reminderPending = true;
-  try { await playVoice('reminder'); if (!running || paused || presence.state !== 'absent') stopAudio(); }
+  try {
+    const hasRecorded=status.phrases?.some(item=>item.purpose===kind);
+    if(hasRecorded)await playVoice(kind);else await speakBrowserPrompt(presencePrompts[kind],kind);
+    if (!running || paused || presence.state !== 'absent') stopAudio();
+  }
   catch (e) { fail(e); }
   finally { reminderPending = false; }
 }
@@ -594,9 +618,11 @@ function tick(now) {
         if (now - lastSeenFrame > 3000) throw new Error('Камера перестала передавать изображение. Нажмите «Продолжить», чтобы подключить её снова.');
         const found = result?.faceLandmarks?.length > 0;
         const current = presence.update(found, now / 1000);
-        $('monitorStatus').textContent = {present:'Лицо в кадре · занятие идёт',missing:'Лицо вне кадра · ждём возвращения',absent:'Пора вернуться к занятию',returning:'С возвращением'}[current.state];
-        if (found && audioKind === 'reminder') stopAudio();
-        if (current.remind && !tutorBusy && !questionRecording && !listenerPending && now>childSpeakingUntil && !playing) reminder();
+        $('monitorStatus').textContent = {present:'Лицо в кадре · занятие идёт',missing:'Лицо пропало · готовлю напоминание',absent:'Ребёнок не в кадре · зову вернуться',returning:'С возвращением'}[current.state];
+        if (found && (audioKind === 'camera' || audioKind === 'away')) stopAudio();
+        if (current.reminder && !tutorBusy && !questionRecording && !listenerPending && now>childSpeakingUntil && !playing) {
+          presence.acknowledgeReminder(current.reminder,now/1000);reminder(current.reminder);
+        }
       }
     } catch (e) { if (!detectError) { detectError = true; pause(); fail(e); } }
   }
@@ -604,6 +630,7 @@ function tick(now) {
     renderTime = now;
     let opening=0;
     if(playing&&analyser){analyser.getFloatTimeDomainData(pcm);opening=speechOpening(pcm);}
+    else if(playing&&browserUtterance)opening=.22+.18*Math.abs(Math.sin((now-browserSpeechStarted)*.018));
     const elapsed=audioContext?audioContext.currentTime-audioStarted:0;
     const cue=playing?activeCues.findLast(c=>c.time<=elapsed):null;
     const pose=avatarMotion.update(now/1000,{active:(running&&!paused)||audioKind==='preview',speaking:playing,listening:now<childSpeakingUntil,engaged:listenerPending||questionRecording||tutorBusy,preview:running?0:previewYaw,reduced:matchMedia('(prefers-reduced-motion: reduce)').matches});
@@ -793,8 +820,13 @@ async function recognizeHandsFree(wav,listenId){
     const result=await api('speech',wav,true,50000,abort.signal);
     if(result.limit_warning)$('tutorStatus').textContent=result.limit_warning;
     if(listenId!==listenEpoch||epoch!==helpEpoch||!running||paused)return;
-    if(isDirectedSpeech(result.text,performance.now()<followupUntil))await answerQuestion(result.text);
-    else setListenerState('listening','Скажи «помоги» и задай вопрос.');
+    const heard=String(result.text||'').trim();
+    $('tutorStatus').textContent=`Услышал: «${heard}»`;
+    // During a lesson the microphone is explicitly enabled by the parent and
+    // camera presence is confirmed. Do not silently discard a clear phrase
+    // merely because Whisper omitted a question mark or wake word.
+    if(isDirectedSpeech(heard,performance.now()<followupUntil)||/[а-яёa-z0-9]{2}/iu.test(heard))await answerQuestion(heard);
+    else setListenerState('listening','Не разобрал вопрос. Скажи его ещё раз.');
   }catch(e){
     if(listenId!==listenEpoch||epoch!==helpEpoch)return;
     const failure=classifySpeechRecognitionError(e);
@@ -815,8 +847,13 @@ async function voiceQuestion() {
     questionStream=mic;setListenerState('speech','Говори. Когда закончишь, нажми «Закончить вопрос».');
     await ctx.audioWorklet.addModule('/recorder.js');
     source=ctx.createMediaStreamSource(mic); node=new AudioWorkletNode(ctx,'recorder');
-    const chunks=[]; let count=0;
-    node.port.onmessage=({data})=>{chunks.push(data);count+=data.length;const rms=Math.sqrt(data.reduce((v,x)=>v+x*x,0)/data.length);if(rms>.008)childSpeakingUntil=performance.now()+1500;};
+    const chunks=[]; let count=0,detectedUtterance=null;const gate=new SpeechGate(ctx.sampleRate);
+    node.port.onmessage=({data})=>{
+      chunks.push(data);count+=data.length;const rms=Math.sqrt(data.reduce((v,x)=>v+x*x,0)/data.length);
+      if(rms>.0045)childSpeakingUntil=performance.now()+1500;
+      const utterance=gate.push(data);
+      if(utterance&&!detectedUtterance){detectedUtterance=utterance;questionStop=true;}
+    };
     source.connect(node);node.connect(ctx.destination);
     const began=performance.now();
     while(!questionStop && !questionCancel && count<ctx.sampleRate*25) {
@@ -824,13 +861,14 @@ async function voiceQuestion() {
       if(performance.now()-began>33000 || mic.getAudioTracks()[0].readyState!=='live') throw new Error('Микрофон перестал передавать звук.');
       await sleep(100);
     }
-    if(questionCancel) return;
-    const samples=new Float32Array(count); let offset=0;
-    for(const chunk of chunks) {samples.set(chunk,offset);offset+=chunk.length;}
-    wav=encodeWav(samples.slice(0,ctx.sampleRate*25),ctx.sampleRate);
+    if(!questionCancel){
+      const samples=detectedUtterance||new Float32Array(count); let offset=0;
+      if(!detectedUtterance)for(const chunk of chunks) {samples.set(chunk,offset);offset+=chunk.length;}
+      wav=encodeWav(samples.slice(0,ctx.sampleRate*25),ctx.sampleRate);
+    }
   } catch(e) {if(!questionCancel) fail(mediaError(e));}
-  finally {source?.disconnect();node?.disconnect();stopTracks(mic);await ctx?.close();questionStream=null;questionRecording=false;controls();if(running&&!paused)startHandsFree().catch(fail);}
-  if(!wav || questionCancel) return;
+  finally {source?.disconnect();node?.disconnect();stopTracks(mic);await ctx?.close();questionStream=null;questionRecording=false;controls();}
+  if(!wav || questionCancel){if(running&&!paused)startHandsFree().catch(fail);return;}
   const epoch=++helpEpoch; tutorBusy=true;controls();
   try {
     $('tutorStatus').textContent='Распознаю твой вопрос…';
@@ -840,6 +878,7 @@ async function voiceQuestion() {
     tutorBusy=false;
     await answerQuestion(result.text);
   } catch(e) {if(epoch===helpEpoch) {tutorBusy=false;controls();fail(e);}}
+  finally {if(running&&!paused)startHandsFree().catch(fail);}
 }
 function action(id, fn) { $(id).addEventListener('click', async () => {
   if (pendingActions.has(id)) return;

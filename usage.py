@@ -222,6 +222,15 @@ class UsageStore:
                 (user_id, now),
             )
 
+    def recover_interrupted_events(self):
+        """Release reservations left pending when the previous app process stopped."""
+        now = int(time.time())
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """UPDATE usage_events SET state='failed', cost_microrubles=0, completed_at=?
+                   WHERE state='pending'""", (now,))
+        return cursor.rowcount
+
     def set_subscription(self, user_id, plan, status="active"):
         if plan not in ("free", "paid", "ultra") or status not in ("active", "paused", "cancelled"):
             raise ValueError("Некорректный тариф или статус подписки.")

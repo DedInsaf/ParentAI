@@ -88,18 +88,37 @@ export function portraitQuality(lm,width,height){
 
 export class Presence {
   constructor() { this.reset(); }
-  reset() { this.state = 'present'; this.since = 0; this.lastReminder = -Infinity; }
+  reset() {
+    this.state = 'present';
+    this.since = 0;
+    this.lastReminder = -Infinity;
+    this.longReminderSent = false;
+  }
+  acknowledgeReminder(kind, now) {
+    this.lastReminder = now;
+    if (kind === 'away') this.longReminderSent = true;
+  }
   update(present, now) {
-    let remind = false;
+    let reminder = null;
     if (present) {
       if (this.state !== 'present' && this.state !== 'returning') { this.state = 'returning'; this.since = now; }
       if (this.state === 'returning' && now - this.since >= 2) this.state = 'present';
     } else {
-      if (this.state === 'present' || this.state === 'returning') { this.state = 'missing'; this.since = now; }
-      if (this.state === 'missing' && now - this.since >= 8) this.state = 'absent';
-      if (this.state === 'absent' && now - this.lastReminder >= 30) { remind = true; this.lastReminder = now; }
+      if (this.state === 'present' || this.state === 'returning') {
+        this.state = 'missing'; this.since = now; this.lastReminder = -Infinity; this.longReminderSent = false;
+      }
+      const absentSeconds = now - this.since;
+      if (this.state === 'missing' && absentSeconds >= 5) this.state = 'absent';
+      if (this.state === 'absent') {
+        if (absentSeconds >= 5 * 60 && !this.longReminderSent) {
+          reminder = 'away';
+        } else if (now - this.lastReminder >= 60) {
+          reminder = 'camera';
+        }
+      }
     }
-    return {state: this.state, remind};
+    return {state: this.state, reminder,
+            absentSeconds: this.state === 'missing' || this.state === 'absent' ? now - this.since : 0};
   }
 }
 

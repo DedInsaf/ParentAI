@@ -128,8 +128,8 @@
   </section>
   <section class="card ready-setup" data-step-panel="ready" hidden>
     <span class="eyebrow">МОЖНО НАЧИНАТЬ</span><h2>Устроимся поудобнее</h2><p>Поставьте рядом тетрадь и задание. Ребёнок садится перед камерой — и можно заниматься вместе с аватаром.</p>
-    <div class="ready-features"><div><span aria-hidden="true">☀</span><p><strong>Спрашивай как обычно</strong>Скажи «помоги» и задай вопрос. Сначала аватар даст подсказку.</p></div><div><span aria-hidden="true">♡</span><p><strong>Можно сделать перерыв</strong>Кнопка перерыва выключает и камеру, и микрофон.</p></div></div>
-    <label class="toggle-row ready-mic"><input id="readyHandsFree" type="checkbox" checked><span>Включить микрофон при начале занятия<small>Можно говорить без кнопки. В браузере нужно разрешить доступ.</small></span></label>
+    <div class="ready-features"><div><span aria-hidden="true">☀</span><p><strong>Спрашивай как обычно</strong>Просто произнеси вопрос. Сначала аватар даст подсказку.</p></div><div><span aria-hidden="true">♡</span><p><strong>Можно сделать перерыв</strong>Кнопка перерыва выключает и камеру, и микрофон.</p></div></div>
+    <label class="toggle-row ready-mic"><input id="readyHandsFree" type="checkbox" checked><span>Включить микрофон при начале занятия<small>Можно сразу задавать вопрос — ключевое слово не требуется. В браузере нужно разрешить доступ.</small></span></label>
     <label class="toggle-row ready-camera"><input id="readyCamera" type="checkbox" checked><span>Включить камеру во время занятия<small>Включена по умолчанию на любом тарифе. Видео обрабатывается только на этом устройстве и не сохраняется.</small></span></label>
     <div id="readyCameraPreview" class="ready-camera-preview" hidden><div class="section-title"><strong>Проверка камеры</strong><button id="closeReadyCameraBtn" type="button" class="quiet">Выключить</button></div><div id="readyCameraSlot"></div><p id="readyCameraStatus" class="helper" role="status">Подключаем камеру…</p></div>
     <p id="readyMicHint" class="helper">Голосовые вопросы сначала распознаются на этом устройстве. Если локальная модель не справится и настроен SpeechKit, запись вопроса будет отправлена ему как резерв. Камера и образец голоса родителя остаются здесь.</p>
@@ -147,7 +147,7 @@
       <p class="muted">Сохраняются только счётчики и итог занятия — без полного разговора, фото и аудиозаписей.</p>
     </section>
     <p class="photo-next"><strong>Следующий сценарий: фото задания.</strong> Интерфейс и серверный контракт будут добавлены после выбора OCR-провайдера и отдельного согласования его стоимости.</p>
-    <details class="device-settings"><summary>Что важно знать родителю</summary><p>Камера проверяет, есть ли лицо в кадре. Она не определяет, решает ли ребёнок задание. Читать и смотреть в тетрадь можно. Если ребёнок ушёл на 8 секунд, прозвучит напоминание.</p><p id="assetsStatus">Камера: подключение…</p><p id="ttsStatus">Голос: подключение…</p><p class="muted">Новые ответы голосом родителя создаются на компьютере; первый ответ может потребовать прогрева модели.</p></details>
+    <details class="device-settings"><summary>Что важно знать родителю</summary><p>Камера проверяет, есть ли лицо в кадре. Она не определяет, решает ли ребёнок задание. Читать и смотреть в тетрадь можно. Через 5 секунд без лица аватар попросит вернуться в кадр, а после 5 минут отсутствия позовёт ребёнка продолжить занятие.</p><p id="assetsStatus">Камера: подключение…</p><p id="ttsStatus">Голос: подключение…</p><p class="muted">Новые ответы голосом родителя создаются на компьютере; первый ответ может потребовать прогрева модели.</p></details>
   </section>
 </main>
 <main id="lessonPage" hidden>
@@ -158,9 +158,10 @@
       <div class="mic-copy"><strong id="micTitle">Микрофон выключен</strong><p id="listenerStatus" role="status">Для вопроса можно написать в поле справа.</p><div class="mic-level" aria-hidden="true"><span id="lessonLevel"></span></div></div>
       <label class="mic-switch"><input id="handsFree" type="checkbox" checked><span>Без кнопки</span></label>
     </div>
-    <div id="micIntro" class="tip lesson-tip" hidden><p><strong>Можно просто говорить.</strong> Скажи «помоги» и задай вопрос. Когда аватар отвечает, дождись конца фразы. Зелёный микрофон означает, что он слушает.</p><button id="dismissMicIntroBtn" type="button" class="quiet">Понятно</button></div>
-    <div id="lessonAvatarSlot"></div><p id="lessonSpeech" class="speech-bubble" aria-live="polite">Я рядом. Скажи «помоги» и расскажи, что не получается.</p>
+    <div id="micIntro" class="tip lesson-tip" hidden><p><strong>Можно просто говорить.</strong> Задай вопрос обычной фразой — слово «помоги» больше не обязательно. Когда аватар отвечает, дождись конца фразы. Зелёный микрофон означает, что он слушает.</p><button id="dismissMicIntroBtn" type="button" class="quiet">Понятно</button></div>
+    <div id="lessonAvatarSlot"></div><p id="lessonSpeech" class="speech-bubble" aria-live="polite">Я рядом. Просто расскажи голосом, что не получается.</p>
     <div class="buttons lesson-actions"><button id="voiceQuestionBtn" class="secondary">Записать вопрос</button><button id="stopSpeechBtn" class="secondary">Остановить ответ</button><button id="lessonVoiceBtn" class="quiet">Послушать приветствие</button></div>
+    <p class="lesson-action-hint">Запись вопроса сама закончится после короткой паузы. Можно также нажать «Закончить вопрос» вручную.</p>
   </section>
   <aside class="lesson-side">
     <section class="card tutor"><div class="section-title"><h2>Что не получается?</h2><span class="hint-chip">Подсказка за подсказкой</span></div><p id="tutorStatus" role="status">Можно спросить голосом или написать здесь.</p>

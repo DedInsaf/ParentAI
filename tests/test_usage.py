@@ -78,6 +78,16 @@ class UsageTests(unittest.TestCase):
             columns = {row[1] for row in connection.execute('PRAGMA table_info(usage_events)')}
         self.assertFalse({'prompt', 'transcript', 'audio', 'photo'} & columns)
 
+    def test_restart_releases_interrupted_usage_reservations(self):
+        event = self.store.reserve(4, 'stt', 'interrupted-speech', duration_ms=3000,
+                                   billed_units=15, estimated_cost=self.store.config.stt_cost(15))
+        self.assertEqual(self.store.dashboard(4)['usage']['stt_billed_seconds'], 15)
+        self.assertEqual(self.store.recover_interrupted_events(), 1)
+        self.assertEqual(self.store.dashboard(4)['usage']['stt_billed_seconds'], 0)
+        with sqlite3.connect(self.store.path) as connection:
+            state = connection.execute('SELECT state FROM usage_events WHERE id=?', (event['id'],)).fetchone()[0]
+        self.assertEqual(state, 'failed')
+
     def test_admin_bypasses_limits_but_cost_is_still_recorded(self):
         for index in range(4):
             event = self.store.reserve(

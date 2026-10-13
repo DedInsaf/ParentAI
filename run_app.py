@@ -17,7 +17,7 @@ def main():
     load_local_env(ROOT / 'parentai.env')
     runtime = Runtime()
     try:
-        server = AppServer(runtime, args.port)
+        server = AppServer(runtime, args.port, warm_speech=not args.no_models)
     except OSError as exc:
         raise SystemExit(f'Не удалось открыть порт {args.port}: {exc}. Используйте --port 0.')
     url = server.origin + '/'
