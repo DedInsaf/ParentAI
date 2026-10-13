@@ -28,9 +28,14 @@ test('public landing shows exact monthly plan limits', () => {
 test('purchase path is clickable but cannot charge before backend launch', () => {
   const html = read('index.html');
   const checkout = read('checkout.html');
-  assert.match(html, /href="\/checkout\.html\?plan=plus"/);
-  assert.match(html, /href="\/checkout\.html\?plan=ultra"/);
+  const ultra = read('checkout-ultra.html');
+  assert.match(html, /href="\/checkout\.html"/);
+  assert.match(html, /href="\/checkout-ultra\.html"/);
+  assert.match(checkout, /Адым Плюс[\s\S]*490 ₽/);
+  assert.match(ultra, /Адым Ультра[\s\S]*990 ₽/);
+  assert.doesNotMatch(ultra, /490 ₽/);
   assert.match(checkout, /data-payment-placeholder/);
+  assert.match(ultra, /data-payment-placeholder/);
   assert.match(checkout, /Оплата временно недоступна/);
   assert.match(checkout, /деньги не списывались/i);
   assert.doesNotMatch(html, /PLATEGA_|merchant|secret/i);
@@ -38,7 +43,7 @@ test('purchase path is clickable but cannot charge before backend launch', () =>
 });
 
 test('public site includes privacy, terms and deployment essentials', () => {
-  for (const name of ['privacy.html', 'terms.html', 'support.html', 'checkout.html', '404.html', 'robots.txt', 'sitemap.xml', '.htaccess']) {
+  for (const name of ['privacy.html', 'terms.html', 'support.html', 'checkout.html', 'checkout-ultra.html', '404.html', 'robots.txt', 'sitemap.xml', '.htaccess']) {
     assert.ok(fs.existsSync(path.join(root, name)), `${name} is missing`);
   }
   assert.match(read('privacy.html'), /support@adym\.ru/i);
