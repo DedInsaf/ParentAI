@@ -16,3 +16,8 @@ test('old public brand is absent from the current interface', () => {
   assert.doesNotMatch(html, /ParentAI|ИИ-Родитель/);
   assert.doesNotMatch(script, /ParentAI|ИИ-Родитель/);
 });
+
+test('a completed task closes the old hint dialogue', () => {
+  assert.match(script, /if\(result\.finished\)\{dialogId=null;followupUntil=0;\}/);
+  assert.match(script, /Задание завершено · можно переходить к следующему/);
+});

@@ -9,7 +9,7 @@ import urllib.error
 import wave
 import numpy as np
 from scipy.io import wavfile
-from dialogue import DEFAULT_REPLY_VOICE,Dialogues
+from dialogue import DEFAULT_REPLY_VOICE,Dialogues,_answers_match
 from runtime import Runtime
 from speech import LocalSpeechRecognizer, SpeechRecognizer, SpeechSynthesizer, stt_pcm
 from lipsync import timeline, viseme
@@ -180,11 +180,20 @@ class DialogueTests(unittest.TestCase):
             try:
                 first=manager.start('2x+3=11','средняя школа');manager.jobs[first['id']]['thread'].join(1)
                 self.assertIn('Вычти 3',manager.snapshot(first['id'])['answer'])
-                second=manager.start('4','средняя школа',first['session']);manager.jobs[second['id']]['thread'].join(1)
+                second=manager.start('У меня получилось: икс равен четырем','средняя школа',first['session']);manager.jobs[second['id']]['thread'].join(1)
                 self.assertIn('Верно',manager.snapshot(second['id'])['answer'])
+                self.assertTrue(manager.snapshot(second['id'])['finished'])
                 self.assertEqual(tutor.calls,1)
                 self.assertNotIn('x=4',manager.snapshot(first['id'])['answer'])
             finally:manager.close()
+
+    def test_spoken_answer_variants_are_safe_and_equivalent(self):
+        self.assertTrue(_answers_match('Ответ будет четыре', ['4']))
+        self.assertTrue(_answers_match('У меня вышло 4 сантиметра', ['4 см']))
+        self.assertTrue(_answers_match('Ответ одна вторая', ['1/2', '0,5']))
+        self.assertFalse(_answers_match('Ответ не 4', ['4']))
+        self.assertFalse(_answers_match('Не 4, а 5', ['4']))
+        self.assertFalse(_answers_match('Ответ 4 килограмма', ['4 см']))
 
     def test_server_controls_attempts_and_keeps_text_without_clone(self):
         class FakeTutor:

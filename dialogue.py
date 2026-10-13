@@ -1,5 +1,7 @@
 """Private lesson plans, local hint progression and cancellable voice replies."""
 from collections import defaultdict, deque
+from decimal import Decimal, InvalidOperation
+from fractions import Fraction
 import re
 import shutil
 import tempfile
@@ -23,8 +25,118 @@ DEFAULT_REPLY_VOICE = "parent"
 
 
 def _normalized_answer(value):
-    value = value.casefold().replace("ё", "е")
+    value = value.casefold().replace("ё", "е").replace("−", "-")
     return re.sub(r"[^0-9a-zа-я+\-=/.,]", "", value).replace(",", ".")
+
+
+_NUMBER_WORDS = {
+    'ноль': 0, 'ноля': 0, 'один': 1, 'одна': 1, 'одно': 1, 'одну': 1,
+    'два': 2, 'две': 2, 'три': 3, 'четыре': 4, 'четырем': 4, 'пять': 5,
+    'шесть': 6, 'семь': 7, 'восемь': 8, 'девять': 9, 'десять': 10,
+    'одиннадцать': 11, 'двенадцать': 12, 'тринадцать': 13, 'четырнадцать': 14,
+    'пятнадцать': 15, 'шестнадцать': 16, 'семнадцать': 17, 'восемнадцать': 18,
+    'девятнадцать': 19, 'двадцать': 20, 'тридцать': 30, 'сорок': 40,
+    'пятьдесят': 50, 'шестьдесят': 60, 'семьдесят': 70, 'восемьдесят': 80,
+    'девяносто': 90, 'сто': 100, 'двести': 200, 'триста': 300, 'четыреста': 400,
+    'пятьсот': 500, 'шестьсот': 600, 'семьсот': 700, 'восемьсот': 800, 'девятьсот': 900,
+}
+_DENOMINATORS = {
+    'вторая': 2, 'вторых': 2, 'третья': 3, 'третьих': 3, 'четвертая': 4, 'четвертых': 4,
+    'пятая': 5, 'пятых': 5, 'десятая': 10, 'десятых': 10, 'сотая': 100, 'сотых': 100,
+    'тысячная': 1000, 'тысячных': 1000,
+}
+_UNIT_ALIASES = {
+    r'\bсантиметр(?:а|ов|ы)?\b': 'см', r'\bмиллиметр(?:а|ов|ы)?\b': 'мм',
+    r'\bкилометр(?:а|ов|ы)?\b': 'км', r'\bкилограмм(?:а|ов|ы)?\b': 'кг',
+    r'\bграмм(?:а|ов|ы)?\b': 'г', r'\bлитр(?:а|ов|ы)?\b': 'л',
+    r'\bсекунд(?:а|ы|у|ам|ами)?\b': 'с', r'\bминут(?:а|ы|у|ам|ами)?\b': 'мин',
+    r'\bпроцент(?:а|ов|ы)?\b': '%',
+}
+
+
+def _integer_words(words):
+    if not words or any(word not in _NUMBER_WORDS for word in words):
+        return None
+    return sum(_NUMBER_WORDS[word] for word in words)
+
+
+def _spoken_number(value):
+    """Convert a short Russian spoken number to an exact fraction."""
+    words = re.findall(r'[a-zа-я]+', value.casefold().replace('ё', 'е'))
+    if not words:
+        return None
+    sign = -1 if words[0] == 'минус' else 1
+    if sign < 0:
+        words = words[1:]
+    whole_markers = {'целая', 'целых', 'целое', 'целые'}
+    marker = next((i for i, word in enumerate(words) if word in whole_markers), None)
+    if marker is not None and words[-1] in _DENOMINATORS:
+        whole = _integer_words(words[:marker])
+        numerator = _integer_words(words[marker + 1:-1])
+        if whole is not None and numerator is not None:
+            return sign * (Fraction(whole) + Fraction(numerator, _DENOMINATORS[words[-1]]))
+    if len(words) > 1 and words[-1] in _DENOMINATORS:
+        numerator = _integer_words(words[:-1])
+        if numerator is not None:
+            return sign * Fraction(numerator, _DENOMINATORS[words[-1]])
+    integer = _integer_words(words)
+    return sign * Fraction(integer) if integer is not None else None
+
+
+def _numeric_answer(value):
+    compact = re.sub(r'\s+', '', value).replace(',', '.').replace('−', '-')
+    try:
+        if re.fullmatch(r'[+-]?\d+(?:\.\d+)?', compact):
+            return Fraction(Decimal(compact))
+        match = re.fullmatch(r'([+-]?\d+)\/([+-]?\d+)', compact)
+        if match and int(match.group(2)):
+            return Fraction(int(match.group(1)), int(match.group(2)))
+    except (InvalidOperation, ValueError, ZeroDivisionError):
+        return None
+    return _spoken_number(value)
+
+
+def _answer_variants(value):
+    """Return conservative equivalents for typed and speech-recognized answers."""
+    text = value.casefold().replace('ё', 'е').replace('−', '-').strip()
+    text = re.sub(r'\bикс\b', 'x', text)
+    for pattern, replacement in _UNIT_ALIASES.items():
+        text = re.sub(pattern, replacement, text)
+    candidates, pending = set(), [text]
+    prefix = re.compile(
+        r'^(?:(?:я\s+думаю|мне\s+кажется)\s*,?\s*(?:что\s+)?|'
+        r'(?:у\s+меня\s+)?(?:ответ|получил(?:ось|ся|а)?|получается|вышло|выходит|итог|будет|это)'
+        r'\s*(?:[:=—-]\s*)?)', re.I)
+    marker = re.compile(r'\b(?:ответ|получил(?:ось|ся|а)?|получается|вышло|итог|равно|равна|равен)\b\s*(?:[:=—-]\s*)?(.+)$', re.I)
+    while pending:
+        candidate = pending.pop().strip(' \t\r\n.!?;:')
+        if not candidate or candidate in candidates:
+            continue
+        candidates.add(candidate)
+        stripped = prefix.sub('', candidate, count=1).strip()
+        if stripped and stripped != candidate:
+            pending.append(stripped)
+        found = marker.search(candidate)
+        if found:
+            pending.append(found.group(1))
+        if '=' in candidate:
+            pending.append(candidate.rsplit('=', 1)[1])
+    variants = {_normalized_answer(candidate) for candidate in candidates}
+    units = {'см', 'мм', 'км', 'кг', 'г', 'л', 'с', 'мин', '%'}
+    unit_pattern = '|'.join(map(re.escape, sorted(units, key=len, reverse=True)))
+    for candidate in candidates:
+        unit_match = re.fullmatch(r'(.+?)\s*(' + unit_pattern + r')', candidate)
+        number_text = unit_match.group(1) if unit_match else candidate
+        number = _numeric_answer(number_text)
+        if number is not None:
+            unit = ':' + unit_match.group(2) if unit_match else ''
+            variants.add(f'#number:{number.numerator}/{number.denominator}{unit}')
+    return {item for item in variants if item}
+
+
+def _answers_match(value, acceptable_answers):
+    offered = _answer_variants(value)
+    return any(offered.intersection(_answer_variants(answer)) for answer in acceptable_answers if answer)
 
 
 def voice_excerpt(text, limit=240):
@@ -117,7 +229,7 @@ class Dialogues:
             key = uuid.uuid4().hex
             job = dict(id=key, session=session, state='thinking', created=now, user_id=user_id,
                        request_id=request_id, cancel=threading.Event(), voice=voice, answer='', warning='',
-                       limit_warning='', cues=[], chunks=[], unlimited=bool(unlimited),
+                       limit_warning='', cues=[], chunks=[], unlimited=bool(unlimited), finished=False,
                        study_session=study_session)
             self.jobs[key] = job
             self.requests[(user_id, request_id)] = key
@@ -137,7 +249,7 @@ class Dialogues:
         with self.lock:
             job = self._owned(key, user_id)
             return {k: job[k] for k in ('id', 'session', 'state', 'answer', 'warning',
-                                         'limit_warning', 'cues', 'chunks')}
+                                         'limit_warning', 'cues', 'chunks', 'finished')}
 
     def cancel(self, key, user_id=None):
         with self.lock:
@@ -185,13 +297,12 @@ class Dialogues:
 
     def _from_plan(self, session, question):
         plan, attempt = session['plan'], session['attempt']
-        normalized = _normalized_answer(question)
-        accepted = {_normalized_answer(item) for item in plan.get('acceptable_answers', []) if item}
+        accepted = plan.get('acceptable_answers', [])
         if attempt and any(word in question.casefold() for word in REPEAT_WORDS):
             index = min(attempt - 1, 2)
             return self._hint(plan, index), False, False, False
-        if attempt and accepted and normalized in accepted:
-            return 'Верно! Ты сам нашёл правильный ответ. Объясни теперь, какой шаг помог тебе больше всего?', True, True, False
+        if attempt and accepted and _answers_match(question, accepted):
+            return 'Верно! Ответ правильный. Отличная работа — можешь переходить к следующему заданию.', True, True, False
         if attempt >= 3:
             return plan['final_explanation'] or plan['solution'], True, False, True
         index = min(attempt, 2)
@@ -241,6 +352,7 @@ class Dialogues:
         session['history'] = (session['history'] + [
             {'role': 'user', 'text': question}, {'role': 'assistant', 'text': answer}])[-6:]
         session['updated'] = time.monotonic()
+        job['finished'] = finished
         return answer[:1200]
 
     def _synthesize_yandex(self, job, answer, bank):

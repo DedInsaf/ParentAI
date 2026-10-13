@@ -758,8 +758,9 @@ async function answerQuestion(question) {
       if(result.state==='done'){
         if(!received&&result.cues?.length)await getAudio(started.id,null,result.cues,result.answer);
         await Promise.all(completions);if(epoch!==helpEpoch)return;
-        followupUntil=performance.now()+60000;
-        $('tutorStatus').textContent=result.warning||result.limit_warning||'Твоя очередь — попробуй следующий шаг.';break;
+        if(result.finished){dialogId=null;followupUntil=0;}
+        else followupUntil=performance.now()+60000;
+        $('tutorStatus').textContent=result.warning||result.limit_warning||(result.finished?'Задание завершено · можно переходить к следующему':'Твоя очередь — попробуй следующий шаг.');break;
       }
       if(result.state==='error')throw new Error(result.warning);
       if(result.state==='cancelled')break;
