@@ -14,10 +14,9 @@ import unicodedata
 
 
 PASSWORD_ITERATIONS = 600_000
-# A remembered login is renewed whenever the application starts. Ten years is
-# effectively "until logout" for this local application, while still leaving
-# every session with a finite expiry in SQLite.
-SESSION_LIFETIME = 10 * 365 * 24 * 60 * 60
+# Remember a device, but do not leave a stolen session valid for years.
+SESSION_LIFETIME = 30 * 24 * 60 * 60
+TERMS_VERSION = "2026-10-15"
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
@@ -92,7 +91,10 @@ class AuthStore:
                     password_hash BLOB NOT NULL,
                     password_iterations INTEGER NOT NULL,
                     created_at INTEGER NOT NULL,
-                    role TEXT NOT NULL DEFAULT 'parent'
+                    role TEXT NOT NULL DEFAULT 'parent',
+                    terms_accepted_at INTEGER,
+                    terms_version TEXT,
+                    parent_confirmed INTEGER NOT NULL DEFAULT 0
                 );
                 CREATE TABLE IF NOT EXISTS sessions (
                     token_hash BLOB PRIMARY KEY,
@@ -107,8 +109,15 @@ class AuthStore:
             columns = {row[1] for row in connection.execute("PRAGMA table_info(users)")}
             if "role" not in columns:
                 connection.execute("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'parent'")
+            if "terms_accepted_at" not in columns:
+                connection.execute("ALTER TABLE users ADD COLUMN terms_accepted_at INTEGER")
+            if "terms_version" not in columns:
+                connection.execute("ALTER TABLE users ADD COLUMN terms_version TEXT")
+            if "parent_confirmed" not in columns:
+                connection.execute("ALTER TABLE users ADD COLUMN parent_confirmed INTEGER NOT NULL DEFAULT 0")
 
-    def register(self, login, email, password, password_confirmation, role="parent") -> User:
+    def register(self, login, email, password, password_confirmation, role="parent",
+                 legal_accepted=True, parent_confirmed=True) -> User:
         if role not in ("parent", "admin"):
             raise ValueError("Неизвестная роль пользователя.")
         display_login, normalized_login = _validate_login(login)
@@ -116,6 +125,8 @@ class AuthStore:
         _validate_password(password)
         if password != password_confirmation:
             raise ValueError("Пароли не совпадают.")
+        if not legal_accepted or not parent_confirmed:
+            raise ValueError("Подтвердите совершеннолетие и принятие документов.")
         salt = os.urandom(16)
         digest = pbkdf2_hmac("sha256", password.encode("utf-8"), salt, PASSWORD_ITERATIONS)
         try:
@@ -123,10 +134,12 @@ class AuthStore:
                 cursor = connection.execute(
                     """INSERT INTO users
                        (login, login_normalized, email, email_normalized, password_salt,
-                        password_hash, password_iterations, created_at, role)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        password_hash, password_iterations, created_at, role,
+                        terms_accepted_at, terms_version, parent_confirmed)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (display_login, normalized_login, display_email, normalized_email, salt,
-                     digest, PASSWORD_ITERATIONS, int(time.time()), role),
+                     digest, PASSWORD_ITERATIONS, int(time.time()), role, int(time.time()),
+                     TERMS_VERSION, 1),
                 )
                 return User(cursor.lastrowid, display_login, display_email, role)
         except sqlite3.IntegrityError:

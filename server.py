@@ -1,4 +1,4 @@
-"""Loopback-only bridge. Avatar scans and voice references stay private on the device."""
+"""Authenticated web application server for local use and small hosted betas."""
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from http.cookies import CookieError, SimpleCookie
 from email.utils import formatdate
@@ -13,7 +13,7 @@ import time
 import uuid
 from collections import defaultdict, deque
 from urllib.parse import urlsplit, parse_qs
-from runtime import ROOT
+from runtime import ROOT, Runtime
 from tutor import Tutor
 from speech import LocalSpeechRecognizer, SpeechRecognizer, SpeechSynthesizer, audio_duration_ms
 from dialogue import Dialogues
@@ -30,8 +30,10 @@ LOGGER = logging.getLogger(__name__)
 class AppServer(ThreadingHTTPServer):
     daemon_threads = True
 
-    def __init__(self, runtime, port=0, warm_speech=True):
+    def __init__(self, runtime, port=0, warm_speech=True, bind=None, public_origin=None):
         self.runtime = runtime
+        self.profile_lock = threading.RLock()
+        self.profile_runtimes = {}
         self.tutor = Tutor.from_environment(ROOT)
         # PRODUCT INVARIANT: speech recognition is local-first by default. If
         # the installed model cannot handle a fragment and a SpeechKit key is
@@ -52,20 +54,56 @@ class AppServer(ThreadingHTTPServer):
         self.usage = UsageStore(runtime.data / 'usage.sqlite3')
         self.usage.recover_interrupted_events()
         self.platega = PlategaClient(os.getenv('PLATEGA_MERCHANT_ID'), os.getenv('PLATEGA_SECRET'))
-        self.dialogues = Dialogues(runtime,self.tutor,self.fast_voice,self.usage)
+        self.dialogues = Dialogues(runtime,self.tutor,self.fast_voice,self.usage,
+                                   runtime_for=self.profile_runtime)
         self.speech_lock = threading.RLock()
         self.speech_cache = {}
         self.speech_recent = defaultdict(deque)
         self.payment_locks = defaultdict(threading.Lock)
+        self.auth_lock = threading.RLock()
+        self.auth_attempts = defaultdict(deque)
+        self.invite_code = os.getenv('PARENTAI_INVITE_CODE', '').strip()
         self.token = secrets.token_urlsafe(32)
-        super().__init__(('127.0.0.1', port), Handler)
-        self.origin = f'http://127.0.0.1:{self.server_port}'
+        bind = bind or os.getenv('PARENTAI_BIND', '127.0.0.1')
+        super().__init__((bind, port), Handler)
+        local_host = '127.0.0.1' if bind in ('0.0.0.0', '::') else bind
+        self.listen_origin = f'http://{local_host}:{self.server_port}'
+        self.origin = (public_origin or os.getenv('PARENTAI_PUBLIC_ORIGIN', '') or self.listen_origin).rstrip('/')
         if warm_speech and local_speech.public_status().get('enabled'):
             threading.Thread(target=local_speech.warm, name='speech-warmup', daemon=True).start()
 
     def server_close(self):
         self.dialogues.close()
+        with self.profile_lock:
+            profiles = list(self.profile_runtimes.values())
+            self.profile_runtimes.clear()
+        for runtime in profiles:
+            runtime.close()
         super().server_close()
+
+    def profile_runtime(self, user_id):
+        """Return an isolated avatar/voice store for exactly one account."""
+        user_id = int(user_id)
+        if user_id < 1:
+            raise ValueError('Некорректный профиль пользователя.')
+        with self.profile_lock:
+            runtime = self.profile_runtimes.get(user_id)
+            if runtime is None:
+                runtime = Runtime(self.runtime.data / 'profiles' / str(user_id))
+                self.profile_runtimes[user_id] = runtime
+            return runtime
+
+    def allow_auth_attempt(self, key, action):
+        now = time.monotonic()
+        window, maximum = (3600, 5) if action == 'register' else (300, 10)
+        with self.auth_lock:
+            bucket = self.auth_attempts[(key, action)]
+            while bucket and now - bucket[0] > window:
+                bucket.popleft()
+            if len(bucket) >= maximum:
+                return False
+            bucket.append(now)
+            return True
 
     def recognize(self, user_id, payload, request_id, unlimited=False):
         request_id = request_id if isinstance(request_id, str) and 8 <= len(request_id) <= 100 else uuid.uuid4().hex
@@ -148,6 +186,9 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header('Referrer-Policy', 'no-referrer')
         self.send_header('Cross-Origin-Resource-Policy', 'same-origin')
         self.send_header('X-Frame-Options', 'DENY')
+        self.send_header('Permissions-Policy', 'camera=(self), microphone=(self), geolocation=()')
+        if self.server.origin.startswith('https://'):
+            self.send_header('Strict-Transport-Security', 'max-age=31536000; includeSubDomains')
         for name, value in (headers or {}).items():
             self.send_header(name, value)
         self.end_headers()
@@ -167,13 +208,23 @@ class Handler(BaseHTTPRequestHandler):
     def current_user(self):
         return self.server.auth.user_for_session(self.session_token())
 
+    def client_key(self):
+        address = self.client_address[0]
+        if address in ('127.0.0.1', '::1'):
+            forwarded = self.headers.get('X-Forwarded-For', '').split(',', 1)[0].strip()
+            if forwarded:
+                address = forwarded
+        return address
+
     def session_cookie(self, token):
         expires = formatdate(time.time() + SESSION_LIFETIME, usegmt=True)
+        secure = '; Secure' if self.server.origin.startswith('https://') else ''
         return (f'parentai_session={token}; Path=/; Max-Age={SESSION_LIFETIME}; Expires={expires}; '
-                'HttpOnly; SameSite=Strict')
+                f'HttpOnly; SameSite=Strict{secure}')
 
     def clear_session_cookie(self):
-        return 'parentai_session=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict'
+        secure = '; Secure' if self.server.origin.startswith('https://') else ''
+        return f'parentai_session=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict{secure}'
 
     def platega_webhook(self):
         if not self.server.platega.valid_callback(
@@ -199,6 +250,8 @@ class Handler(BaseHTTPRequestHandler):
         if not self.allowed():
             return self.send(403, {'error': 'Invalid host'})
         path = urlsplit(self.path).path
+        if path == '/api/health':
+            return self.send(200, {'ok': True, 'service': 'adym'})
         if path == '/api/session':
             if self.headers.get('Sec-Fetch-Site', 'same-origin') not in ('same-origin', 'none'):
                 return self.send(403, {'error': 'Invalid origin'})
@@ -239,32 +292,36 @@ class Handler(BaseHTTPRequestHandler):
             user = self.current_user()
             if not user:
                 return self.send(401, {'error': 'Войдите в аккаунт.'})
+            runtime = self.server.profile_runtime(user.id)
             if path == '/api/avatar-model':
                 try:
-                    return self.send(200, model_path(self.server.runtime).read_bytes(), 'model/gltf-binary')
+                    return self.send(200, model_path(runtime).read_bytes(), 'model/gltf-binary')
                 except (ValueError, OSError) as exc:
                     return self.send(404, {'error': str(exc)})
             if path == '/api/avatar':
-                value = self.server.runtime.avatar()
+                value = runtime.avatar()
             else:
-                value = {**self.server.runtime.snapshot(), 'tutor': self.server.tutor.public_status(),
+                value = {**runtime.snapshot(), 'tutor': self.server.tutor.public_status(),
                          'speech': self.server.speech_status(),'fast_voice':self.server.fast_voice.public_status()}
-                value['voice_engine']=self.server.runtime.voice_engine.status()
+                value['assets'] = self.server.runtime.snapshot().get('assets', value.get('assets'))
+                value['voice_engine']=runtime.voice_engine.status()
                 value['scanner']=scanner_status()
                 value['usage']=self.server.usage.dashboard(user.id, user.role == 'admin')
                 value['billing']={'provider':self.server.platega.public_status(),
                                   'plans':self.server.usage.catalog()}
             return self.send(200, value)
-        root = self.server.runtime.data if path.startswith('/audio/') else ROOT / 'web'
-        if root == self.server.runtime.data and not self.current_user():
+        audio_user = self.current_user() if path.startswith('/audio/') else None
+        if path.startswith('/audio/') and not audio_user:
             return self.send(401, {'error': 'Войдите в аккаунт.'})
+        runtime = self.server.profile_runtime(audio_user.id) if audio_user else None
+        root = runtime.data if runtime else ROOT / 'web'
         relative = path[len('/audio/'):] if path.startswith('/audio/') else path.lstrip('/') or 'avatar.html'
         target = (root / relative).resolve()
         if not target.is_relative_to(root.resolve()) or not target.is_file():
             return self.send(404, {'error': 'Not found'})
         # Serve only published WAVs, not references/logs or arbitrary backend files.
-        if root == self.server.runtime.data:
-            allowed = {'reference.wav'} | {item['file'] for item in self.server.runtime.snapshot()['phrases']}
+        if runtime:
+            allowed = {'reference.wav'} | {item['file'] for item in runtime.snapshot()['phrases']}
             if relative not in allowed:
                 return self.send(404, {'error': 'Not found'})
         self.send(200, target.read_bytes(), mimetypes.guess_type(str(target))[0] or 'application/octet-stream')
@@ -289,15 +346,24 @@ class Handler(BaseHTTPRequestHandler):
                 value = json.loads(payload)
                 if not isinstance(value, dict):
                     raise ValueError('Некорректные данные регистрации.')
+                if not self.server.allow_auth_attempt(self.client_key(), 'register'):
+                    return self.send(429, {'error': 'Слишком много попыток регистрации. Повторите позже.'})
+                if self.server.invite_code and not secrets.compare_digest(
+                        str(value.get('invite_code') or ''), self.server.invite_code):
+                    raise ValueError('Неверный код приглашения.')
+                if value.get('legal_accepted') is not True or value.get('parent_confirmed') is not True:
+                    raise ValueError('Регистрацию должен подтвердить совершеннолетний родитель, приняв документы.')
                 user = self.server.auth.register(
                     value.get('login'), value.get('email'), value.get('password'),
-                    value.get('password_confirmation'))
+                    value.get('password_confirmation'), legal_accepted=True, parent_confirmed=True)
                 session = self.server.auth.create_session(user.id)
                 return self.send(201, {'user': user.public()}, headers={'Set-Cookie': self.session_cookie(session)})
             if path == '/api/auth/login':
                 value = json.loads(payload)
                 if not isinstance(value, dict):
                     raise ValueError('Некорректные данные входа.')
+                if not self.server.allow_auth_attempt(self.client_key(), 'login'):
+                    return self.send(429, {'error': 'Слишком много попыток входа. Повторите через несколько минут.'})
                 user = self.server.auth.authenticate(value.get('identifier'), value.get('password'))
                 if not user:
                     return self.send(401, {'error': 'Неверный логин, почта или пароль.'})
@@ -306,6 +372,7 @@ class Handler(BaseHTTPRequestHandler):
             user = self.current_user()
             if not user:
                 return self.send(401, {'error': 'Войдите в аккаунт.'})
+            runtime = self.server.profile_runtime(user.id)
             if path == '/api/auth/logout':
                 self.server.auth.delete_session(self.session_token())
                 return self.send(200, {'ok': True}, headers={'Set-Cookie': self.clear_session_cookie()})
@@ -349,20 +416,19 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(200, self.server.usage.control_study_session(
                     user.id, value.get('id'), action, user.role == 'admin'))
             if path == '/api/avatar-model':
-                return self.send(200, save_model(self.server.runtime, payload))
+                return self.send(200, save_model(runtime, payload))
             if path == '/api/avatar':
-                return self.send(200, self.server.runtime.avatar(json.loads(payload)))
+                return self.send(200, runtime.avatar(json.loads(payload)))
             if path == '/api/speech':
                 return self.send(200, self.server.recognize(
                     user.id, payload, self.headers.get('X-Request-Id'), user.role == 'admin'))
             if path == '/api/voice-warm':
-                runtime=self.server.runtime
                 with runtime.lock:
                     if runtime.reference_mode=='clone' and runtime.status['reference'] and runtime.status['voice'] not in ('generating','cancelling'):
                         runtime.voice_engine.warm(runtime.data/'reference.wav')
                 return self.send(202,{'ok':True})
             if path == '/api/voice-release':
-                self.server.runtime.voice_engine.release()
+                runtime.voice_engine.release()
                 return self.send(200,{'ok':True})
             if path == '/api/dialog':
                 value = json.loads(payload)
@@ -414,13 +480,13 @@ class Handler(BaseHTTPRequestHandler):
                 self.server.usage.control_study_session(user.id, study['id'], 'stop', user.role == 'admin')
                 return self.send(200, result)
             if path == '/api/cancel':
-                self.server.runtime.cancel_generation()
+                runtime.cancel_generation()
                 return self.send(200, {'ok': True})
             if path == '/api/reference':
                 mode = parse_qs(urlsplit(self.path).query).get('mode', ['clone'])[0]
-                return self.send(200, self.server.runtime.reference(payload, mode))
+                return self.send(200, runtime.reference(payload, mode))
             if self.path == '/api/generate':
-                self.server.runtime.generate()
+                runtime.generate()
                 return self.send(202, {'ok': True})
             self.send(404, {'error': 'Not found'})
         except LimitExceeded as exc:

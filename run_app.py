@@ -13,11 +13,14 @@ def main():
     parser.add_argument('--no-browser', action='store_true')
     parser.add_argument('--no-models', action='store_true', help='Диагностика интерфейса без загрузки моделей')
     parser.add_argument('--port', type=int, default=8767)
+    parser.add_argument('--bind', default=None, help='Адрес прослушивания; для Caddy оставьте 127.0.0.1')
+    parser.add_argument('--public-origin', default=None, help='Публичный HTTPS origin, например https://app.adym.ru')
     args = parser.parse_args()
     load_local_env(ROOT / 'parentai.env')
     runtime = Runtime()
     try:
-        server = AppServer(runtime, args.port, warm_speech=not args.no_models)
+        server = AppServer(runtime, args.port, warm_speech=not args.no_models,
+                           bind=args.bind, public_origin=args.public_origin)
     except OSError as exc:
         raise SystemExit(f'Не удалось открыть порт {args.port}: {exc}. Используйте --port 0.')
     url = server.origin + '/'

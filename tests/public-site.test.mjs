@@ -22,7 +22,7 @@ test('public landing shows exact monthly plan limits', () => {
   assert.match(html, /490 ₽/);
   assert.match(html, /990 ₽/);
   assert.match(html, /30 календарных дней/);
-  assert.match(html, /без автоматического продления/i);
+  assert.match(html, /продлеваться каждые 30 календарных дней/i);
 });
 
 test('purchase path is clickable but cannot charge before backend launch', () => {

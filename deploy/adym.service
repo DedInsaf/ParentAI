@@ -1,0 +1,24 @@
+[Unit]
+Description=Adym learning assistant
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=adym
+Group=adym
+WorkingDirectory=/opt/adym
+EnvironmentFile=/opt/adym/parentai.env
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/adym/.venv/bin/python /opt/adym/run_app.py --no-browser --bind 127.0.0.1 --port 8767 --public-origin https://app.adym.ru
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/adym/data
+
+[Install]
+WantedBy=multi-user.target

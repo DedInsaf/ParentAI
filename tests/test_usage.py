@@ -2,6 +2,7 @@ import sqlite3
 import tempfile
 import time
 import unittest
+from unittest.mock import patch
 
 from usage import BillingConfig, LimitExceeded, UsageStore, rubles_to_micros
 
@@ -61,6 +62,18 @@ class UsageTests(unittest.TestCase):
         self.assertEqual(summary['report']['assignments'], 2)
         self.assertEqual(summary['usage']['llm_requests'], 2)
         self.assertEqual(summary['remaining']['assignments'], 0)
+
+    def test_global_budget_limits_all_accounts_and_local_work_stays_free(self):
+        path = self.temp.name + '/budget.sqlite3'
+        with patch.dict('os.environ', {'PARENTAI_GLOBAL_MONTHLY_BUDGET_RUBLES': '0.10'}):
+            product = UsageStore(path, config(cost='100'))
+        local = product.reserve(1, 'stt', 'local', estimated_cost=0)
+        product.complete(local['id'], cost=0)
+        cloud = product.reserve(1, 'llm', 'cloud', estimated_cost=rubles_to_micros('0.08'))
+        product.complete(cloud['id'], cost=rubles_to_micros('0.08'))
+        with self.assertRaisesRegex(LimitExceeded, 'Общий месячный бюджет'):
+            product.reserve(2, 'llm', 'second-account',
+                            estimated_cost=rubles_to_micros('0.03'), bypass_limits=True)
 
     def test_reports_only_aggregates_and_percentiles(self):
         event = self.store.reserve(3, 'stt', 'speech-001', duration_ms=4100, billed_units=15,

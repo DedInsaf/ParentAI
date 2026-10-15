@@ -46,6 +46,7 @@ class ServerTests(unittest.TestCase):
 
     def test_public_ui_and_protected_api(self):
         self.assertEqual(self.request('/')[0],200)
+        self.assertEqual(self.request('/api/health',authenticated=False)[0],200)
         self.assertEqual(self.request('/api/status')[0],403)
         self.assertEqual(self.request('/api/status',headers={'X-App-Token':self.s.token})[0],200)
         self.assertEqual(self.request('/api/status',headers={'X-App-Token':self.s.token},authenticated=False)[0],401)
@@ -121,7 +122,8 @@ class ServerTests(unittest.TestCase):
     def test_admin_cannot_be_self_assigned_and_has_unlimited_dashboard(self):
         headers={'Origin':self.s.origin,'X-App-Token':self.s.token,'Content-Type':'application/json'}
         payload=json.dumps({'login':'new-user','email':'new@example.com','password':'password-123',
-                            'password_confirmation':'password-123','role':'admin'}).encode()
+                            'password_confirmation':'password-123','role':'admin',
+                            'legal_accepted':True,'parent_confirmed':True}).encode()
         code,body=self.request('/api/auth/register',payload,headers,authenticated=False)
         self.assertEqual(code,201)
         self.assertFalse(json.loads(body)['user']['is_admin'])
@@ -156,6 +158,37 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(self.request('/audio/'+filename)[0],404)
         self.assertEqual(self.request('/api/avatar-model',b'bad',headers)[0],400)
         self.assertEqual(self.request('/api/avatar-model',headers=headers)[1],glb())
+
+    def test_avatar_and_voice_storage_is_isolated_between_accounts(self):
+        headers={'Origin':self.s.origin,'X-App-Token':self.s.token}
+        self.assertEqual(self.request('/api/avatar-model',glb(),headers)[0],200)
+        second=self.s.auth.register('second-user','second@example.com','password-123','password-123')
+        second_session=self.s.auth.create_session(second.id)
+        req=urllib.request.Request(self.s.origin+'/api/avatar-model',headers={
+            'Cookie':'parentai_session='+second_session,'X-App-Token':self.s.token})
+        with self.assertRaises(urllib.error.HTTPError) as error:
+            urllib.request.urlopen(req)
+        self.assertEqual(error.exception.code,404)
+        self.assertNotEqual(self.s.profile_runtime(1).data,self.s.profile_runtime(second.id).data)
+
+    def test_registration_requires_parental_legal_consent(self):
+        headers={'Origin':self.s.origin,'X-App-Token':self.s.token,'Content-Type':'application/json'}
+        payload=json.dumps({'login':'new-user','email':'new@example.com','password':'password-123',
+                            'password_confirmation':'password-123'}).encode()
+        code,body=self.request('/api/auth/register',payload,headers,authenticated=False)
+        self.assertEqual(code,400)
+        self.assertIn('родитель',json.loads(body)['error'])
+
+    def test_closed_beta_registration_checks_invite_code(self):
+        self.s.invite_code='beta-secret'
+        headers={'Origin':self.s.origin,'X-App-Token':self.s.token,'Content-Type':'application/json'}
+        value={'login':'invited-user','email':'invited@example.com','password':'password-123',
+               'password_confirmation':'password-123','legal_accepted':True,'parent_confirmed':True}
+        self.assertEqual(self.request('/api/auth/register',json.dumps(value).encode(),headers,
+                                      authenticated=False)[0],400)
+        value['invite_code']='beta-secret'
+        self.assertEqual(self.request('/api/auth/register',json.dumps(value).encode(),headers,
+                                      authenticated=False)[0],201)
 
     def test_speech_dialog_and_reply_audio_are_protected(self):
         for path in ('/api/speech','/api/dialog','/api/dialog-cancel'):

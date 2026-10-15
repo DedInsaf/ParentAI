@@ -6,6 +6,7 @@ from datetime import datetime
 from decimal import Decimal, ROUND_CEILING, ROUND_HALF_UP
 import json
 import math
+import os
 from pathlib import Path
 import sqlite3
 import threading
@@ -80,6 +81,10 @@ class UsageStore:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.config = config or BillingConfig.load()
         self.lock = threading.RLock()
+        self.global_monthly_budget = rubles_to_micros(
+            os.getenv("PARENTAI_GLOBAL_MONTHLY_BUDGET_RUBLES", "0") or "0")
+        self.global_daily_budget = rubles_to_micros(
+            os.getenv("PARENTAI_GLOBAL_DAILY_BUDGET_RUBLES", "0") or "0")
         self._initialize()
 
     def _connect(self):
@@ -559,6 +564,23 @@ class UsageStore:
             ).fetchone()
             if existing:
                 return {"id": existing["id"], "duplicate": True, "warning": ""}
+            estimated_cost = max(0, int(estimated_cost))
+            if estimated_cost:
+                if self.global_monthly_budget:
+                    spent = connection.execute(
+                        """SELECT COALESCE(SUM(cost_microrubles),0) AS value FROM usage_events
+                           WHERE state IN ('pending','complete') AND created_at>=? AND created_at<?""",
+                        (start, end)).fetchone()["value"]
+                    if spent + estimated_cost > self.global_monthly_budget:
+                        raise LimitExceeded("Общий месячный бюджет сервиса исчерпан. Попробуйте позже.")
+                if self.global_daily_budget:
+                    day_start = now - (now % 86400)
+                    spent = connection.execute(
+                        """SELECT COALESCE(SUM(cost_microrubles),0) AS value FROM usage_events
+                           WHERE state IN ('pending','complete') AND created_at>=?""",
+                        (day_start,)).fetchone()["value"]
+                    if spent + estimated_cost > self.global_daily_budget:
+                        raise LimitExceeded("Дневной бюджет сервиса исчерпан. Попробуйте завтра.")
             row = connection.execute("SELECT plan, status FROM subscriptions WHERE user_id=?", (user_id,)).fetchone()
             plan = row["plan"] if row and row["status"] == "active" else "free"
             if study_session_id:
@@ -588,7 +610,7 @@ class UsageStore:
                     ).fetchone()["value"]
                     if not bypass_limits and tasks + 1 > int(self.config.plan(plan)["assignments_per_session"]):
                         raise LimitExceeded("В этом занятии уже разобрано максимум новых задач. Начните новое занятие.")
-            projected["external_cost_micros"] += max(0, int(estimated_cost))
+            projected["external_cost_micros"] += estimated_cost
             if operation == "llm":
                 projected["llm_requests"] += 1
             elif operation == "stt":

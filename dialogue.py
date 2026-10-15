@@ -153,8 +153,9 @@ def voice_excerpt(text, limit=240):
 
 
 class Dialogues:
-    def __init__(self, runtime, tutor, fast_voice=None, usage=None):
+    def __init__(self, runtime, tutor, fast_voice=None, usage=None, runtime_for=None):
         self.runtime, self.tutor = runtime, tutor
+        self.runtime_for = runtime_for or (lambda _user_id: runtime)
         self.fast_voice, self.usage = fast_voice, usage
         self.lock = threading.RLock()
         self.sessions, self.jobs, self.requests = {}, {}, {}
@@ -384,6 +385,7 @@ class Dialogues:
 
     def _run(self, job, question, level, attempt):
         acquired = False
+        runtime = self.runtime_for(job['user_id'])
         try:
             answer = self._answer(job, question, level)
             if job['cancel'].is_set() or self.closed.is_set():
@@ -404,23 +406,23 @@ class Dialogues:
                     raise InterruptedError()
                 job.update(cues=timeline(bank / 'phrase-0.wav', spoken), audio=True, state='done')
                 return
-            with self.runtime.lock:
+            with runtime.lock:
                 if job['cancel'].is_set() or self.closed.is_set():
                     raise InterruptedError()
-                if (self.runtime.reference_mode != 'clone' or not self.runtime.status['reference']
-                        or self.runtime.status['voice'] in BUSY or self.runtime.reply_busy):
+                if (runtime.reference_mode != 'clone' or not runtime.status['reference']
+                        or runtime.status['voice'] in BUSY or runtime.reply_busy):
                     job.update(state='done', warning='Голос родителя недоступен, но подсказка сохранена на экране.')
                     return
-                self.runtime.reply_busy = acquired = True
+                runtime.reply_busy = acquired = True
                 bank = Path(self.storage.name) / job['id']
                 bank.mkdir()
-                shutil.copyfile(self.runtime.data / 'reference.wav', bank / 'reference.wav')
+                shutil.copyfile(runtime.data / 'reference.wav', bank / 'reference.wav')
             job['state'] = 'speaking'
             spoken = voice_excerpt(answer)
             def update(value):
                 with self.lock:
                     job['chunks'] = list(value.get('chunks', []))
-            self.runtime.voice_engine.synthesize(bank / 'reference.wav', bank, spoken, job['cancel'], update)
+            runtime.voice_engine.synthesize(bank / 'reference.wav', bank, spoken, job['cancel'], update)
             if job['cancel'].is_set() or self.closed.is_set():
                 raise InterruptedError()
             job.update(cues=timeline(bank / 'phrase-0.wav', spoken), audio=True, state='done')
@@ -432,8 +434,8 @@ class Dialogues:
             job.update(state='done' if job['answer'] else 'error', warning=str(exc))
         finally:
             if acquired:
-                with self.runtime.lock:
-                    self.runtime.reply_busy = False
+                with runtime.lock:
+                    runtime.reply_busy = False
 
     def close(self):
         self.closed.set()

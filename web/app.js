@@ -136,10 +136,13 @@ async function poll() {
     cloneOption.disabled=!status.xtts_enabled;
     parentReplyOption.disabled=!status.xtts_enabled;
     cloneOption.textContent=status.xtts_enabled?'Напоминания и новые ответы моим голосом':'Голос родителя отключён в конфигурации';
-    parentReplyOption.textContent=status.xtts_enabled?'Голос родителя · основной':'Голос родителя · отключён в конфигурации';
-    // PRODUCT INVARIANT: never switch replyVoice to Yandex automatically.
-    // A provider voice is allowed only after an explicit parent selection;
-    // otherwise a failure stays visible instead of impersonating the parent.
+    parentReplyOption.textContent=status.xtts_enabled?'Голос родителя · основной':'Голос родителя · недоступен';
+    if(!status.xtts_enabled&&$('replyVoice').value==='parent'){
+      $('replyVoice').value='yandex';
+      $('replyVoiceHint').textContent='Выбран обычный голос Яндекса: синтез голосом родителя отключён на этом сервере, поэтому ответы всё равно будут слышны.';
+    }else if(status.xtts_enabled){
+      $('replyVoiceHint').textContent='Адым отвечает голосом родителя. Обычный голос Яндекса можно выбрать вручную.';
+    }
     if(!status.xtts_enabled&&$('voiceMode').value==='clone'){$('voiceMode').value='direct';updateVoiceMode();}
     renderParentSummary(status.usage);
     renderSubscription(status.usage, status.billing);
@@ -1049,6 +1052,10 @@ for (const [formId, path] of [['loginForm', 'login'], ['registerForm', 'register
       return;
     }
     const values = Object.fromEntries(new FormData(form));
+    if (formId === 'registerForm') {
+      values.parent_confirmed = form.elements.parent_confirmed.checked;
+      values.legal_accepted = form.elements.legal_accepted.checked;
+    }
     authBusy(form, true);
     try {
       const data = await authRequest(path, values);
