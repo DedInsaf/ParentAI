@@ -18,8 +18,10 @@ test('old public brand is absent from the current interface', () => {
 });
 
 test('a completed task closes the old hint dialogue', () => {
-  assert.match(script, /if\(result\.finished\)\{dialogId=null;followupUntil=0;\}/);
-  assert.match(script, /Задание завершено · можно переходить к следующему/);
+  assert.match(script, /if\(result\.finished\)\{dialogId=null;taskFinished=true;followupUntil=0;/);
+  assert.match(script, /Правильно! Введи или скажи новое задание/);
+  assert.match(script, /Введи условие нового задания/);
+  assert.match(script, /if\(taskFinished\)\{\$\('tutorMessages'\)\.replaceChildren\(\)/);
 });
 
 test('public beta UI hides developer controls and exposes account rights', () => {
@@ -30,4 +32,5 @@ test('public beta UI hides developer controls and exposes account rights', () =>
   assert.match(html, /adym\.ru\/privacy\.html/);
   assert.match(html, /adym\.ru\/support\.html/);
   assert.match(script, /authRequest\('delete'/);
+  assert.doesNotMatch(html, /Расход сервиса|summaryToday|summaryCost|internalCost/);
 });

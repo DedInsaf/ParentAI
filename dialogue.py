@@ -222,10 +222,15 @@ class Dialogues:
                     raise ValueError('Диалог истёк. Нажмите «Новое задание».')
                 if item.get('study_session') != study_session:
                     raise ValueError('Эта задача относится к другому занятию. Начните новую задачу.')
+                # A solved task is immutable. Even if an older browser keeps its
+                # session id while the final audio is finishing, the next input
+                # must start a fresh task instead of reopening old hints.
+                if item.get('finished'):
+                    session = None
             session = session or uuid.uuid4().hex
             self.sessions.setdefault(session, dict(history=[], attempt=0, updated=now, plan=None,
                                                    user_id=user_id, study_session=study_session,
-                                                   difficult=False))
+                                                   difficult=False, finished=False))
             attempt = self.sessions[session]['attempt']
             key = uuid.uuid4().hex
             job = dict(id=key, session=session, state='thinking', created=now, user_id=user_id,
@@ -298,12 +303,13 @@ class Dialogues:
 
     def _from_plan(self, session, question):
         plan, attempt = session['plan'], session['attempt']
-        accepted = plan.get('acceptable_answers', [])
+        accepted = [*plan.get('acceptable_answers', []), plan.get('answer_criterion', '')]
         if attempt and any(word in question.casefold() for word in REPEAT_WORDS):
             index = min(attempt - 1, 2)
             return self._hint(plan, index), False, False, False
         if attempt and accepted and _answers_match(question, accepted):
-            return 'Верно! Ответ правильный. Отличная работа — можешь переходить к следующему заданию.', True, True, False
+            return ('Верно! Ответ правильный. Отличная работа! Переходим к новому заданию? '
+                    'Напиши или скажи его условие.'), True, True, False
         if attempt >= 3:
             return plan['final_explanation'] or plan['solution'], True, False, True
         index = min(attempt, 2)
@@ -350,6 +356,7 @@ class Dialogues:
         elif self.usage and job['user_id']:
             self.usage.finish_lesson(job['user_id'], job['session'], independent, difficult)
         session['difficult'] = session['difficult'] or difficult
+        session['finished'] = finished
         session['history'] = (session['history'] + [
             {'role': 'user', 'text': question}, {'role': 'assistant', 'text': answer}])[-6:]
         session['updated'] = time.monotonic()

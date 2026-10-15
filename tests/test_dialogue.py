@@ -187,6 +187,33 @@ class DialogueTests(unittest.TestCase):
                 self.assertNotIn('x=4',manager.snapshot(first['id'])['answer'])
             finally:manager.close()
 
+    def test_answer_criterion_finishes_task_and_stale_session_starts_a_new_one(self):
+        class PlanTutor:
+            calls=0
+            model='test-model'
+            def public_status(self):return {'enabled':True}
+            def create_plan(self,question,level):
+                self.calls+=1
+                answer='4' if self.calls==1 else '7'
+                return {'plan':{'solution':answer,'hints':['Подумай.']*3,
+                    'control_questions':['Какой ответ?']*3,'common_errors':[],
+                    'answer_criterion':f'Ответ равен {answer}','acceptable_answers':[],
+                    'final_explanation':f'Ответ {answer}.'},'usage':{}}
+        with tempfile.TemporaryDirectory() as temp:
+            tutor=PlanTutor();manager=Dialogues(Runtime(temp),tutor)
+            try:
+                first=manager.start('2 + 2','начальная школа');manager.jobs[first['id']]['thread'].join(1)
+                solved=manager.start('У меня получилось четыре','начальная школа',first['session'])
+                manager.jobs[solved['id']]['thread'].join(1)
+                self.assertTrue(manager.snapshot(solved['id'])['finished'])
+                self.assertIn('новому заданию',manager.snapshot(solved['id'])['answer'])
+                next_task=manager.start('3 + 4','начальная школа',first['session'])
+                manager.jobs[next_task['id']]['thread'].join(1)
+                self.assertNotEqual(next_task['session'],first['session'])
+                self.assertIn('Подумай',manager.snapshot(next_task['id'])['answer'])
+                self.assertEqual(tutor.calls,2)
+            finally:manager.close()
+
     def test_spoken_answer_variants_are_safe_and_equivalent(self):
         self.assertTrue(_answers_match('Ответ будет четыре', ['4']))
         self.assertTrue(_answers_match('У меня вышло 4 сантиметра', ['4 см']))

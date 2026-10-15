@@ -25,7 +25,7 @@ const pendingActions = new Set();
 let online = false, recordCancelled = false, recordingStream, recordingAbort, referenceRejected = false, previewUrl, renderTime = 0;
 let referenceLoaded = false, voiceModeTouched = false;
 let lessonStarted = 0, lessonElapsed = 0, tutorBusy = false, lessonCameraEnabled = false, lessonPresenceEnabled = false;
-let activeCues=[], audioStarted=0, dialogId=null, studySessionId=null, lessonLimitSeconds=null, lessonLimitHandled=false, helpEpoch=0;
+let activeCues=[], audioStarted=0, dialogId=null, taskFinished=false, studySessionId=null, lessonLimitSeconds=null, lessonLimitHandled=false, helpEpoch=0;
 let questionRecording=false, questionStop=false, questionCancel=false, questionAbort, questionStream;
 let currentJob=null;
 let previewYaw=0,showWireframe=false,scanEpoch=0;
@@ -164,8 +164,6 @@ function renderParentSummary(value) {
   $('summaryHints').textContent = value.report.hints;
   $('summaryIndependent').textContent = value.report.solved_independently;
   $('summaryDifficult').textContent = value.report.difficult;
-  $('summaryToday').textContent = `${Number(value.usage.today_cost_rubles).toFixed(2)} ₽`;
-  $('summaryCost').textContent = `${Number(value.usage.external_cost_rubles).toFixed(2)} ₽`;
   $('summaryRemaining').textContent = value.plan.unlimited ? 'Без ограничений' :
     `${value.remaining.sessions} занятий · ${value.remaining.assignments} новых задач`;
   $('summaryText').textContent = value.report.summary;
@@ -562,7 +560,7 @@ async function start() {
   let study;
   try { study = await api('study-session', JSON.stringify({action:'start'})); }
   catch(error){stopCamera();throw error;}
-  studySessionId=study.id;lessonLimitSeconds=study.limit_seconds;lessonLimitHandled=false;pausePending=false;dialogId=null;
+  studySessionId=study.id;lessonLimitSeconds=study.limit_seconds;lessonLimitHandled=false;pausePending=false;dialogId=null;taskFinished=false;
   stopAudio(); running = true; paused = false; presence.reset(); lessonElapsed = Number(study.elapsed_seconds||0)*1000; lessonStarted = performance.now(); showLesson();
   if(lessonCameraEnabled) startLessonPresence();
   else $('monitorStatus').textContent='Камера выключена родителем';
@@ -597,7 +595,7 @@ async function pause() {
   }
   controls();
 }
-function stop(message='Занятие завершено · камера выключена',notifyServer=true) { const session=studySessionId;studySessionId=null;if(session&&notifyServer)api('study-session',JSON.stringify({action:'stop',id:session})).catch(()=>{});stopHandsFree();api('voice-release',new Uint8Array()).catch(()=>{});running = false; paused = false;pausePending=false;dialogId=null;lessonCameraEnabled=false;lessonPresenceEnabled=false;document.body.classList.remove('on-break'); stopAudio(); stopCamera(); cancelTutor(); presence.reset(); $('pauseBtn').textContent = 'Сделать перерыв'; $('monitorStatus').textContent = message; showSetup(); controls(); }
+function stop(message='Занятие завершено · камера выключена',notifyServer=true) { const session=studySessionId;studySessionId=null;if(session&&notifyServer)api('study-session',JSON.stringify({action:'stop',id:session})).catch(()=>{});stopHandsFree();api('voice-release',new Uint8Array()).catch(()=>{});running = false; paused = false;pausePending=false;dialogId=null;taskFinished=false;lessonCameraEnabled=false;lessonPresenceEnabled=false;document.body.classList.remove('on-break'); stopAudio(); stopCamera(); cancelTutor(); presence.reset(); $('pauseBtn').textContent = 'Сделать перерыв'; $('monitorStatus').textContent = message; showSetup(); controls(); }
 function startLessonPresence() {
   lessonPresenceEnabled=!!detector;
   $('monitorStatus').textContent=lessonPresenceEnabled?'Камера включена · ищем лицо':'Камера включена · запускаем проверку лица';
@@ -757,6 +755,7 @@ async function askTutor(event) {
 }
 async function answerQuestion(question) {
   const epoch=++helpEpoch;
+  if(taskFinished){$('tutorMessages').replaceChildren();taskFinished=false;$('assignment').placeholder='Например: не понимаю, как решить 2x + 3 = 11';}
   chatMessage('user',question);stopAudio();tutorBusy=true;controls();clearError();
   let displayed=false,received=0;const completions=[];
   const getAudio=async(key,chunk,cues,text)=>{
@@ -785,9 +784,9 @@ async function answerQuestion(question) {
       if(result.state==='done'){
         if(!received&&result.cues?.length)await getAudio(started.id,null,result.cues,result.answer);
         await Promise.all(completions);if(epoch!==helpEpoch)return;
-        if(result.finished){dialogId=null;followupUntil=0;}
-        else followupUntil=performance.now()+60000;
-        $('tutorStatus').textContent=result.warning||result.limit_warning||(result.finished?'Задание завершено · можно переходить к следующему':'Твоя очередь — попробуй следующий шаг.');break;
+        if(result.finished){dialogId=null;taskFinished=true;followupUntil=0;$('assignment').placeholder='Введи условие нового задания';}
+        else {taskFinished=false;followupUntil=performance.now()+60000;}
+        $('tutorStatus').textContent=result.warning||result.limit_warning||(result.finished?'Правильно! Введи или скажи новое задание':'Твоя очередь — попробуй следующий шаг.');break;
       }
       if(result.state==='error')throw new Error(result.warning);
       if(result.state==='cancelled')break;
@@ -951,7 +950,7 @@ action('viewFrontBtn',()=>{previewYaw=0;});action('viewSideBtn',()=>{previewYaw=
 action('previewMotionBtn',()=>playVoice('preview'));
 $('tutorForm').addEventListener('submit', askTutor);
 $('cancelHelpBtn').addEventListener('click', cancelTutor);
-$('clearHelpBtn').addEventListener('click', () => { cancelTutor(); dialogId=null;followupUntil=0; $('tutorMessages').replaceChildren(); $('assignment').value = ''; });
+$('clearHelpBtn').addEventListener('click', () => { cancelTutor(); dialogId=null;taskFinished=false;followupUntil=0; $('tutorMessages').replaceChildren(); $('assignment').value = ''; $('assignment').placeholder='Например: не понимаю, как решить 2x + 3 = 11'; $('assignment').focus(); });
 window.addEventListener('popstate', () => { if (running) stop(); });
 document.addEventListener('visibilitychange', () => { if (document.hidden) { recordCancelled = true; recordingAbort?.abort(); stopTracks(recordingStream);if(scanning)cancelScan();window.speechSynthesis?.cancel();stopHandsFree();stopCamera(); } if (document.hidden && running && !paused) { pause().catch(()=>{}); $('monitorStatus').textContent = 'Перерыв · окно скрыто'; } });
 window.addEventListener('beforeunload', () => {
@@ -1049,7 +1048,6 @@ function showApplication(user) {
   currentUser = user;
   authenticated = true;
   $('accountLogin').textContent = user.is_admin ? `${user.login} · Админ` : user.login;
-  $('internalCost').hidden = !user.is_admin;
   $('authPage').hidden = true;
   document.querySelector('.app-header').hidden = false;
   $('setupPage').hidden = false;
