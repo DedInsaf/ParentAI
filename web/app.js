@@ -81,18 +81,28 @@ async function api(path, body, retry = true, timeout = 15000, signal, operationI
 }
 function controls() {
   const transition = pendingActions.has('startBtn') || pendingActions.has('pauseBtn');
+  const directVoice = $('voiceMode').value === 'direct';
+  const recordedTakes = status.reference_mode === 'clone' ? (status.reference_takes || []) : [];
+  const selectedTakeRecorded = recordedTakes.includes(voiceTake);
+  const samplesReady = directVoice || recordedTakes.length === 3;
+  const voiceProfileReady = !!status.phrases?.length && status.voice === 'ready' &&
+    status.reference_mode === $('voiceMode').value && samplesReady;
   $('scanBtn').disabled = !online || transition || !status.scanner?.enabled || scanning || running || recording || connecting;
   $('nextVoiceBtn').disabled=!mesh || scanning;
   $('scannerUnavailable').hidden=true;
   $('previewMotionBtn').disabled=!mesh || !status.phrases?.length || scanning || recording || running;
-  $('nextReadyBtn').disabled=!(status.phrases?.length) || recording || voiceBusy();
+  $('nextVoiceTakeBtn').hidden = directVoice || voiceTake >= 3 || !selectedTakeRecorded;
+  $('nextVoiceTakeBtn').disabled = recording || voiceBusy();
+  $('nextVoiceTakeBtn').textContent = voiceTake === 1 ? 'Дальше: второй образец — поддерживаю →' : 'Дальше: третий образец — зову вернуться →';
+  $('nextReadyBtn').hidden = !voiceProfileReady;
+  $('nextReadyBtn').disabled=!voiceProfileReady || recording || voiceBusy();
   for(const id of ['viewFrontBtn','viewSideBtn']) $(id).disabled=!mesh || scanning;
   for(const button of document.querySelectorAll('[data-setup-step]')) button.disabled=scanning || recording || running;
   $('recordBtn').disabled = !online || transition || recording || scanning || running || voiceBusy();
   $('voiceMode').disabled = recording || running || voiceBusy();
   $('microphone').disabled = recording;
-  const samplesReady = $('voiceMode').value === 'direct' || (status.reference_takes?.length || 0) === 3;
   $('generateBtn').disabled = !online || transition || recording || running || !status.reference || !samplesReady || referenceRejected || status.reference_mode !== $('voiceMode').value || voiceBusy();
+  $('generateBtn').hidden = !directVoice && !samplesReady;
   $('generateBtn').textContent = $('voiceMode').value === 'direct' ? 'Сохранить напоминание' : 'Создать голос';
   $('testVoiceBtn').disabled = !online || !(status.phrases?.length) || recording || running;
   $('startBtn').disabled = !online || transition || !mesh || !(status.phrases?.length) || running || scanning || recording || voiceBusy();
@@ -113,7 +123,10 @@ function controls() {
   $('stopSpeechBtn').hidden=!playing;
   $('readyHandsFree').checked=$('handsFree').checked;
   $('faceNextHint').textContent=!mesh?'После создания аватара можно перейти к голосу.':'';
-  $('voiceNextHint').textContent=voiceBusy()?'Готовим голос. Можно отменить и попробовать снова.':!status.phrases?.length?'Запишите, прослушайте и сохраните голос, чтобы продолжить.':'';
+  $('voiceNextHint').textContent=voiceBusy()?'Готовим голос. Можно отменить и попробовать снова.':
+    !directVoice && !selectedTakeRecorded?`Сначала запишите образец ${voiceTake} из 3.`:
+    !directVoice && voiceTake < 3?'Прослушайте запись и нажмите кнопку перехода к следующему образцу.':
+    !voiceProfileReady?'Все записи готовы. Теперь создайте и прослушайте общий голос.':'';
   $('startHint').textContent=!mesh?'Сначала создайте образ родителя на первом шаге.':!status.phrases?.length?'Сначала сохраните голос на втором шаге.':voiceBusy()?'Подождите, пока голос будет готов.':'';
   $('startBtn').textContent=pendingActions.has('startBtn')?'Подключаем камеру…':'Начать занятие →';
   $('cancelHelpBtn').hidden = !tutorBusy && !questionRecording && !listenerPending;
@@ -964,6 +977,9 @@ function updateVoiceMode() {
 $('voiceMode').addEventListener('change', () => { voiceModeTouched = true; updateVoiceMode(); controls(); });
 for (const button of document.querySelectorAll('[data-voice-take]')) button.addEventListener('click', () => {
   voiceTake = Number(button.dataset.voiceTake); updateVoiceMode(); controls();
+});
+action('nextVoiceTakeBtn', () => {
+  voiceTake = Math.min(3, voiceTake + 1); updateVoiceMode(); controls();
 });
 action('cancelRecordBtn', () => { recordCancelled = true; recordingAbort?.abort(); stopTracks(recordingStream); });
 action('cancelScanBtn', cancelScan);

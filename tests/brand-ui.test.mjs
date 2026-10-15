@@ -58,6 +58,9 @@ test('a cloned parent voice is the lesson default and combines three expressive 
   assert.doesNotMatch(html, /<option value="yandex" selected>/);
   assert.match(script, /direct' \? 8 : 18/);
   assert.equal((html.match(/data-voice-take=/g) || []).length, 3);
-  assert.match(script, /reference_takes\?\.length \|\| 0\) === 3/);
+  assert.match(script, /recordedTakes\.length === 3/);
   assert.match(script, /references|take=\$\{take\}/);
+  assert.match(html, /id="nextVoiceTakeBtn"[^>]*hidden/);
+  assert.match(script, /Дальше: второй образец — поддерживаю/);
+  assert.match(script, /voiceProfileReady/);
 });
