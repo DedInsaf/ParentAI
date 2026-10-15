@@ -46,7 +46,7 @@ def compact_clone_speech(audio, active_frames, frame, rate):
     return np.concatenate(pieces)
 
 
-def prepare_reference(payload: bytes, direct=False):
+def prepare_reference(payload: bytes, direct=False, min_speech_seconds=None):
     try:
         rate, audio = wavfile.read(io.BytesIO(payload))
     except Exception as exc:
@@ -71,7 +71,8 @@ def prepare_reference(payload: bytes, direct=False):
     active_frames = rms > max(.008, floor * 2, peak * .12)
     active = np.flatnonzero(active_frames)
     speech_seconds = len(active) * .02
-    if speech_seconds < (0.6 if direct else 12):
+    required_speech = 0.6 if direct else (12 if min_speech_seconds is None else min_speech_seconds)
+    if speech_seconds < required_speech:
         raise ValueError('Слишком мало активной речи. Для создания голоса спокойно читайте весь текст без длинных пауз.' if not direct else 'Слишком мало активной речи. Поднесите микрофон ближе и повторите.')
     start = max(0, int(active[0] * frame - rate * .2))
     end = min(len(x), int((active[-1] + 1) * frame + rate * .2))

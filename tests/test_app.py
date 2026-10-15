@@ -161,6 +161,27 @@ class RuntimeTests(unittest.TestCase):
         with self.assertRaises(ValueError): self.r.reference(wav(np.zeros(48000*20)))
         self.assertEqual(path.read_bytes(), original)
 
+    def test_three_clone_samples_are_stored_restored_and_ordered(self):
+        self.r.xtts_enabled = True
+        for take in (2, 1, 3):
+            self.r.reference(wav(speech()), take=take)
+        self.assertEqual(self.r.snapshot()['reference_takes'], [1, 2, 3])
+        self.assertEqual([path.name for path in self.r.reference_paths()],
+                         ['reference.wav', 'reference-2.wav', 'reference-3.wav'])
+        restored = Runtime(self.temp.name); self.addCleanup(restored.close)
+        self.assertEqual(restored.snapshot()['reference_count'], 3)
+        self.assertEqual(restored.snapshot()['reference_takes'], [1, 2, 3])
+
+    def test_switching_from_direct_starts_a_fresh_clone_set(self):
+        self.r.reference(wav(speech()), mode='clone', take=2)
+        self.r.reference(wav(speech()[:48000*8]), mode='direct')
+        self.assertEqual(self.r.snapshot()['reference_takes'], [1])
+        self.r.reference(wav(speech()), mode='clone', take=3)
+        self.assertEqual(self.r.snapshot()['reference_takes'], [3])
+        restored = Runtime(self.temp.name); self.addCleanup(restored.close)
+        self.assertTrue(restored.snapshot()['reference'])
+        self.assertEqual(restored.snapshot()['reference_takes'], [3])
+
     def test_reject_record_during_synthesis(self):
         self.r.set(voice='generating')
         with self.assertRaises(ValueError): self.r.reference(wav(speech()))

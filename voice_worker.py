@@ -92,8 +92,16 @@ def serve(directory):
         output=Path(value['output']);output.mkdir(exist_ok=True)
         manifest={'state':'speaking','chunks':[]}
         try:
-            reference=Path(value['reference'])
-            key=hashlib.sha256(reference.read_bytes()).digest()
+            raw_references=value.get('references',value.get('reference'))
+            if isinstance(raw_references,str): raw_references=[raw_references]
+            references=[Path(path) for path in raw_references or []]
+            if not references: raise ValueError('Не найдены образцы голоса.')
+            digest=hashlib.sha256()
+            for reference in references:
+                reference_bytes=reference.read_bytes()
+                digest.update(len(reference_bytes).to_bytes(8,'big'))
+                digest.update(reference_bytes)
+            key=digest.digest()
             if key!=cached_key:
                 # Reference feature extraction stays on CPU; synthesis uses Metal.
                 model.to('cpu')
@@ -102,7 +110,7 @@ def serve(directory):
                 # sample preserves substantially more of the parent's timbre
                 # and speaking manner.
                 conditioning=model.get_conditioning_latents(
-                    audio_path=[str(reference)],**clone_options)
+                    audio_path=[str(reference) for reference in references],**clone_options)
                 try:
                     model.to(device);conditioning=tuple(x.to(device) for x in conditioning)
                 except (RuntimeError,NotImplementedError):
@@ -154,7 +162,8 @@ def synthesize(reference, bank, reply=None):
         progress = bank / 'progress.tmp'
         progress.write_text(json.dumps({'progress': f'Создаю фразу {i + 1} из {len(texts)}'}))
         progress.replace(bank / 'progress.json')
-        tts.tts_to_file(text=text, speaker_wav=str(reference), language='ru',
+        references=list(reference) if isinstance(reference,(list,tuple)) else [reference]
+        tts.tts_to_file(text=text, speaker_wav=[str(path) for path in references], language='ru',
                         file_path=str(bank / f'phrase-{i}.wav'), split_sentences=True)
 
 

@@ -21,9 +21,10 @@ class Tensor:
 class Model:
     def __init__(self,fail_mps=False):
         self.device='cpu';self.conditioned=0;self.fail_mps=fail_mps;self.devices=[]
-        self.conditioning_kwargs=None;self.inference_kwargs=[]
+        self.conditioning_kwargs=None;self.conditioning_audio=None;self.inference_kwargs=[]
     def to(self,device):self.device=device;return self
     def get_conditioning_latents(self,audio_path,**kwargs):
+        self.conditioning_audio=list(audio_path)
         self.conditioning_kwargs=kwargs
         self.conditioned+=1;return Tensor(),Tensor()
     def inference_stream(self,*args,**kwargs):
@@ -62,3 +63,17 @@ class VoiceWorkerTests(unittest.TestCase):
     def test_unsupported_gpu_operation_falls_back_before_publishing_audio(self):
         model=Model(fail_mps=True);status=self.run_worker(model,1)
         self.assertEqual(model.devices,['mps','cpu']);self.assertEqual(status['device'],'cpu')
+
+    def test_worker_uses_every_reference_sample(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp);references=[]
+            for index in range(3):
+                reference=root/f'reference-{index}.wav';reference.write_bytes(f'voice {index}'.encode());references.append(reference)
+            out=root/'out';out.mkdir()
+            (root/'request.request.json').write_text(json.dumps({
+                'references':[str(path) for path in references], 'output':str(out), 'text':'Подсказка.'}))
+            model=Model();torch=SimpleNamespace(backends=SimpleNamespace(mps=SimpleNamespace(is_available=lambda:False)))
+            tts=SimpleNamespace(synthesizer=SimpleNamespace(tts_model=model))
+            with patch.dict('sys.modules',{'torch':torch}),patch('voice_worker.load_model',return_value=tts),patch('voice_worker.time.monotonic',side_effect=[0,0,0,400]):
+                serve(root)
+            self.assertEqual(model.conditioning_audio,[str(path) for path in references])

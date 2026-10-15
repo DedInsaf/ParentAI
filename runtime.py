@@ -52,8 +52,10 @@ class Runtime:
         from voice_engine import VoiceEngine
         self.voice_engine=VoiceEngine()
         self.reference_mode = 'clone' if self.xtts_enabled else 'direct'
+        self.reference_takes = []
         self.status = {'tts': 'Не загружена', 'assets': 'Ожидание загрузки', 'voice': 'idle',
-                       'progress': '', 'error': '', 'reference': False}
+                       'progress': '', 'error': '', 'reference': False,
+                       'reference_count': 0, 'reference_takes': []}
         self.manifest = []
         try:
             saved = json.loads((self.data / 'manifest.json').read_text())
@@ -64,19 +66,39 @@ class Runtime:
                 self.status['voice'] = 'ready'
         except (OSError, ValueError, KeyError, TypeError, AttributeError):
             pass
-        if (self.data / 'reference.wav').is_file():
+        try:
+            reference_settings = json.loads((self.data / 'reference.json').read_text())
+            saved_mode = reference_settings['mode']
+            self.reference_mode = saved_mode if saved_mode == 'direct' or self.xtts_enabled else 'direct'
+        except (OSError, ValueError, KeyError, TypeError):
+            reference_settings = {}
+        saved_takes = reference_settings.get('takes') if isinstance(reference_settings, dict) else None
+        if self.reference_mode == 'clone' and isinstance(saved_takes, list):
+            self.reference_takes = [take for take in saved_takes
+                                    if take in (1, 2, 3) and self.reference_path(take).is_file()]
+        elif self.reference_path().is_file():
+            self.reference_takes = [1]
+        if self.reference_takes:
             self.status['reference'] = True
-            try:
-                saved_mode = json.loads((self.data / 'reference.json').read_text())['mode']
-                self.reference_mode = saved_mode if saved_mode == 'direct' or self.xtts_enabled else 'direct'
-            except (OSError, ValueError, KeyError):
-                pass
+            self.status.update(reference_count=len(self.reference_takes),
+                               reference_takes=list(self.reference_takes))
 
     def safe_audio(self, relative):
         target = (self.data / relative).resolve()
         if not target.is_relative_to(self.data.resolve()) or target.suffix != '.wav':
             raise ValueError('Некорректный путь аудио')
         return target
+
+    def reference_path(self, take=1):
+        return self.data / ('reference.wav' if take == 1 else f'reference-{take}.wav')
+
+    def reference_paths(self):
+        """Active cloning samples, preserving one-file profiles from older releases."""
+        takes = self.reference_takes if self.reference_mode == 'clone' else [1]
+        if not takes and self.reference_path().is_file():
+            takes = [1]
+        paths = [self.reference_path(take) for take in takes]
+        return [path for path in paths if path.is_file()]
 
     def snapshot(self):
         with self.lock:
@@ -89,7 +111,7 @@ class Runtime:
 
     def start(self):
         if self.xtts_enabled and self.reference_mode=="clone" and self.status["reference"]:
-            self.voice_engine.warm(self.data/"reference.wav")
+            self.voice_engine.warm(self.reference_paths())
         threading.Thread(target=self.start_assets, daemon=True).start()
 
     def start_assets(self):
@@ -198,21 +220,40 @@ class Runtime:
             atomic_json(path, saved)
             return {'ok': True}
 
-    def reference(self, payload, mode='clone'):
+    def reference(self, payload, mode='clone', take=1):
         if mode not in ('clone', 'direct'):
             raise ValueError('Неизвестный режим голоса')
+        try:
+            take = int(take)
+        except (TypeError, ValueError):
+            raise ValueError('Неизвестный образец голоса') from None
+        if take not in ((1,) if mode == 'direct' else (1, 2, 3)):
+            raise ValueError('Неизвестный образец голоса')
         if mode == 'clone' and not self.xtts_enabled:
             raise ValueError('XTTS-v2 выключен: его лицензия не разрешает коммерческое использование. Выберите запись без клонирования.')
         with self.lock:
             if self.status['voice'] in BUSY or self.reply_busy:
                 raise ValueError('Сначала остановите создание голоса.')
-            clean, info = prepare_reference(payload, direct=mode == 'direct')
-            temporary = self.data / 'reference.tmp'
+            clean, info = prepare_reference(
+                payload, direct=mode == 'direct',
+                min_speech_seconds=None if mode == 'direct' else 7)
+            target = self.reference_path(take)
+            temporary = target.with_suffix('.tmp')
             temporary.write_bytes(clean)
-            temporary.replace(self.data / 'reference.wav')
-            atomic_json(self.data / 'reference.json', {'mode': mode})
+            temporary.replace(target)
+            active = set(self.reference_takes) if self.reference_mode == mode == 'clone' else set()
+            active.add(take)
+            self.reference_takes = sorted(active) if mode == 'clone' else [1]
+            atomic_json(self.data / 'reference.json', {'mode': mode, 'takes': self.reference_takes})
             self.reference_mode = mode
-            self.status.update(reference=True, voice='recorded', error='', progress='Запись проверена. Прослушайте и сохраните голос.')
+            self.status.update(
+                reference=True, reference_count=len(self.reference_takes),
+                reference_takes=list(self.reference_takes), voice='recorded', error='',
+                progress=(f'Образец {take} из 3 проверен. Запишите остальные для максимального сходства.'
+                          if mode == 'clone' and len(self.reference_takes) < 3
+                          else 'Все три образца готовы. Прослушайте их и создайте голос.'
+                          if mode == 'clone' else
+                          'Запись проверена. Прослушайте и сохраните напоминание.'))
             return info
 
     def generate(self):
@@ -243,7 +284,7 @@ class Runtime:
         for i,text in enumerate(PHRASES):
             self.set(progress=f'Создаю фразу {i+1} из {len(PHRASES)}')
             folder=bank/f'part-{i}';folder.mkdir()
-            self.voice_engine.synthesize(self.data/'reference.wav',folder,text,self.cancel)
+            self.voice_engine.synthesize(self.reference_paths(),folder,text,self.cancel)
             shutil.copyfile(folder/'phrase-0.wav',bank/f'phrase-{i}.wav')
             shutil.rmtree(folder)
         self.set(tts='Голос прогрет · память освобождается после занятия или 5 минут простоя')

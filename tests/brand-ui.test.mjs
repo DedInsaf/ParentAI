@@ -53,9 +53,11 @@ test('avatar dependency errors distinguish local WebAssembly from internet failu
   assert.doesNotMatch(script, /подготовить создание аватара\. Проверьте интернет/);
 });
 
-test('a cloned parent voice is the lesson default and uses a full reference sample', () => {
+test('a cloned parent voice is the lesson default and combines three expressive samples', () => {
   assert.match(html, /<option value="parent" selected>Голос родителя/);
   assert.doesNotMatch(html, /<option value="yandex" selected>/);
-  assert.match(script, /direct' \? 8 : 30/);
-  assert.match(script, /Записать образец · 30 сек/);
+  assert.match(script, /direct' \? 8 : 18/);
+  assert.equal((html.match(/data-voice-take=/g) || []).length, 3);
+  assert.match(script, /reference_takes\?\.length \|\| 0\) === 3/);
+  assert.match(script, /references|take=\$\{take\}/);
 });

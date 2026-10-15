@@ -52,8 +52,13 @@ class VoiceEngine:
             directory=None
             try:
                 directory=self.directory()/('warm-'+uuid.uuid4().hex)
-                directory.mkdir();shutil.copyfile(reference,directory/'reference.wav')
-                self.synthesize(directory/'reference.wav',directory,'',cancel)
+                directory.mkdir()
+                references = list(reference) if isinstance(reference, (list, tuple)) else [reference]
+                copies=[]
+                for index, source in enumerate(references, 1):
+                    target=directory/('reference.wav' if index==1 else f'reference-{index}.wav')
+                    shutil.copyfile(source,target);copies.append(target)
+                self.synthesize(copies,directory,'',cancel)
             except Exception:
                 pass  # Public status reports model load failures; no noisy thread traceback.
             finally:
@@ -83,7 +88,9 @@ class VoiceEngine:
             root=Path(self.storage.name)
             request=root/(key+'.request.json')
             temporary=request.with_suffix('.tmp')
-            temporary.write_text(json.dumps({'reference':str(reference),'output':str(output),'text':text}),encoding='utf-8')
+            references = list(reference) if isinstance(reference, (list, tuple)) else [reference]
+            temporary.write_text(json.dumps({'references':[str(path) for path in references],
+                                             'output':str(output),'text':text}),encoding='utf-8')
             temporary.replace(request)
             result=Path(output)/'stream.json'
             deadline=time.monotonic()+600

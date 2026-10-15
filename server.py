@@ -400,7 +400,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(404, {'error': 'Not found'})
         # Serve only published WAVs, not references/logs or arbitrary backend files.
         if runtime:
-            allowed = {'reference.wav'} | {item['file'] for item in runtime.snapshot()['phrases']}
+            allowed = {path.name for path in runtime.reference_paths()} | {item['file'] for item in runtime.snapshot()['phrases']}
             if relative not in allowed:
                 return self.send(404, {'error': 'Not found'})
         cache = ('public, max-age=31536000, immutable'
@@ -566,7 +566,7 @@ class Handler(BaseHTTPRequestHandler):
             if path == '/api/voice-warm':
                 with runtime.lock:
                     if runtime.reference_mode=='clone' and runtime.status['reference'] and runtime.status['voice'] not in ('generating','cancelling'):
-                        runtime.voice_engine.warm(runtime.data/'reference.wav')
+                        runtime.voice_engine.warm(runtime.reference_paths())
                 return self.send(202,{'ok':True})
             if path == '/api/voice-release':
                 runtime.voice_engine.release()
@@ -624,8 +624,10 @@ class Handler(BaseHTTPRequestHandler):
                 runtime.cancel_generation()
                 return self.send(200, {'ok': True})
             if path == '/api/reference':
-                mode = parse_qs(urlsplit(self.path).query).get('mode', ['clone'])[0]
-                return self.send(200, runtime.reference(payload, mode))
+                query = parse_qs(urlsplit(self.path).query)
+                mode = query.get('mode', ['clone'])[0]
+                take = query.get('take', ['1'])[0]
+                return self.send(200, runtime.reference(payload, mode, take))
             if self.path == '/api/generate':
                 runtime.generate()
                 return self.send(202, {'ok': True})

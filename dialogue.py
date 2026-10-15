@@ -423,13 +423,16 @@ class Dialogues:
                 runtime.reply_busy = acquired = True
                 bank = Path(self.storage.name) / job['id']
                 bank.mkdir()
-                shutil.copyfile(runtime.data / 'reference.wav', bank / 'reference.wav')
+                references=[]
+                for index, source in enumerate(runtime.reference_paths(), 1):
+                    target=bank / ('reference.wav' if index == 1 else f'reference-{index}.wav')
+                    shutil.copyfile(source, target);references.append(target)
             job['state'] = 'speaking'
             spoken = voice_excerpt(answer)
             def update(value):
                 with self.lock:
                     job['chunks'] = list(value.get('chunks', []))
-            runtime.voice_engine.synthesize(bank / 'reference.wav', bank, spoken, job['cancel'], update)
+            runtime.voice_engine.synthesize(references, bank, spoken, job['cancel'], update)
             if job['cancel'].is_set() or self.closed.is_set():
                 raise InterruptedError()
             job.update(cues=timeline(bank / 'phrase-0.wav', spoken), audio=True, state='done')
