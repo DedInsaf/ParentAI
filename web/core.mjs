@@ -146,6 +146,24 @@ export function withTimeout(promise, ms, dispose = () => {}, signal) {
   return result.finally(() => { clearTimeout(timer); signal?.removeEventListener('abort', abort); });
 }
 
+export function fetchFailure(error, path, timedOut = false, cancelled = false) {
+  if (cancelled) {
+    const result = new Error('Действие отменено.');
+    result.name = 'AbortError';
+    return result;
+  }
+  if (timedOut) {
+    return new Error(path === 'speech'
+      ? 'Распознавание заняло больше обычного. Скажи вопрос ещё раз или введи его текстом.'
+      : 'Сервер отвечает дольше обычного. Повторите попытку.');
+  }
+  const message = String(error?.message || error || 'Неизвестная ошибка').trim();
+  if (error?.name === 'AbortError' || /fetch (?:is )?aborted|the operation was aborted|signal is aborted/iu.test(message)) {
+    return new Error('Связь с приложением прервалась. Повторите попытку.');
+  }
+  return error instanceof Error ? error : new Error(message);
+}
+
 export async function requestUserCamera(mediaDevices, dispose, signal, timeout = 20000) {
   if (!mediaDevices?.getUserMedia) {
     const error = new Error('Камера недоступна в этом браузере.');

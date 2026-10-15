@@ -48,6 +48,10 @@ export function classifySpeechRecognitionError(error){
   const message=String(error?.message||error||'Неизвестная ошибка распознавания речи.').trim();
   const retryableAudio=/(не слышно речи|не разобрал вопрос|повторите или введите текст|запись вопроса неполная|некорректная запись вопроса)/iu.test(message);
   if(retryableAudio)return {stop:false,message:'Не разобрал речь. Подойди ближе к микрофону и попробуй ещё раз.'};
+  if(/распознавание заняло больше обычного/iu.test(message))return {
+    stop:false,
+    message:'Распознавание заняло больше обычного. Микрофон продолжает работать — скажи вопрос ещё раз.',
+  };
 
   // Provider, network, access, and quota failures must be shown verbatim. Hiding
   // them behind "не разобрал речь" makes a SpeechKit outage look like a bad mic

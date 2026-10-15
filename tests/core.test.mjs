@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {Presence, positionsFor, neutralFacePositions, encodeWav, scanQuality, scanCoverage, scanTurnIssue, faceYaw, mouthRig, speechOpening, requestUserCamera} from '../web/core.mjs';
+import {Presence, positionsFor, neutralFacePositions, encodeWav, scanQuality, scanCoverage, scanTurnIssue, faceYaw, mouthRig, speechOpening, requestUserCamera, fetchFailure} from '../web/core.mjs';
 test('coordinates use matching physical units on a wide camera',()=>{
   const p=positionsFor([{x:.6,y:.6,z:.1},{x:.5,y:.5,z:0}],1280,720,1);
   assert.ok(Math.abs(p[1]/p[0]+720/1280)<1e-6);
@@ -77,6 +77,13 @@ test('late camera stream is disposed after permission timeout',async()=>{
   await assert.rejects(withTimeout(pending,5,v=>{disposed=v}));
   resolve('stream'); await new Promise(r=>setTimeout(r,0));
   assert.equal(disposed,'stream');
+});
+
+test('aborted requests never expose browser internals and speech timeouts are actionable',()=>{
+  const aborted=new DOMException('Fetch is aborted','AbortError');
+  assert.equal(fetchFailure(aborted,'status').message,'Связь с приложением прервалась. Повторите попытку.');
+  assert.match(fetchFailure(aborted,'speech',true).message,/Распознавание заняло больше обычного/);
+  assert.equal(fetchFailure(aborted,'speech',false,true).name,'AbortError');
 });
 test('cancelling pending microphone permission also disposes late stream',async()=>{
   const controller=new AbortController(); let resolve, disposed=false;

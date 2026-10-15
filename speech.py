@@ -3,6 +3,7 @@ import io
 import base64
 import binascii
 import json
+import logging
 import math
 import importlib.util
 import threading
@@ -19,6 +20,19 @@ STT_ENDPOINT = 'https://stt.api.cloud.yandex.net/speech/v1/stt:recognize'
 TTS_ENDPOINT = 'https://tts.api.cloud.yandex.net/tts/v3/utteranceSynthesis'
 RETRYABLE_SPEECHKIT_CODES = frozenset((408, 500, 501, 502, 503, 504))
 LOCAL_STT_MODEL = 'openai/whisper-small'
+
+
+class _ExpectedTransformersNoise(logging.Filter):
+    """Hide two harmless Transformers notices that users mistake for failures."""
+    def filter(self, record):
+        message = record.getMessage()
+        return not (message.startswith('Device set to use ')
+                    or '`return_token_timestamps` is deprecated for WhisperFeatureExtractor' in message)
+
+
+for _logger_name in ('transformers.pipelines.base',
+                     'transformers.models.whisper.feature_extraction_whisper'):
+    logging.getLogger(_logger_name).addFilter(_ExpectedTransformersNoise())
 
 
 def _json_stream(payload):

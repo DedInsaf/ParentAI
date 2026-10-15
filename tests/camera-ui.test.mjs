@@ -58,3 +58,8 @@ test('voice question is visible, accepts ordinary speech and stops after silence
   assert.match(html, /слово «помоги» больше не обязательно/);
   assert.match(html, /сама закончится после короткой паузы/);
 });
+
+test('speech recognition does not race XTTS warm-up and has a cold-start allowance', () => {
+  assert.doesNotMatch(script, /api\('voice-warm'/);
+  assert.match(script, /api\('speech',wav,true,120000/);
+});

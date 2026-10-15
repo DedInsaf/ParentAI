@@ -561,6 +561,10 @@ class Handler(BaseHTTPRequestHandler):
             if path == '/api/avatar':
                 return self.send(200, runtime.avatar(json.loads(payload)))
             if path == '/api/speech':
+                # XTTS and Whisper are both large CPU models. A speculative
+                # XTTS warm-up must not compete with recognition for RAM/CPU.
+                # It will be started again only after the tutor has an answer.
+                runtime.voice_engine.release()
                 return self.send(200, self.server.recognize(
                     user.id, payload, self.headers.get('X-Request-Id'), user.role == 'admin'))
             if path == '/api/voice-warm':

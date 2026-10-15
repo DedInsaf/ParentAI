@@ -50,4 +50,6 @@ test('speech errors distinguish unclear audio from provider failures',()=>{
     {stop:true,message:'Не удалось связаться со SpeechKit. Повторите позже.'});
   assert.deepEqual(classifySpeechRecognitionError(new Error('Превышена квота SpeechKit (код 429).')),
     {stop:true,message:'Превышена квота SpeechKit (код 429).'});
+  assert.deepEqual(classifySpeechRecognitionError(new Error('Распознавание заняло больше обычного. Скажи вопрос ещё раз.')),
+    {stop:false,message:'Распознавание заняло больше обычного. Микрофон продолжает работать — скажи вопрос ещё раз.'});
 });

@@ -1,4 +1,4 @@
-import {Presence, encodeWav, withTimeout, requestUserCamera, speechOpening, scanQuality, scanTurnIssue, portraitQuality, faceYaw} from './core.mjs';
+import {Presence, encodeWav, withTimeout, fetchFailure, requestUserCamera, speechOpening, scanQuality, scanTurnIssue, portraitQuality, faceYaw} from './core.mjs';
 import {blinkAmount} from './head-geometry.mjs';
 import {SpeechGate,isDirectedSpeech,classifySpeechRecognitionError} from './listening.mjs';
 import {AvatarMotion} from './avatar-motion.mjs';
@@ -56,8 +56,9 @@ function mediaError(e) {
 
 async function api(path, body, retry = true, timeout = 15000, signal, operationId = requestId()) {
   const controller = new AbortController();
+  let timedOut = false;
   const abort=()=>controller.abort();signal?.addEventListener("abort",abort,{once:true});if(signal?.aborted)abort();
-  const timer = setTimeout(() => controller.abort(), timeout);
+  const timer = setTimeout(() => { timedOut = true; controller.abort(); }, timeout);
   try {
     const res = await fetch('/api/' + path, {method: body === undefined ? 'GET' : 'POST',
       signal: controller.signal,
@@ -77,6 +78,8 @@ async function api(path, body, retry = true, timeout = 15000, signal, operationI
     }
     if (!res.ok) throw new Error(data.error || `Ошибка ${res.status}`);
     return data;
+  } catch(error) {
+    throw fetchFailure(error,path,timedOut,!!signal?.aborted);
   } finally { clearTimeout(timer);signal?.removeEventListener("abort",abort); }
 }
 function controls() {
@@ -597,7 +600,6 @@ async function start() {
   if(lessonCameraEnabled) startLessonPresence();
   else $('monitorStatus').textContent='Камера выключена родителем';
   controls();
-  if($('replyVoice').value==='parent') api('voice-warm',new Uint8Array()).catch(()=>{});
   startHandsFree().catch(fail);
   try { await playVoice('lesson'); } catch(e) { fail(e); }
 }
@@ -876,7 +878,7 @@ async function recognizeHandsFree(wav,listenId){
   listenerPending=true;controls();const epoch=helpEpoch;const abort=new AbortController();if(listener)listener.sttAbort=abort;
   setListenerState('processing','Распознаю вопрос. Сейчас отвечу.');
   try{
-    const result=await api('speech',wav,true,50000,abort.signal);
+    const result=await api('speech',wav,true,120000,abort.signal);
     if(result.limit_warning)$('tutorStatus').textContent=result.limit_warning;
     if(listenId!==listenEpoch||epoch!==helpEpoch||!running||paused)return;
     const heard=String(result.text||'').trim();
@@ -931,7 +933,7 @@ async function voiceQuestion() {
   const epoch=++helpEpoch; tutorBusy=true;controls();
   try {
     $('tutorStatus').textContent='Распознаю твой вопрос…';
-    const result=await api('speech',wav,true,50000);
+    const result=await api('speech',wav,true,120000);
     if(result.limit_warning)$('tutorStatus').textContent=result.limit_warning;
     if(epoch!==helpEpoch) return;
     tutorBusy=false;
@@ -1002,7 +1004,6 @@ $('readyCamera').addEventListener('change',async()=>{
 $('closeReadyCameraBtn').addEventListener('click',()=>closeReadyCameraPreview(true));
 action('dismissMicIntroBtn',()=>{$('micIntro').hidden=true;});
 document.querySelector('.app-header .brand').addEventListener('click',event=>{event.preventDefault();if(running)stop();setupStep('face');});
-$('replyVoice').addEventListener('change',()=>{if(running&&$('replyVoice').value==='parent')api('voice-warm',new Uint8Array()).catch(()=>{});});
 $('voiceQuestionBtn').addEventListener('click',()=>voiceQuestion().catch(fail));
 $('scanAudio').addEventListener('change',()=>{if(!$('scanAudio').checked) window.speechSynthesis?.cancel();});
 document.querySelectorAll('[data-setup-step]').forEach(button=>button.addEventListener('click',()=>setupStep(button.dataset.setupStep)));
