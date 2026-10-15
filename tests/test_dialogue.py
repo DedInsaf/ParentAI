@@ -271,8 +271,10 @@ class StreamedVoiceTests(unittest.TestCase):
             def answer(self,*args,**kwargs):return {'answer':'Подумай, какое правило подходит?'}
         class Engine:
             calls=0
-            def synthesize(self,ref,output,text,cancel,update):
+            styles=[]
+            def synthesize(self,ref,output,text,cancel,update,style='neutral'):
                 self.calls+=1
+                self.styles.append(style)
                 wavfile.write(output/'chunk-0.wav',16000,np.ones(1600,dtype=np.float32)*.1)
                 update({'chunks':[{'file':'chunk-0.wav','cues':timeline(output/'chunk-0.wav',text)}]})
                 available.set();finish.wait(2)
@@ -295,6 +297,7 @@ class StreamedVoiceTests(unittest.TestCase):
                 second=manager.start('Ещё подсказку','средняя школа',first['session'])
                 manager.jobs[second['id']]['thread'].join(2)
                 self.assertEqual(runtime.voice_engine.calls,2)
+                self.assertEqual(runtime.voice_engine.styles,['supportive','supportive'])
             finally:finish.set();manager.close()
 
     def test_failed_first_question_can_be_retried_without_expired_session(self):

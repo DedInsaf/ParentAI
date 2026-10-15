@@ -79,7 +79,7 @@ class VoiceEngine:
             except (OSError,ValueError):device='cpu'
             return {'state':'ready' if ready else 'loading','device':device,'message':('Голос готов · Apple GPU' if device=='mps' else 'Голос готов · CPU') if ready else 'Подготавливаю голос к занятию…'}
 
-    def synthesize(self,reference,output,text,cancel,on_update=lambda _:None):
+    def synthesize(self,reference,output,text,cancel,on_update=lambda _:None,style='neutral'):
         with self.request_lock:
             if cancel.is_set(): raise InterruptedError()
             self.start()
@@ -90,7 +90,8 @@ class VoiceEngine:
             temporary=request.with_suffix('.tmp')
             references = list(reference) if isinstance(reference, (list, tuple)) else [reference]
             temporary.write_text(json.dumps({'references':[str(path) for path in references],
-                                             'output':str(output),'text':text}),encoding='utf-8')
+                                             'output':str(output),'text':text,
+                                             'style':style}),encoding='utf-8')
             temporary.replace(request)
             result=Path(output)/'stream.json'
             deadline=time.monotonic()+600

@@ -281,10 +281,12 @@ class Runtime:
         if self.cancel.is_set() or self.stop.is_set():
             raise InterruptedError('Создание голоса отменено')
         self.set(tts='Модель прогревается для быстрых ответов',progress='Загружаю модель голоса…')
+        styles = ('firm', 'supportive', 'firm', 'firm')
         for i,text in enumerate(PHRASES):
             self.set(progress=f'Создаю фразу {i+1} из {len(PHRASES)}')
             folder=bank/f'part-{i}';folder.mkdir()
-            self.voice_engine.synthesize(self.reference_paths(),folder,text,self.cancel)
+            self.voice_engine.synthesize(
+                self.reference_paths(),folder,text,self.cancel,style=styles[i])
             shutil.copyfile(folder/'phrase-0.wav',bank/f'phrase-{i}.wav')
             shutil.rmtree(folder)
         self.set(tts='Голос прогрет · память освобождается после занятия или 5 минут простоя')

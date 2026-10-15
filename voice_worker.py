@@ -31,12 +31,35 @@ def conditioning_options(model):
 
 
 def inference_options(model):
+    # Lower randomness keeps the cloned identity stable between short lesson
+    # replies. XTTS' more creative defaults can noticeably change age, pitch
+    # and accent from one generation to the next.
     return {
-        'temperature': float(model_setting(model, 'temperature', .75)),
+        'temperature': min(.65, float(model_setting(model, 'temperature', .75))),
         'length_penalty': float(model_setting(model, 'length_penalty', 1.0)),
         'repetition_penalty': float(model_setting(model, 'repetition_penalty', 5.0)),
         'top_k': int(model_setting(model, 'top_k', 50)),
-        'top_p': float(model_setting(model, 'top_p', .85)),
+        'top_p': min(.8, float(model_setting(model, 'top_p', .85))),
+    }
+
+
+def build_style_conditionings(model, references, options):
+    """Average speaker identity across takes without averaging their delivery."""
+    paths = [str(reference) for reference in references]
+    combined = model.get_conditioning_latents(audio_path=paths, **options)
+    if len(paths) == 1:
+        style_latents = [combined[0]]
+    else:
+        # XTTS normally concatenates every take for both identity and style.
+        # Keep its averaged speaker embedding, but derive GPT prosody from one
+        # coherent recording so neutral, warm and firm takes do not blur.
+        style_latents = [model.get_conditioning_latents(
+            audio_path=[path], **options)[0] for path in paths]
+    speaker = combined[1]
+    return {
+        'neutral': (style_latents[0], speaker),
+        'supportive': (style_latents[min(1, len(style_latents) - 1)], speaker),
+        'firm': (style_latents[-1], speaker),
     }
 
 
@@ -61,12 +84,12 @@ def serve(directory):
     import torch
     tts=load_model(); model=tts.synthesizer.tts_model
     device='mps' if os.getenv('PARENTAI_VOICE_DEVICE','auto')!='cpu' and torch.backends.mps.is_available() else 'cpu'
-    cached_key=None;conditioning=None
+    cached_key=None;conditioning=None;conditionings={};conditioning_style='neutral'
     clone_options=conditioning_options(model)
     generation_options=inference_options(model)
     atomic_json(directory/'ready.json',{'ok':True,'device':device})
     def generate(sentence):
-        nonlocal device,conditioning
+        nonlocal device,conditioning,conditionings
         emitted=False
         try:
             for tensor in model.inference_stream(
@@ -76,7 +99,10 @@ def serve(directory):
         except (RuntimeError,NotImplementedError):
             if device!='mps' or emitted:raise
             # Retry before publishing audio, so the answer never repeats midway.
-            device='cpu';model.to(device);conditioning=tuple(x.to(device) for x in conditioning)
+            device='cpu';model.to(device)
+            conditionings={name:tuple(x.to(device) for x in values)
+                           for name,values in conditionings.items()}
+            conditioning=conditionings[conditioning_style]
             atomic_json(directory/'ready.json',{'ok':True,'device':device})
             yield from model.inference_stream(
                 sentence,'ru',*conditioning,stream_chunk_size=20,
@@ -105,19 +131,21 @@ def serve(directory):
             if key!=cached_key:
                 # Reference feature extraction stays on CPU; synthesis uses Metal.
                 model.to('cpu')
-                # The low-level XTTS method otherwise considers only the first
-                # six seconds. Averaging short chunks across the complete clean
-                # sample preserves substantially more of the parent's timbre
-                # and speaking manner.
-                conditioning=model.get_conditioning_latents(
-                    audio_path=[str(reference) for reference in references],**clone_options)
+                conditionings=build_style_conditionings(model,references,clone_options)
                 try:
-                    model.to(device);conditioning=tuple(x.to(device) for x in conditioning)
+                    model.to(device)
+                    conditionings={name:tuple(x.to(device) for x in values)
+                                   for name,values in conditionings.items()}
                 except (RuntimeError,NotImplementedError):
                     if device!='mps':raise
-                    device='cpu';model.to(device);conditioning=tuple(x.to(device) for x in conditioning)
+                    device='cpu';model.to(device)
+                    conditionings={name:tuple(x.to(device) for x in values)
+                                   for name,values in conditionings.items()}
                     atomic_json(directory/'ready.json',{'ok':True,'device':device})
                 cached_key=key
+            conditioning_style=value.get('style','neutral')
+            if conditioning_style not in conditionings: conditioning_style='neutral'
+            conditioning=conditionings[conditioning_style]
             if not value['text']:
                 for _ in generate('Привет.'):pass
                 manifest['state']='done';atomic_json(output/'stream.json',manifest);continue

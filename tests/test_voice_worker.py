@@ -12,6 +12,7 @@ from voice_worker import serve
 
 
 class Tensor:
+    def __init__(self,tag=''):self.tag=tag
     def to(self,device):return self
     def detach(self):return self
     def cpu(self):return self
@@ -21,14 +22,17 @@ class Tensor:
 class Model:
     def __init__(self,fail_mps=False):
         self.device='cpu';self.conditioned=0;self.fail_mps=fail_mps;self.devices=[]
-        self.conditioning_kwargs=None;self.conditioning_audio=None;self.inference_kwargs=[]
+        self.conditioning_kwargs=None;self.conditioning_audio=None;self.conditioning_calls=[]
+        self.inference_kwargs=[];self.inference_styles=[]
     def to(self,device):self.device=device;return self
     def get_conditioning_latents(self,audio_path,**kwargs):
         self.conditioning_audio=list(audio_path)
+        self.conditioning_calls.append(list(audio_path))
         self.conditioning_kwargs=kwargs
-        self.conditioned+=1;return Tensor(),Tensor()
+        self.conditioned+=1;return Tensor('|'.join(audio_path)),Tensor('speaker')
     def inference_stream(self,*args,**kwargs):
         self.inference_kwargs.append(kwargs)
+        self.inference_styles.append(args[2].tag)
         self.devices.append(self.device)
         if self.fail_mps and self.device=='mps':raise RuntimeError('Unsupported Metal operation')
         yield Tensor()
@@ -59,6 +63,8 @@ class VoiceWorkerTests(unittest.TestCase):
             'max_ref_length':30,'gpt_cond_len':30,'gpt_cond_chunk_len':4,
             'sound_norm_refs':False})
         self.assertEqual(model.inference_kwargs[0]['repetition_penalty'],5.0)
+        self.assertEqual(model.inference_kwargs[0]['temperature'],.65)
+        self.assertEqual(model.inference_kwargs[0]['top_p'],.8)
 
     def test_unsupported_gpu_operation_falls_back_before_publishing_audio(self):
         model=Model(fail_mps=True);status=self.run_worker(model,1)
@@ -71,9 +77,12 @@ class VoiceWorkerTests(unittest.TestCase):
                 reference=root/f'reference-{index}.wav';reference.write_bytes(f'voice {index}'.encode());references.append(reference)
             out=root/'out';out.mkdir()
             (root/'request.request.json').write_text(json.dumps({
-                'references':[str(path) for path in references], 'output':str(out), 'text':'Подсказка.'}))
+                'references':[str(path) for path in references], 'output':str(out),
+                'text':'Подсказка.', 'style':'supportive'}))
             model=Model();torch=SimpleNamespace(backends=SimpleNamespace(mps=SimpleNamespace(is_available=lambda:False)))
             tts=SimpleNamespace(synthesizer=SimpleNamespace(tts_model=model))
             with patch.dict('sys.modules',{'torch':torch}),patch('voice_worker.load_model',return_value=tts),patch('voice_worker.time.monotonic',side_effect=[0,0,0,400]):
                 serve(root)
-            self.assertEqual(model.conditioning_audio,[str(path) for path in references])
+            self.assertEqual(model.conditioning_calls[0],[str(path) for path in references])
+            self.assertEqual(model.conditioning_calls[1:],[[str(path)] for path in references])
+            self.assertEqual(model.inference_styles,[str(references[1])])

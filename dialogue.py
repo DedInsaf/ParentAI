@@ -432,7 +432,8 @@ class Dialogues:
             def update(value):
                 with self.lock:
                     job['chunks'] = list(value.get('chunks', []))
-            runtime.voice_engine.synthesize(references, bank, spoken, job['cancel'], update)
+            runtime.voice_engine.synthesize(
+                references, bank, spoken, job['cancel'], update, style='supportive')
             if job['cancel'].is_set() or self.closed.is_set():
                 raise InterruptedError()
             job.update(cues=timeline(bank / 'phrase-0.wav', spoken), audio=True, state='done')
