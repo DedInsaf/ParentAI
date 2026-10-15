@@ -1,5 +1,6 @@
 """One launch: local API, model workers and camera-capable browser UI."""
 import argparse
+import logging
 import threading
 import webbrowser
 from runtime import Runtime, ROOT
@@ -8,6 +9,8 @@ from tutor import load_local_env
 
 
 def main():
+    logging.basicConfig(level=logging.INFO,
+                        format='%(asctime)s %(levelname)s %(name)s: %(message)s')
     parser = argparse.ArgumentParser(description='Адым — шаг к самостоятельной учёбе')
     parser.add_argument('--desktop', action='store_true', help='Окно pywebview (доступ к камере зависит от ОС)')
     parser.add_argument('--no-browser', action='store_true')

@@ -75,6 +75,18 @@ class UsageTests(unittest.TestCase):
             product.reserve(2, 'llm', 'second-account',
                             estimated_cost=rubles_to_micros('0.03'), bypass_limits=True)
 
+    def test_account_deletion_removes_all_usage_rows(self):
+        self.store.set_subscription(45, 'free')
+        study=self.store.start_study_session(45)
+        event=self.store.reserve(45,'llm','delete-me',lesson_id='lesson-delete',
+                                 study_session_id=study['id'],new_lesson=True)
+        self.store.complete(event['id'])
+        self.store.delete_user_data(45)
+        with sqlite3.connect(self.store.path) as connection:
+            for table in ('usage_events','lessons','study_sessions','payment_subscriptions','subscriptions'):
+                self.assertEqual(connection.execute(
+                    f'SELECT COUNT(*) FROM {table} WHERE user_id=45').fetchone()[0],0)
+
     def test_reports_only_aggregates_and_percentiles(self):
         event = self.store.reserve(3, 'stt', 'speech-001', duration_ms=4100, billed_units=15,
                                    estimated_cost=self.store.config.stt_cost(15), provider='Yandex SpeechKit')

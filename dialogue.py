@@ -446,3 +446,21 @@ class Dialogues:
         for job in jobs:
             job['thread'].join(timeout=6)
         self.storage.cleanup()
+
+    def cancel_user(self, user_id):
+        """Stop and forget temporary dialogue data before an account is deleted."""
+        with self.lock:
+            jobs = [job for job in self.jobs.values() if job['user_id'] == user_id]
+            for job in jobs:
+                job['cancel'].set()
+        for job in jobs:
+            job['thread'].join(timeout=6)
+        with self.lock:
+            for job in jobs:
+                self.jobs.pop(job['id'], None)
+                self.requests.pop((user_id, job['request_id']), None)
+                shutil.rmtree(Path(self.storage.name) / job['id'], ignore_errors=True)
+            for key, value in list(self.sessions.items()):
+                if value.get('user_id') == user_id:
+                    del self.sessions[key]
+            self.recent.pop(user_id, None)

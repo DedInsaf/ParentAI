@@ -33,7 +33,7 @@
       <button class="full auth-submit" type="submit">Войти в аккаунт</button>
     </form>
     <form id="registerForm" hidden>
-      <h2>Создать аккаунт</h2><p class="muted">Все поля обязательны.</p>
+      <h2>Создать аккаунт</h2><p class="muted">Код приглашения нужен только во время закрытого бета-теста.</p>
       <label for="registerLogin">Логин</label><input id="registerLogin" name="login" type="text" autocomplete="username" minlength="3" maxlength="32" pattern="[A-Za-zА-Яа-яЁё0-9][A-Za-zА-Яа-яЁё0-9._-]{2,31}" title="От 3 до 32 символов: буквы, цифры, точка, дефис и подчёркивание" required>
       <label for="registerEmail">Почта</label><input id="registerEmail" name="email" type="email" autocomplete="email" maxlength="254" required>
       <label for="registerPassword">Пароль</label><input id="registerPassword" name="password" type="password" autocomplete="new-password" minlength="8" maxlength="128" required><small class="field-hint">Минимум 8 символов</small>
@@ -44,6 +44,7 @@
       <button class="full auth-submit" type="submit">Создать аккаунт</button>
     </form>
     <p id="authError" class="auth-error" role="alert" hidden></p>
+    <nav class="auth-links" aria-label="Документы и поддержка"><a href="https://adym.ru/privacy.html" target="_blank" rel="noopener">Конфиденциальность</a><a href="https://adym.ru/terms.html" target="_blank" rel="noopener">Соглашение</a><a href="https://adym.ru/support.html" target="_blank" rel="noopener">Поддержка</a></nav>
   </section>
 </main>
 <header class="app-header" hidden>
@@ -54,7 +55,7 @@
     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7.5A2.5 2.5 0 0 1 6.5 5h11A2.5 2.5 0 0 1 20 7.5v9a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 16.5v-9Z"/><path d="M4 9h16M16 14h1"/></svg>
     <span><small>Тариф</small><strong id="headerPlanName">Бесплатный</strong></span>
   </button>
-  <div class="account"><span id="accountLogin"></span><button id="logoutBtn" type="button" class="quiet">Выйти</button></div>
+  <details class="account"><summary><span id="accountLogin"></span><span aria-hidden="true">⌄</span></summary><div class="account-menu"><a href="https://adym.ru/support.html" target="_blank" rel="noopener">Поддержка</a><a href="https://adym.ru/privacy.html" target="_blank" rel="noopener">Конфиденциальность</a><a href="https://adym.ru/terms.html" target="_blank" rel="noopener">Соглашение</a><button id="logoutBtn" type="button" class="quiet">Выйти</button><button id="deleteAccountBtn" type="button" class="danger-quiet">Удалить аккаунт</button></div></details>
   <div id="lessonToolbar" class="lesson-toolbar" hidden><button id="pauseBtn" class="secondary" disabled>Сделать перерыв</button><button id="stopBtn" class="quiet" disabled>Закончить</button></div>
 </header>
 <dialog id="billingDialog" class="billing-dialog" aria-labelledby="subscriptionTitle">
@@ -67,25 +68,35 @@
       <article id="freePlanCard" class="plan-card">
         <div class="plan-card-title"><div><span class="plan-name">Бесплатный</span><strong>0 ₽</strong></div><span id="freePlanState" class="plan-state">Текущий тариф</span></div>
         <p>Чтобы спокойно попробовать Адым.</p>
-        <ul><li><strong id="freeSessions">5</strong> занятий в месяц</li><li>до <strong id="freeMinutes">20</strong> минут каждое</li><li>до <strong id="freeTasks">3</strong> новых задач за занятие</li><li>голосовые вопросы локально — без лимита; резерв SpeechKit — <strong id="freeSpeechFallback">2,5 мин</strong>/месяц</li><li><strong id="freeVoice">3</strong> ответа голосом Яндекса за занятие</li><li>голос родителя — без отдельного лимита</li></ul>
+        <ul><li><strong id="freeSessions">5</strong> занятий в месяц</li><li>до <strong id="freeMinutes">20</strong> минут каждое</li><li>до <strong id="freeTasks">3</strong> новых задач за занятие</li><li>голосовые вопросы — без отдельного лимита; резервное распознавание — <strong id="freeSpeechFallback">2,5 мин</strong>/месяц</li><li><strong id="freeVoice">3</strong> озвученных ответа за занятие</li><li>записанные напоминания родителя — без отдельного лимита</li></ul>
         <button id="freePlanBtn" type="button" class="secondary full" disabled>Текущий тариф</button>
       </article>
       <article id="paidPlanCard" class="plan-card featured">
         <div class="plan-card-title"><div><span class="plan-name">Адым Плюс</span><strong><span id="paidPrice">490</span> ₽<small>/месяц</small></strong></div><span class="best-choice">Для регулярных занятий</span></div>
         <p>Комфортный режим на учебный месяц.</p>
-        <ul><li><strong id="paidSessions">20</strong> занятий в месяц</li><li>до <strong id="paidMinutes">30</strong> минут каждое</li><li>до <strong id="paidTasks">3</strong> новых задач за занятие</li><li>голосовые вопросы локально — без лимита; резерв SpeechKit — <strong id="paidSpeechFallback">60 мин</strong>/месяц</li><li><strong id="paidVoice">10</strong> ответов голосом Яндекса за занятие</li><li>голос родителя — без отдельного лимита</li></ul>
+        <ul><li><strong id="paidSessions">20</strong> занятий в месяц</li><li>до <strong id="paidMinutes">30</strong> минут каждое</li><li>до <strong id="paidTasks">3</strong> новых задач за занятие</li><li>голосовые вопросы — без отдельного лимита; резервное распознавание — <strong id="paidSpeechFallback">60 мин</strong>/месяц</li><li><strong id="paidVoice">10</strong> озвученных ответов за занятие</li><li>записанные напоминания родителя — без отдельного лимита</li></ul>
         <button id="buyPaidBtn" type="button" class="full">Оформить подписку через Platega</button>
       </article>
       <article id="ultraPlanCard" class="plan-card ultra">
         <div class="plan-card-title"><div><span class="plan-name">Адым Ультра</span><strong><span id="ultraPrice">990</span> ₽<small>/месяц</small></strong></div><span class="best-choice">Всё включено</span></div>
         <p>Максимум времени и общения для большой учебной нагрузки.</p>
-        <ul><li><strong id="ultraSessions">45</strong> занятий в месяц</li><li>до <strong id="ultraMinutes">45</strong> минут каждое</li><li>до <strong id="ultraTasks">4</strong> новых задач за занятие</li><li>голосовые вопросы локально — без лимита; резерв SpeechKit — <strong id="ultraSpeechFallback">150 мин</strong>/месяц</li><li><strong id="ultraVoice">20</strong> ответов голосом Яндекса за занятие</li><li>голос родителя — без отдельного лимита</li></ul>
+        <ul><li><strong id="ultraSessions">45</strong> занятий в месяц</li><li>до <strong id="ultraMinutes">45</strong> минут каждое</li><li>до <strong id="ultraTasks">4</strong> новых задач за занятие</li><li>голосовые вопросы — без отдельного лимита; резервное распознавание — <strong id="ultraSpeechFallback">150 мин</strong>/месяц</li><li><strong id="ultraVoice">20</strong> озвученных ответов за занятие</li><li>записанные напоминания родителя — без отдельного лимита</li></ul>
         <button id="buyUltraBtn" type="button" class="full">Оформить Ультра через Platega</button>
       </article>
     </div>
-    <p class="plan-explainer"><strong>Что считается новой задачей?</strong> Новое условие из домашней работы. Уточнения, попытки ответа и последовательные подсказки внутри этой задачи ничего дополнительно не списывают. Перерыв останавливает таймер занятия. SpeechKit для распознавания расходуется только тогда, когда локальный Whisper не справился.</p>
+    <p class="plan-explainer"><strong>Что считается новой задачей?</strong> Новое условие из домашней работы. Уточнения, попытки ответа и последовательные подсказки внутри этой задачи ничего дополнительно не списывают. Перерыв останавливает таймер занятия. Резервное распознавание включается только тогда, когда основной способ не справился.</p>
     <p id="billingMessage" class="billing-message" role="status">Оплата подписки проходит на защищённой странице Platega через СБП. Списание повторяется раз в месяц; отменить подписку можно по ссылке из письма Platega.</p>
   </div>
+</dialog>
+<dialog id="deleteAccountDialog" class="confirm-dialog" aria-labelledby="deleteAccountTitle">
+  <form id="deleteAccountForm">
+    <h2 id="deleteAccountTitle">Удалить аккаунт?</h2>
+    <p>Аватар, голос, результаты занятий и данные входа будут удалены без возможности восстановления.</p>
+    <label for="deletePassword">Пароль</label><input id="deletePassword" name="password" type="password" autocomplete="current-password" maxlength="128" required>
+    <label for="deleteConfirmation">Введите слово УДАЛИТЬ</label><input id="deleteConfirmation" name="confirmation" type="text" autocomplete="off" pattern="УДАЛИТЬ" required>
+    <p id="deleteAccountError" class="auth-error" role="alert" hidden></p>
+    <div class="buttons"><button id="confirmDeleteAccountBtn" type="submit" class="danger">Удалить навсегда</button><button id="cancelDeleteAccountBtn" type="button" class="secondary">Отмена</button></div>
+  </form>
 </dialog>
 <p id="readyHint" role="status"></p><div id="error" role="alert" hidden></div>
 <main id="setupPage" hidden>
@@ -99,7 +110,6 @@
     <div class="section-title"><h2>Вот как вас увидит ребёнок</h2><span id="faceStatus" class="status-chip">Пока нет снимка</span></div>
     <div id="setupAvatarSlot"><div id="scene"><div id="placeholder"><span class="placeholder-face" aria-hidden="true">☺</span><p>Здесь появится ваш аватар</p><small>Сначала создайте образ по снимкам лица</small></div></div></div>
     <div class="model-views" aria-label="Проверка аватара"><button id="viewFrontBtn" type="button">Прямо</button><button id="viewSideBtn" type="button">Слегка повернуться</button><button id="previewMotionBtn" type="button">Послушать и посмотреть</button></div>
-    <details class="appearance"><summary>Посмотреть геометрию аватара</summary><button id="viewMeshBtn" type="button" class="secondary" aria-pressed="false">Показать сетку</button></details>
         <details id="cutoutPreview" class="appearance" hidden><summary>Проверить, как удалён фон</summary><p class="helper">Ваш снимок без фона. Здесь должны сохраниться волосы, уши, шея и одежда.</p><img id="cutoutImage" class="portrait-cutout" alt="Снимок родителя с автоматически удалённым фоном"></details>
     <p class="helper"><span aria-hidden="true">♡</span> Узнаваемый образ и спокойный голос помогают чувствовать, что вы рядом.</p>
   </section>
@@ -110,7 +120,7 @@
     <div class="scan-steps"><div><span>1</span>Снимки лица</div><div><span>2</span>Создание модели</div><div><span>3</span>Проверка образа</div></div>
     <p class="tip">Снимки делаются автоматически. Подсказки звучат вслух: смотрите в объектив, слушайте и спокойно поворачивайте голову.</p>
     <label class="toggle-row"><input id="scanAudio" type="checkbox" checked><span>Подсказывать голосом<small>Подсказывать каждый поворот и момент снимка</small></span></label>
-    <label class="toggle-row avatar-consent"><input id="avatarConsent" type="checkbox"><span>Разрешаю создать и сохранить аватар<small>Исходные снимки обрабатываются в браузере и не сохраняются. Готовая 3D-модель хранится в защищённом профиле.</small></span></label>
+    <label class="toggle-row avatar-consent"><input id="avatarConsent" type="checkbox"><span>Разрешаю создать и сохранить аватар<small>Видеопоток не записывается. Отобранные снимки и модель сохраняются в защищённом профиле семьи и удаляются вместе с аккаунтом.</small></span></label>
     <p id="cameraHint" class="helper" role="status">Готовый аватар автоматически сохранится в Адым.</p>
     <div id="scannerUnavailable" class="tip" role="status" hidden></div>
     <button id="scanBtn" class="next-step" disabled>Создать мой аватар</button>
@@ -120,8 +130,8 @@
   </section>
   <section class="card voice-setup" data-step-panel="voice" hidden>
     <span class="eyebrow">ЗНАКОМЫЙ ГОЛОС</span><h2>Давайте запишем ваш голос</h2><p>В тихой комнате, обычным спокойным голосом. После записи можно всё прослушать и повторить.</p>
-    <label for="voiceMode">Что будет говорить аватар?</label><select id="voiceMode"><option value="clone" selected>Напоминания и новые ответы моим голосом</option><option value="direct">Только моё записанное напоминание</option></select>
-    <p id="voiceModeHint" class="tip">Голос родителя — основной голос Адым. Запись используется для напоминаний и новых ответов.</p>
+    <label for="voiceMode">Как использовать запись?</label><select id="voiceMode"><option value="clone">Напоминания и новые ответы моим голосом</option><option value="direct" selected>Моё записанное напоминание</option></select>
+    <p id="voiceModeHint" class="tip">Аватар сможет позвать ребёнка вашей настоящей записью.</p>
     <label class="reading-label" for="readText">Прочитайте этот текст</label><blockquote id="readText">Давай вернёмся к заданию. Если нужна помощь, позови меня.</blockquote>
     <details class="device-settings"><summary>Выбрать другой микрофон</summary><label for="microphone">Устройство записи</label><select id="microphone"><option value="">По умолчанию</option></select></details>
     <meter id="level" min="0" max="1" value="0" aria-label="Уровень микрофона"></meter><p id="voiceHint" role="status">Нажмите «Записать», первую секунду помолчите, затем читайте.</p>
@@ -135,7 +145,7 @@
     <label class="toggle-row ready-mic"><input id="readyHandsFree" type="checkbox" checked><span>Включить микрофон при начале занятия<small>Можно сразу задавать вопрос — ключевое слово не требуется. В браузере нужно разрешить доступ.</small></span></label>
     <label class="toggle-row ready-camera"><input id="readyCamera" type="checkbox" checked><span>Включить камеру во время занятия<small>Включена по умолчанию на любом тарифе. Видео обрабатывается только на этом устройстве и не сохраняется.</small></span></label>
     <div id="readyCameraPreview" class="ready-camera-preview" hidden><div class="section-title"><strong>Проверка камеры</strong><button id="closeReadyCameraBtn" type="button" class="quiet">Выключить</button></div><div id="readyCameraSlot"></div><p id="readyCameraStatus" class="helper" role="status">Подключаем камеру…</p></div>
-    <p id="readyMicHint" class="helper">Голосовые вопросы сначала распознаются на сервере Адым локальной моделью. Если она не справится и настроен SpeechKit, законченный фрагмент будет отправлен ему как резерв. Камера ребёнка не записывается.</p>
+    <p id="readyMicHint" class="helper">После начала микрофон будет заметен над аватаром. Запись вопроса закончится автоматически после короткой паузы и не будет сохраняться.</p>
     <button id="startBtn" class="next-step start-button" disabled>Начать занятие →</button><p id="startHint" class="helper"></p>
     <section class="parent-summary" aria-labelledby="parentSummaryTitle">
       <div class="section-title"><h3 id="parentSummaryTitle">Для родителя</h3><span id="planName" class="status-chip">Бесплатный</span></div>
@@ -146,11 +156,11 @@
         <div><strong id="summaryDifficult">0</strong><span>со сложностями</span></div>
       </div>
       <p id="summaryText" class="helper">Пока нет завершённых заданий.</p>
-      <p class="summary-cost"><span>Расход: сегодня <strong id="summaryToday">0,00 ₽</strong>, за месяц <strong id="summaryCost">0,00 ₽</strong></span><span>Осталось: <strong id="summaryRemaining">5 занятий</strong></span></p>
+      <p class="summary-cost"><span id="internalCost" hidden>Расход сервиса: сегодня <strong id="summaryToday">0,00 ₽</strong>, за месяц <strong id="summaryCost">0,00 ₽</strong></span><span>Осталось: <strong id="summaryRemaining">5 занятий</strong></span></p>
       <p class="muted">Сохраняются только счётчики и итог занятия — без полного разговора, фото и аудиозаписей.</p>
     </section>
-    <p class="photo-next"><strong>Следующий сценарий: фото задания.</strong> Интерфейс и серверный контракт будут добавлены после выбора OCR-провайдера и отдельного согласования его стоимости.</p>
-    <details class="device-settings"><summary>Что важно знать родителю</summary><p>Камера проверяет, есть ли лицо в кадре. Она не определяет, решает ли ребёнок задание. Читать и смотреть в тетрадь можно. Через 5 секунд без лица аватар попросит вернуться в кадр, а после 5 минут отсутствия позовёт ребёнка продолжить занятие.</p><p id="assetsStatus">Камера: подключение…</p><p id="ttsStatus">Голос: подключение…</p><p class="muted">Новые ответы голосом родителя создаются на компьютере; первый ответ может потребовать прогрева модели.</p></details>
+    <details class="device-settings"><summary>Что важно знать родителю</summary><p>Камера проверяет, есть ли лицо в кадре. Она не определяет, решает ли ребёнок задание. Читать и смотреть в тетрадь можно. Через 5 секунд без лица аватар попросит вернуться в кадр, а после 5 минут отсутствия позовёт ребёнка продолжить занятие.</p><p class="muted">Если камера или микрофон отключены в браузере, Адым предложит включить их снова.</p></details>
+    <span id="assetsStatus" hidden></span><span id="ttsStatus" hidden></span>
   </section>
 </main>
 <main id="lessonPage" hidden>
@@ -170,7 +180,7 @@
     <section class="card tutor"><div class="section-title"><h2>Что не получается?</h2><span class="hint-chip">Подсказка за подсказкой</span></div><p id="tutorStatus" role="status">Можно спросить голосом или написать здесь.</p>
       <div id="tutorMessages" role="log" aria-label="Обсуждение задания"></div>
       <form id="tutorForm"><label for="assignment">Твой вопрос или задание</label><textarea id="assignment" rows="3" maxlength="4000" placeholder="Например: не понимаю, как решить 2x + 3 = 11"></textarea><div class="buttons"><button id="askBtn" type="submit">Дай подсказку</button><button id="cancelHelpBtn" class="secondary" type="button" hidden>Отменить</button><button id="clearHelpBtn" class="quiet" type="button">Новое задание</button></div></form>
-      <details class="lesson-settings"><summary>Настройки с родителем</summary><label for="schoolLevel">Как объяснять</label><select id="schoolLevel"><option value="начальная школа">1–4 класс</option><option value="средняя школа">5–9 класс</option><option value="старшая школа">10–11 класс</option></select><label for="replyVoice">Каким голосом отвечать</label><select id="replyVoice"><option value="parent" selected>Голос родителя · если доступен</option><option value="yandex">Обычный голос Яндекса</option></select><p class="muted" id="replyVoiceHint">Если лицензированный синтез голоса родителя выключен, Адым явно выберет обычный голос Яндекса, чтобы ответы не оставались без звука.</p><p class="muted" id="tutorPrivacy">Микрофон включён только во время занятия. Речь сначала распознаётся локальной моделью на сервере; если она не справится и настроен SpeechKit, только законченный фрагмент вопроса отправляется ему как резерв. Текст каждой новой задачи один раз отправляется в YandexGPT. Во время ответа речь не распознаётся. Для озвучивания голосом Яндекса сокращённый текст отправляется в SpeechKit. Камера ребёнка не записывается; аватар и образец голоса родителя изолированы в профиле семьи; записи вопросов не сохраняются.</p></details>
+      <details class="lesson-settings"><summary>Настройки с родителем</summary><label for="schoolLevel">Как объяснять</label><select id="schoolLevel"><option value="начальная школа">1–4 класс</option><option value="средняя школа">5–9 класс</option><option value="старшая школа">10–11 класс</option></select><label for="replyVoice">Каким голосом отвечать</label><select id="replyVoice"><option value="parent">Голос родителя · если доступен</option><option value="yandex" selected>Голос Адым</option></select><p class="muted" id="replyVoiceHint">Адым озвучивает новые подсказки обычным голосом, а напоминания может произносить записью родителя.</p><p class="muted" id="tutorPrivacy">Микрофон включён только во время занятия. Запись вопроса обрабатывается для распознавания и не сохраняется. Текст новой задачи передаётся сервису генерации подсказок. Камера ребёнка не записывается; аватар и голос родителя доступны только профилю семьи.</p></details>
     </section>
     <section class="card child-camera"><div class="section-title"><h2>Ты в кадре</h2><span class="privacy-chip small">Только здесь</span></div><div id="lessonCameraSlot"></div><p id="monitorStatus" role="status">Готово к занятию</p><button id="retryCameraBtn" type="button" class="secondary" hidden>Включить камеру</button><p class="helper">Смотри в тетрадь, думай, пробуй. Я подожду.</p></section>
   </aside>

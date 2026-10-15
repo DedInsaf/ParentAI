@@ -4,7 +4,7 @@ import {SpeechGate,isDirectedSpeech,classifySpeechRecognitionError} from './list
 import {AvatarMotion} from './avatar-motion.mjs';
 import {ModelAvatar} from './avatar-model.mjs';
 import {LocalAvatar} from './local-avatar.mjs';
-import {fitStablePortraitAnchors} from './portrait-fit.mjs';
+import {fitStablePortraitAnchors,portraitAccessoryIssue} from './portrait-fit.mjs';
 import {portraitCutout} from './portrait-texture.mjs';
 import {packPortraitAnalysis,unpackPortraitAnalysis} from './avatar-persistence.mjs';
 const $ = id => document.getElementById(id);
@@ -39,11 +39,11 @@ const cameraLive = () => !!stream?.getVideoTracks().some(track => track.readySta
 function mediaError(e) {
   const messages = {
     NotAllowedError: 'Доступ к камере или микрофону запрещён. Разрешите его для браузера в «Системные настройки → Конфиденциальность и безопасность», затем повторите.',
-    SecurityError: 'Браузер заблокировал камеру или микрофон. Откройте Адым по локальному адресу из приложения и разрешите доступ.',
+    SecurityError: 'Браузер заблокировал камеру или микрофон. Откройте Адым по защищённому адресу HTTPS и разрешите доступ.',
     NotFoundError: 'Камера или микрофон не найдены. Подключите устройство и повторите.',
     NotReadableError: 'Камера или микрофон заняты другим приложением. Закройте FaceTime, Zoom или другую программу и повторите.',
     AbortError: 'Камера или микрофон не смогли запуститься. Закройте другие приложения, использующие их, и повторите.',
-    UnsupportedError: 'Камера недоступна в этом браузере. Откройте Адым по адресу localhost из приложения.',
+    UnsupportedError: 'Камера недоступна в этом браузере. Откройте Адым в актуальной версии Chrome, Edge или Safari.',
   };
   return new Error(messages[e.name] || e.message);
 }
@@ -81,7 +81,7 @@ function controls() {
   $('scannerUnavailable').hidden=true;
   $('previewMotionBtn').disabled=!mesh || !status.phrases?.length || scanning || recording || running;
   $('nextReadyBtn').disabled=!(status.phrases?.length) || recording || voiceBusy();
-  for(const id of ['viewFrontBtn','viewSideBtn','viewMeshBtn']) $(id).disabled=!mesh || scanning;
+  for(const id of ['viewFrontBtn','viewSideBtn']) $(id).disabled=!mesh || scanning;
   for(const button of document.querySelectorAll('[data-setup-step]')) button.disabled=scanning || recording || running;
   $('recordBtn').disabled = !online || transition || recording || scanning || running || voiceBusy();
   $('voiceMode').disabled = recording || running || voiceBusy();
@@ -102,8 +102,8 @@ function controls() {
   $('voiceQuestionBtn').textContent = questionRecording ? 'Закончить вопрос' : 'Записать вопрос';
   $('readyHandsFree').disabled=running || !status.speech?.enabled;
   $('readyMicHint').textContent=status.speech?.enabled
-    ?`После начала микрофон будет заметен над аватаром. Распознавание: ${status.speech.provider}${status.speech.fallback?` · резерв: ${status.speech.fallback}`:''}.`
-    :'Голосовые вопросы пока не подключены. Можно написать вопрос; родителю нужно установить локальную модель или настроить SpeechKit.';
+    ?'После начала микрофон будет заметен над аватаром. Запись вопроса закончится автоматически после короткой паузы.'
+    :'Голосовые вопросы временно недоступны. Вопрос можно написать текстом.';
   $('stopSpeechBtn').hidden=!playing;
   $('readyHandsFree').checked=$('handsFree').checked;
   $('faceNextHint').textContent=!mesh?'После создания аватара можно перейти к голосу.':'';
@@ -135,18 +135,18 @@ async function poll() {
     const parentReplyOption=$('replyVoice').querySelector('option[value="parent"]');
     cloneOption.disabled=!status.xtts_enabled;
     parentReplyOption.disabled=!status.xtts_enabled;
-    cloneOption.textContent=status.xtts_enabled?'Напоминания и новые ответы моим голосом':'Голос родителя отключён в конфигурации';
+    cloneOption.textContent=status.xtts_enabled?'Напоминания и новые ответы моим голосом':'Новые ответы голосом родителя пока недоступны';
     parentReplyOption.textContent=status.xtts_enabled?'Голос родителя · основной':'Голос родителя · недоступен';
     if(!status.xtts_enabled&&$('replyVoice').value==='parent'){
       $('replyVoice').value='yandex';
-      $('replyVoiceHint').textContent='Выбран обычный голос Яндекса: синтез голосом родителя отключён на этом сервере, поэтому ответы всё равно будут слышны.';
+      $('replyVoiceHint').textContent='Адым озвучивает новые подсказки обычным голосом, а напоминания может произносить записью родителя.';
     }else if(status.xtts_enabled){
-      $('replyVoiceHint').textContent='Адым отвечает голосом родителя. Обычный голос Яндекса можно выбрать вручную.';
+      $('replyVoiceHint').textContent='Можно выбрать голос родителя или обычный голос Адым.';
     }
     if(!status.xtts_enabled&&$('voiceMode').value==='clone'){$('voiceMode').value='direct';updateVoiceMode();}
     renderParentSummary(status.usage);
     renderSubscription(status.usage, status.billing);
-    if (!tutorBusy && !questionRecording && !listenerPending) $('tutorStatus').textContent = status.tutor?.enabled?'Задай вопрос голосом или напиши его. Будем пробовать по шагам.':'Помощник ещё не подключён. Попроси родителя настроить Яндекс.';
+    if (!tutorBusy && !questionRecording && !listenerPending) $('tutorStatus').textContent = status.tutor?.enabled?'Задай вопрос голосом или напиши его. Будем пробовать по шагам.':'Подсказки временно недоступны. Попробуй немного позже.';
     if (!recording) $('voiceHint').textContent = status.error || status.progress || (status.phrases.length ? 'Сохранённый голос готов. Можно начать занятие.' : 'Выберите способ записи голоса.');
     if (status.reference && !referenceLoaded && !recording) {
       $('reference').src = '/audio/reference.wav'; $('reference').hidden = false; referenceLoaded = true;
@@ -176,10 +176,10 @@ function renderSubscription(summary, billing) {
   const free = billing.plans?.free || {};
   const paid = billing.plans?.paid || {};
   const ultra = billing.plans?.ultra || {};
-  const planTitle = summary.plan.unlimited ? 'Admin' : summary.plan.title;
+  const planTitle = summary.plan.unlimited ? 'Администратор' : summary.plan.title;
   $('headerPlanName').textContent = planTitle;
   $('billingBtn').setAttribute('aria-label', `Тариф: ${planTitle}. Открыть информацию о подписке`);
-  $('currentPlanHero').textContent = summary.plan.unlimited ? 'Admin · без ограничений' : `Сейчас: ${summary.plan.title}`;
+  $('currentPlanHero').textContent = summary.plan.unlimited ? 'Администратор · без ограничений' : `Сейчас: ${summary.plan.title}`;
   for (const [prefix, plan, defaults] of [
     ['free', free, [5,20,3,3,150]], ['paid', paid, [20,30,3,10,3600]], ['ultra', ultra, [45,45,4,20,9000]],
   ]) {
@@ -196,7 +196,7 @@ function renderSubscription(summary, billing) {
   $('paidPlanCard').classList.toggle('is-current', current === 'paid');
   $('ultraPlanCard').classList.toggle('is-current', current === 'ultra');
   $('freePlanState').textContent = current === 'free' ? 'Текущий тариф' : 'Базовый тариф';
-  $('freePlanBtn').textContent = current === 'free' ? 'Текущий тариф' : 'Free';
+  $('freePlanBtn').textContent = current === 'free' ? 'Текущий тариф' : 'Бесплатный';
   const button = $('buyPaidBtn'), ultraButton = $('buyUltraBtn');
   const waiting = ['pending','subscription_activated'].includes(summary.payment?.status);
   const hasPaidPlan = current === 'paid' || current === 'ultra';
@@ -209,14 +209,14 @@ function renderSubscription(summary, billing) {
     'Подписка активна' : hasPaidPlan ? 'Смена тарифа — через поддержку' : waiting ? 'Ожидаем подтверждение Platega' :
     `Оформить за ${ultra.monthly_price_rubles ?? 990} ₽/месяц`;
   if (!billing.provider?.enabled && current === 'free') {
-    $('billingMessage').textContent = 'Кнопка покупки готова. Чтобы принимать оплату, добавьте Merchant ID и API-ключ Platega в настройки сервера.';
+    $('billingMessage').textContent = 'Покупка подписки временно недоступна. Пока можно пользоваться бесплатным тарифом.';
   } else if (waiting) {
     $('billingMessage').textContent = 'Подписка создана в Platega и ожидает подтверждения. Нажмите кнопку ещё раз, чтобы вернуться к оплате.';
     (summary.payment?.plan === 'ultra' ? ultraButton : button).disabled = false;
   } else if (current === 'paid' || current === 'ultra') {
     $('billingMessage').textContent = `${summary.plan.title} активен. Чтобы сменить тариф без двойного списания, сначала отмените текущую подписку через Platega или напишите в поддержку.`;
   } else if (summary.plan.unlimited) {
-    $('billingMessage').textContent = 'Администратор тестирует все возможности продукта без тарифных ограничений.';
+    $('billingMessage').textContent = 'Доступ администратора работает без тарифных ограничений.';
   } else {
     $('billingMessage').textContent = 'Оплата проходит на защищённой странице Platega через СБП. Списание повторяется раз в месяц; отменить подписку можно по ссылке из письма Platega.';
   }
@@ -247,7 +247,7 @@ async function dependencies() {
     try { detector = await vision.FaceLandmarker.createFromOptions(files, options); }
     catch { options.baseOptions.delegate = 'CPU'; detector = await vision.FaceLandmarker.createFromOptions(files, options); }
     return vision;
-  })().catch(e => { dependenciesPromise = null; throw new Error('Не удалось загрузить 3D/распознавание. Проверьте загрузку ресурсов в разделе «Состояние» и повторите. ' + e.message); });
+  })().catch(() => { dependenciesPromise = null; throw new Error('Не удалось подготовить создание аватара. Проверьте интернет и обновите страницу.'); });
   return dependenciesPromise;
 }
 function initScene() {
@@ -315,11 +315,11 @@ function detectVideo(now) {
 }
 
 async function scan() {
-  if(!$('avatarConsent').checked){$('avatarConsent').focus();throw new Error('Разрешите Адым создать аватар из снимков на этом устройстве.');}
+  if(!$('avatarConsent').checked){$('avatarConsent').focus();throw new Error('Разрешите Адым создать и сохранить аватар из снимков.');}
   stopAudio();scanning=true;const epoch=++scanEpoch,abort=new AbortController();scannerAbort=abort;restoringAbort?.abort();
   $('scannerDialog').showModal();$('scannerCamera').appendChild(video.closest('.camera-frame'));controls();
   try {
-    scanInstruction('Подключаем камеру. Сядьте лицом к свету, чтобы волосы и уши были видны.');
+    scanInstruction('Перед съёмкой снимите шляпу, кепку и наушники. Очки оставьте, если носите их постоянно. Сядьте лицом к свету.',true);
     await Promise.all([enableCamera(),dependencies()]);
     const poses=[
       {role:'front',direction:0,instruction:'Посмотрите прямо в объектив и мягко сомкните губы.'},
@@ -352,7 +352,14 @@ async function scan() {
           const fresh=frozen[0];
           const frozenIssue=role==='portrait'?portraitQuality(fresh,canvas.width,canvas.height):role==='front'?scanQuality(fresh,canvas.width,canvas.height):scanTurnIssue(fresh,canvas.width,canvas.height,direction,outer);
           if(frozenIssue){stable=0;continue;}
-          views.push({role,yaw:faceYaw(fresh),canvas,landmarks:fresh.map(p=>({x:p.x,y:p.y,z:p.z})),photo:canvas.toDataURL('image/jpeg',.88)});
+          const view={role,yaw:faceYaw(fresh),canvas,landmarks:fresh.map(p=>({x:p.x,y:p.y,z:p.z})),photo:canvas.toDataURL('image/jpeg',.88)};
+          views.push(view);
+          if(role==='front'){
+            scanInstruction('Проверяем, что шляпа, кепка или наушники сняты. Очки можно оставить.',true);
+            const accessoryMask=await scanAccessories(view,abort.signal);
+            const accessoryIssue=portraitAccessoryIssue(view.landmarks,accessoryMask);
+            if(accessoryIssue)throw new Error(accessoryIssue);
+          }
           scanInstruction('Снимок готов.',true);await sleep(1200);break;
         }
         await sleep(80);
@@ -368,13 +375,13 @@ async function scan() {
       portrait.anchors=await fitPortrait(portrait,message=>scanInstruction(message),abort.signal);
     }
     if(epoch!==scanEpoch)return;
-    scanInstruction('Создаём объёмную модель прямо на устройстве.',true);
+    scanInstruction('Создаём ваш объёмный аватар.',true);
     const model=LocalAvatar.create(THREE,views,avatarTopology);
     try {await api('avatar',JSON.stringify({version:7,views:views.map(({role,yaw,landmarks,photo})=>({role,yaw,landmarks,photo})),anchors:(portrait||front).anchors,portraitAnalysis:packPortraitAnalysis(portrait||front)}),true,60000,abort.signal);}
     catch(error){model.dispose();throw error;}
     if(epoch!==scanEpoch){model.dispose();return;}
     installModel(model);showPortraitCutout(portrait||front);cancelScan();
-    $('faceStatus').textContent='Черновик 3D-аватара создан';$('cameraHint').textContent='Черновик сохранён на этом устройстве. Проверьте лицо, волосы, шею и поворот.';
+    $('faceStatus').textContent='3D-аватар создан';$('cameraHint').textContent='Аватар сохранён в вашем профиле. Проверьте лицо, волосы, шею и поворот.';
     scanInstruction('Черновик аватара создан и сохранён. Фотографии никуда не отправлялись.',true);
   } catch(error){if(epoch===scanEpoch){cancelScan();throw error;}}
 }
@@ -410,9 +417,28 @@ async function fitPortrait(view,onProgress=()=>{},signal) {
     });
     view.segmentation=mask;
     view.matte=mask.matte;
+    const accessoryIssue=portraitAccessoryIssue(view.landmarks,mask);
+    if(accessoryIssue)throw new Error(accessoryIssue);
     return fitStablePortraitAnchors(view.landmarks,mask);
   }
   finally {worker?.terminate();bitmap?.close();}
+}
+async function scanAccessories(view,signal) {
+  let worker,bitmap;
+  try {
+    bitmap=await createImageBitmap(view.canvas);
+    return await new Promise((resolve,reject)=>{
+      if(signal?.aborted){reject(new DOMException('Сканирование отменено','AbortError'));return;}
+      worker=new Worker('/portrait-worker.js');
+      const cleanup=()=>{clearTimeout(timer);signal?.removeEventListener('abort',cancel);};
+      const cancel=()=>{cleanup();worker.terminate();reject(new DOMException('Сканирование отменено','AbortError'));};
+      const timer=setTimeout(()=>{cleanup();reject(new Error('Проверка головного убора заняла слишком долго. Попробуйте ещё раз.'));},30000);
+      signal?.addEventListener('abort',cancel,{once:true});
+      worker.onmessage=({data})=>{if(data.progress)return;cleanup();data.error?reject(new Error(data.error)):resolve(data);};
+      worker.onerror=event=>{cleanup();reject(new Error(event.message||'Не удалось проверить головной убор.'));};
+      try {worker.postMessage({bitmap,accessoriesOnly:true},[bitmap]);bitmap=null;} catch(error){cleanup();reject(error);}
+    });
+  } finally {worker?.terminate();bitmap?.close();}
 }
 function showPortraitCutout(view){
   $('cutoutImage').src=portraitCutout(view).toDataURL('image/png');$('cutoutPreview').hidden=false;
@@ -554,7 +580,7 @@ async function pause() {
       lessonElapsed=Number(session.elapsed_seconds||0)*1000;lessonLimitSeconds=session.limit_seconds;pausePending=false;
     } catch(error) {
       lessonElapsed=localElapsed;
-      paused = true;pausePending=true; lessonPresenceEnabled=false;document.body.classList.add('on-break');stopCamera();setListenerState('off','Перерыв. Камера и микрофон выключены.'); $('pauseBtn').textContent = 'Продолжить занятие'; $('monitorStatus').textContent = 'Перерыв локально · ждём связь с приложением';
+      paused = true;pausePending=true; lessonPresenceEnabled=false;document.body.classList.add('on-break');stopCamera();setListenerState('off','Перерыв. Камера и микрофон выключены.'); $('pauseBtn').textContent = 'Продолжить занятие'; $('monitorStatus').textContent = 'Перерыв · ждём восстановление связи';
       controls();
       throw error;
     }
@@ -709,8 +735,6 @@ function applyModelView() {
   avatarGroup?.traverse(item=>{
     if(item.material && item.isMesh) for(const material of Array.isArray(item.material)?item.material:[item.material])material.wireframe=showWireframe;
   });
-  $('viewMeshBtn').setAttribute('aria-pressed',String(showWireframe));
-  $('viewMeshBtn').textContent=showWireframe?'Скрыть сетку':'Показать сетку';
 }
 function chatMessage(role, text) {
   const box = document.createElement('p'); box.className = `chat-message ${role}`;
@@ -893,7 +917,7 @@ function action(id, fn) { $(id).addEventListener('click', async () => {
 function updateVoiceMode() {
   const direct = $('voiceMode').value === 'direct';
   $('recordBtn').textContent = direct ? 'Записать напоминание · 8 сек' : 'Записать образец · 20 сек';
-  $('voiceModeHint').textContent=direct?'Запись сохранится как есть. Для новых ответов вашим голосом выберите второй вариант.':'Новые фразы будут создаваться вашим голосом на компьютере. Первый ответ после запуска может готовиться дольше.';
+  $('voiceModeHint').textContent=direct?'Аватар сможет позвать ребёнка вашей настоящей записью.':'Аватар будет создавать новые фразы вашим голосом. Первый ответ может готовиться дольше.';
   $('readText').textContent = direct ? 'Давай вернёмся к заданию. Если нужна помощь, позови меня.' : 'Привет! Я рядом, если тебе нужна помощь. Давай спокойно разберёмся с заданием. Сначала прочитаем условие, потом подумаем над решением. Не нужно торопиться. У тебя всё получится.';
 }
 $('voiceMode').addEventListener('change', () => { voiceModeTouched = true; updateVoiceMode(); controls(); });
@@ -925,7 +949,6 @@ document.querySelectorAll('[data-setup-step]').forEach(button=>button.addEventLi
 action('nextVoiceBtn',()=>setupStep('voice'));action('nextReadyBtn',()=>setupStep('ready'));
 action('viewFrontBtn',()=>{previewYaw=0;});action('viewSideBtn',()=>{previewYaw=.11;});
 action('previewMotionBtn',()=>playVoice('preview'));
-action('viewMeshBtn',()=>{showWireframe=!showWireframe;applyModelView();});
 $('tutorForm').addEventListener('submit', askTutor);
 $('cancelHelpBtn').addEventListener('click', cancelTutor);
 $('clearHelpBtn').addEventListener('click', () => { cancelTutor(); dialogId=null;followupUntil=0; $('tutorMessages').replaceChildren(); $('assignment').value = ''; });
@@ -940,7 +963,7 @@ async function restoreAvatar() {
   try {
     const saved=await api('avatar');if(!saved||restoringEpoch!==scanEpoch)return;
     if(saved.version===7){
-      $('faceStatus').textContent='Восстанавливаем локальный аватар…';await avatarDependencies();
+      $('faceStatus').textContent='Восстанавливаем ваш аватар…';await avatarDependencies();
       const views=await Promise.all(saved.views.map(async view=>{const image=new Image();image.src=view.photo;await image.decode();const canvas=document.createElement('canvas');canvas.width=image.width;canvas.height=image.height;canvas.getContext('2d').drawImage(image,0,0);return {...view,canvas,anchors:view.role==='portrait'?saved.anchors:undefined};}));
       const front=views.find(view=>view.role==='front'),portrait=views.find(view=>view.role==='portrait');
       const bust=portrait||front;
@@ -953,11 +976,11 @@ async function restoreAvatar() {
       if(restoringEpoch!==scanEpoch)return;
       installModel(LocalAvatar.create(THREE,views,avatarTopology));
       showPortraitCutout(portrait||front);
-      $('faceStatus').textContent='Черновик 3D-аватара загружен';$('cameraHint').textContent='Черновик хранится на этом устройстве и доступен после перезапуска.';return;
+      $('faceStatus').textContent='3D-аватар загружен';$('cameraHint').textContent='Аватар хранится в вашем профиле и доступен после повторного входа.';return;
     }
     if(saved.version!==6){
       $('faceStatus').textContent='Нужен новый скан';
-      $('cameraHint').textContent='Ваш прежний снимок сохранён. Для локального объёмного аватара создайте новый образ через сканер.';
+      $('cameraHint').textContent='Ваш прежний снимок сохранён. Чтобы использовать новый объёмный аватар, создайте образ ещё раз.';
       return;
     }
     $('faceStatus').textContent='Восстанавливаем ваш аватар…';await renderDependencies();
@@ -1026,6 +1049,7 @@ function showApplication(user) {
   currentUser = user;
   authenticated = true;
   $('accountLogin').textContent = user.is_admin ? `${user.login} · Админ` : user.login;
+  $('internalCost').hidden = !user.is_admin;
   $('authPage').hidden = true;
   document.querySelector('.app-header').hidden = false;
   $('setupPage').hidden = false;
@@ -1078,6 +1102,32 @@ $('logoutBtn').addEventListener('click', async () => {
     await authRequest('logout', {});
   }
   finally { location.reload(); }
+});
+$('deleteAccountBtn').addEventListener('click', () => {
+  document.querySelector('.account').open = false;
+  $('deleteAccountForm').reset();
+  $('deleteAccountError').hidden = true;
+  $('deleteAccountDialog').showModal();
+  requestAnimationFrame(() => $('deletePassword').focus());
+});
+$('cancelDeleteAccountBtn').addEventListener('click', () => $('deleteAccountDialog').close());
+$('deleteAccountDialog').addEventListener('click', event => {
+  if (event.target === $('deleteAccountDialog')) $('deleteAccountDialog').close();
+});
+$('deleteAccountForm').addEventListener('submit', async event => {
+  event.preventDefault();
+  const form=event.currentTarget,button=$('confirmDeleteAccountBtn');
+  $('deleteAccountError').hidden=true;button.disabled=true;
+  const label=button.textContent;button.textContent='Удаляем…';
+  try {
+    if(running)stop('Занятие завершено · камера выключена',false);
+    const values=Object.fromEntries(new FormData(form));
+    await authRequest('delete',values);
+    authenticated=false;location.replace('/');
+  } catch(error) {
+    $('deleteAccountError').textContent=error.message||String(error);
+    $('deleteAccountError').hidden=false;
+  } finally {button.disabled=false;button.textContent=label;}
 });
 async function buyPlan(plan, buttonId) {
   clearError();

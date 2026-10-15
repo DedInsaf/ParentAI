@@ -8,6 +8,7 @@ import mimetypes
 from pathlib import Path
 import secrets
 import math
+import shutil
 import threading
 import time
 import uuid
@@ -93,6 +94,22 @@ class AppServer(ThreadingHTTPServer):
                 self.profile_runtimes[user_id] = runtime
             return runtime
 
+    def delete_profile(self, user_id):
+        user_id = int(user_id)
+        with self.profile_lock:
+            runtime = self.profile_runtimes.pop(user_id, None)
+        if runtime:
+            runtime.cancel_generation()
+            runtime.close()
+        target = (self.runtime.data / 'profiles' / str(user_id)).resolve()
+        profiles = (self.runtime.data / 'profiles').resolve()
+        if target.parent == profiles:
+            shutil.rmtree(target, ignore_errors=True)
+        with self.speech_lock:
+            for key in [key for key in self.speech_cache if key[0] == user_id]:
+                del self.speech_cache[key]
+            self.speech_recent.pop(user_id, None)
+
     def allow_auth_attempt(self, key, action):
         now = time.monotonic()
         window, maximum = (3600, 5) if action == 'register' else (300, 10)
@@ -124,12 +141,11 @@ class AppServer(ThreadingHTTPServer):
                 raise ValueError('Слишком много голосовых вопросов подряд. Сделай короткий перерыв.')
             recent.append(now)
             duration = audio_duration_ms(payload)
-            errors, warning = [], ''
+            warning = ''
             engines = [self.speech, *getattr(self, 'speech_fallbacks', [])]
             for index, engine in enumerate(engines):
                 speech_status = engine.public_status()
                 if not speech_status.get('enabled'):
-                    errors.append(f"{speech_status.get('provider', 'Распознавание')}: не настроено")
                     continue
                 local_speech = bool(speech_status.get('local'))
                 billed_seconds = 0 if local_speech else max(15, math.ceil(duration / 15000) * 15)
@@ -143,7 +159,8 @@ class AppServer(ThreadingHTTPServer):
                     text = engine.recognize(payload)
                 except Exception as exc:
                     self.usage.fail(reservation['id'])
-                    errors.append(f"{speech_status.get('provider', 'Распознавание')}: {exc}")
+                    LOGGER.warning('Speech recognition failed for user %s via %s: %s',
+                                   user_id, speech_status.get('provider', 'unknown'), exc)
                     continue
                 self.usage.complete(
                     reservation['id'], duration_ms=duration, billed_units=billed_seconds,
@@ -152,8 +169,7 @@ class AppServer(ThreadingHTTPServer):
                 warning = reservation['warning']
                 break
             else:
-                detail = '; '.join(errors) or 'ни один способ распознавания не настроен'
-                raise ValueError(f'Не удалось распознать вопрос. {detail}')
+                raise ValueError('Не удалось распознать вопрос. Повторите чуть медленнее или напишите его текстом.')
             result = {'text': text, 'limit_warning': warning,
                       'speech_provider': speech_status.get('provider', '')}
             self.speech_cache[cache_key] = (now, result)
@@ -175,24 +191,53 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, *_):
         pass
 
-    def send(self, code, body, kind='application/json', headers=None):
-        if kind == 'application/json':
-            body = json.dumps(body, ensure_ascii=False).encode()
-        self.send_response(code)
+    def response_headers(self, kind, length, cache='no-store', headers=None):
         self.send_header('Content-Type', kind)
-        self.send_header('Content-Length', str(len(body)))
-        self.send_header('Cache-Control', 'no-store')
+        self.send_header('Content-Length', str(length))
+        self.send_header('Cache-Control', cache)
         self.send_header('X-Content-Type-Options', 'nosniff')
         self.send_header('Referrer-Policy', 'no-referrer')
         self.send_header('Cross-Origin-Resource-Policy', 'same-origin')
         self.send_header('X-Frame-Options', 'DENY')
+        self.send_header('Content-Security-Policy',
+                         "default-src 'self'; script-src 'self' "
+                         "'sha256-y0joblgLTLFGhbj/xXhGS1SyGmxly/oZpyENyx9LBXI='; "
+                         "style-src 'self' 'unsafe-inline'; "
+                         "img-src 'self' data: blob:; media-src 'self' blob:; worker-src 'self' blob:; "
+                         "connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; "
+                         "form-action 'self'")
         self.send_header('Permissions-Policy', 'camera=(self), microphone=(self), geolocation=()')
         if self.server.origin.startswith('https://'):
             self.send_header('Strict-Transport-Security', 'max-age=31536000; includeSubDomains')
         for name, value in (headers or {}).items():
             self.send_header(name, value)
+
+    def send(self, code, body, kind='application/json', headers=None, cache='no-store'):
+        if kind == 'application/json':
+            body = json.dumps(body, ensure_ascii=False).encode()
+        self.send_response(code)
+        self.response_headers(kind, len(body), cache, headers)
         self.end_headers()
         self.wfile.write(body)
+
+    def send_file(self, target, kind=None, cache='private, no-store'):
+        stat = target.stat()
+        etag = f'"{stat.st_mtime_ns:x}-{stat.st_size:x}"'
+        if self.headers.get('If-None-Match') == etag:
+            self.send_response(304)
+            self.response_headers(kind or 'application/octet-stream', 0, cache, {'ETag': etag})
+            self.end_headers()
+            return
+        self.send_response(200)
+        self.response_headers(kind or mimetypes.guess_type(str(target))[0] or 'application/octet-stream',
+                              stat.st_size, cache, {'ETag': etag})
+        self.end_headers()
+        try:
+            with target.open('rb') as source:
+                shutil.copyfileobj(source, self.wfile, length=256 * 1024)
+        except (BrokenPipeError, ConnectionResetError):
+            # Closing a tab may stop a large model or audio download midway.
+            return
 
     def allowed(self):
         return self.headers.get('Host') == urlsplit(self.server.origin).netloc
@@ -281,8 +326,8 @@ class Handler(BaseHTTPRequestHandler):
                 key = path.rsplit('/', 1)[1]
                 if path.startswith('/api/dialog-audio/'):
                     part=parse_qs(urlsplit(self.path).query).get('chunk',[None])[0]
-                    return self.send(200, self.server.dialogues.audio(
-                        key, None if part is None else int(part), user.id).read_bytes(), 'audio/wav')
+                    return self.send_file(self.server.dialogues.audio(
+                        key, None if part is None else int(part), user.id), 'audio/wav')
                 return self.send(200, self.server.dialogues.snapshot(key, user.id))
             except (ValueError,OSError) as exc:
                 return self.send(404, {'error': str(exc)})
@@ -295,7 +340,7 @@ class Handler(BaseHTTPRequestHandler):
             runtime = self.server.profile_runtime(user.id)
             if path == '/api/avatar-model':
                 try:
-                    return self.send(200, model_path(runtime).read_bytes(), 'model/gltf-binary')
+                    return self.send_file(model_path(runtime), 'model/gltf-binary')
                 except (ValueError, OSError) as exc:
                     return self.send(404, {'error': str(exc)})
             if path == '/api/avatar':
@@ -324,7 +369,10 @@ class Handler(BaseHTTPRequestHandler):
             allowed = {'reference.wav'} | {item['file'] for item in runtime.snapshot()['phrases']}
             if relative not in allowed:
                 return self.send(404, {'error': 'Not found'})
-        self.send(200, target.read_bytes(), mimetypes.guess_type(str(target))[0] or 'application/octet-stream')
+        cache = ('public, max-age=31536000, immutable'
+                 if not runtime and relative.startswith('vendor/') else
+                 'private, no-store' if runtime else 'no-cache')
+        self.send_file(target, cache=cache)
 
     def do_POST(self):
         path = urlsplit(self.path).path
@@ -375,6 +423,20 @@ class Handler(BaseHTTPRequestHandler):
             runtime = self.server.profile_runtime(user.id)
             if path == '/api/auth/logout':
                 self.server.auth.delete_session(self.session_token())
+                return self.send(200, {'ok': True}, headers={'Set-Cookie': self.clear_session_cookie()})
+            if path == '/api/auth/delete':
+                value = json.loads(payload)
+                if not isinstance(value, dict) or value.get('confirmation') != 'УДАЛИТЬ':
+                    raise ValueError('Введите слово УДАЛИТЬ для подтверждения.')
+                if not self.server.auth.verify_password(user.id, value.get('password')):
+                    raise ValueError('Неверный пароль.')
+                subscription = self.server.usage.subscription(user.id)
+                if subscription['plan'] in ('paid', 'ultra') or self.server.usage.pending_checkout(user.id):
+                    raise ValueError('Сначала отмените подписку через поддержку, затем удалите аккаунт.')
+                self.server.dialogues.cancel_user(user.id)
+                self.server.delete_profile(user.id)
+                self.server.usage.delete_user_data(user.id)
+                self.server.auth.delete_user(user.id)
                 return self.send(200, {'ok': True}, headers={'Set-Cookie': self.clear_session_cookie()})
             if path == '/api/billing/checkout':
                 value = json.loads(payload)

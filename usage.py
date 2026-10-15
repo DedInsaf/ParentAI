@@ -331,6 +331,15 @@ class UsageStore:
                    WHERE user_id=? ORDER BY created_at DESC LIMIT 1""", (user_id,)).fetchone()
         return dict(row) if row else None
 
+    def delete_user_data(self, user_id):
+        """Remove every usage, lesson and subscription row owned by one account."""
+        user_id = int(user_id)
+        with self.lock, self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            for table in ("usage_events", "lessons", "study_sessions",
+                          "payment_subscriptions", "subscriptions"):
+                connection.execute(f"DELETE FROM {table} WHERE user_id=?", (user_id,))
+
     def _active_plan(self, connection, user_id):
         row = connection.execute(
             "SELECT plan,status FROM subscriptions WHERE user_id=?", (user_id,)
@@ -714,7 +723,7 @@ class UsageStore:
         remaining = ({key: None for key in limits} if unlimited else
                      {key: max(0, limits[key] - totals[key]) for key in limits})
         return {
-            "plan": ({"code": "admin", "title": "Admin", "status": "active", "unlimited": True,
+            "plan": ({"code": "admin", "title": "Администратор", "status": "active", "unlimited": True,
                       "session_minutes": None, "assignments_per_session": None,
                       "yandex_voice_per_session": None}
                      if unlimited else

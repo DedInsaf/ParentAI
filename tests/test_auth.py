@@ -65,6 +65,15 @@ class AuthStoreTests(unittest.TestCase):
         self.store.set_role(parent.login, 'admin')
         self.assertEqual(self.store.authenticate(parent.login, 'strong-pass').role, 'admin')
 
+    def test_password_verification_and_account_deletion(self):
+        user = self.store.register('delete-user', 'delete@example.com', 'strong-pass', 'strong-pass')
+        token = self.store.create_session(user.id)
+        self.assertFalse(self.store.verify_password(user.id, 'wrong-pass'))
+        self.assertTrue(self.store.verify_password(user.id, 'strong-pass'))
+        self.store.delete_user(user.id)
+        self.assertIsNone(self.store.user_for_session(token))
+        self.assertIsNone(self.store.authenticate('delete-user', 'strong-pass'))
+
 
 if __name__ == '__main__':
     unittest.main()

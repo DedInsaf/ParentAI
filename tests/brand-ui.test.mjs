@@ -21,3 +21,13 @@ test('a completed task closes the old hint dialogue', () => {
   assert.match(script, /if\(result\.finished\)\{dialogId=null;followupUntil=0;\}/);
   assert.match(script, /Задание завершено · можно переходить к следующему/);
 });
+
+test('public beta UI hides developer controls and exposes account rights', () => {
+  assert.doesNotMatch(html, /Следующий сценарий|Посмотреть геометрию аватара/);
+  assert.doesNotMatch(script, /Merchant ID|API-ключ Platega|адресу localhost/);
+  assert.match(html, /id="deleteAccountBtn"/);
+  assert.match(html, /id="deleteAccountDialog"/);
+  assert.match(html, /adym\.ru\/privacy\.html/);
+  assert.match(html, /adym\.ru\/support\.html/);
+  assert.match(script, /authRequest\('delete'/);
+});

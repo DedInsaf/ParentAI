@@ -211,6 +211,27 @@ class AuthStore:
         if cursor.rowcount != 1:
             raise ValueError("Пользователь не найден.")
 
+    def verify_password(self, user_id, password) -> bool:
+        if not isinstance(password, str) or not password or len(password) > 128:
+            return False
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT password_salt,password_hash,password_iterations FROM users WHERE id=?",
+                (int(user_id),),
+            ).fetchone()
+        if row is None:
+            return False
+        candidate = pbkdf2_hmac(
+            "sha256", password.encode("utf-8"), row["password_salt"], row["password_iterations"]
+        )
+        return hmac.compare_digest(candidate, row["password_hash"])
+
+    def delete_user(self, user_id):
+        with self._connect() as connection:
+            cursor = connection.execute("DELETE FROM users WHERE id=?", (int(user_id),))
+        if cursor.rowcount != 1:
+            raise ValueError("Аккаунт уже удалён.")
+
     def delete_session(self, token):
         if not isinstance(token, str) or not token:
             return

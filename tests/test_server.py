@@ -58,6 +58,17 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(session['user']['login'],'test-user')
         self.assertEqual(self.request('/api/session',headers={'Sec-Fetch-Site':'cross-site'})[0],403)
 
+    def test_static_assets_are_streamed_with_cache_and_security_headers(self):
+        code,body,headers=self.request('/app.js',include_headers=True,authenticated=False)
+        self.assertEqual(code,200)
+        self.assertTrue(body)
+        self.assertEqual(headers['Cache-Control'],'no-cache')
+        self.assertIn("default-src 'self'",headers['Content-Security-Policy'])
+        etag=headers['ETag']
+        code,body=self.request('/app.js',headers={'If-None-Match':etag},authenticated=False)
+        self.assertEqual(code,304)
+        self.assertEqual(body,b'')
+
     def test_session_restore_renews_persistent_cookie(self):
         code, body, headers = self.request('/api/session', include_headers=True)
         self.assertEqual(code, 200)
@@ -178,6 +189,21 @@ class ServerTests(unittest.TestCase):
         code,body=self.request('/api/auth/register',payload,headers,authenticated=False)
         self.assertEqual(code,400)
         self.assertIn('родитель',json.loads(body)['error'])
+
+    def test_account_deletion_requires_password_and_removes_private_data(self):
+        headers={'Origin':self.s.origin,'X-App-Token':self.s.token,'Content-Type':'application/json'}
+        self.assertEqual(self.request('/api/avatar-model',glb(),headers)[0],200)
+        profile=self.s.profile_runtime(1).data
+        self.assertTrue(profile.is_dir())
+        wrong=json.dumps({'password':'wrong-password','confirmation':'УДАЛИТЬ'}).encode()
+        self.assertEqual(self.request('/api/auth/delete',wrong,headers)[0],400)
+        value=json.dumps({'password':'password-123','confirmation':'УДАЛИТЬ'}).encode()
+        code,body,response_headers=self.request('/api/auth/delete',value,headers,include_headers=True)
+        self.assertEqual(code,200)
+        self.assertFalse(profile.exists())
+        self.assertIn('Max-Age=0',response_headers['Set-Cookie'])
+        self.assertIsNone(self.s.auth.authenticate('test-user','password-123'))
+        self.assertEqual(self.request('/api/status',headers={'X-App-Token':self.s.token})[0],401)
 
     def test_closed_beta_registration_checks_invite_code(self):
         self.s.invite_code='beta-secret'
