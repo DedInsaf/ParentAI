@@ -34,3 +34,16 @@ test('public beta UI hides developer controls and exposes account rights', () =>
   assert.match(script, /authRequest\('delete'/);
   assert.doesNotMatch(html, /Расход сервиса|summaryToday|summaryCost|internalCost/);
 });
+
+test('administrator has a dedicated protected account management dialog', () => {
+  assert.match(html, /id="adminPanelBtn"[^>]+hidden/);
+  assert.match(html, /id="adminDialog"/);
+  assert.match(html, /id="adminUsers"/);
+  assert.match(html, /Журнал действий администратора/);
+  assert.match(script, /api\(`admin\/users/);
+  assert.match(script, /action:\s*'set_plan'|runAdminAction\(account,'set_plan'/);
+  assert.match(script, /runAdminAction\(account,'ban'/);
+  assert.match(script, /runAdminAction\(account,'unban'/);
+  assert.match(script, /runAdminAction\(account,'revoke_sessions'/);
+  assert.match(script, /adminPanelBtn'\)\.hidden = !user\.is_admin/);
+});

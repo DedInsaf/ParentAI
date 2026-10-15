@@ -74,6 +74,30 @@ class AuthStoreTests(unittest.TestCase):
         self.assertIsNone(self.store.user_for_session(token))
         self.assertIsNone(self.store.authenticate('delete-user', 'strong-pass'))
 
+    def test_admin_can_ban_search_revoke_sessions_and_audit_actions(self):
+        admin = self.store.register('admin-user', 'admin@example.com', 'strong-pass', 'strong-pass', role='admin')
+        parent = self.store.register('parent-user', 'parent@example.com', 'strong-pass', 'strong-pass')
+        token = self.store.create_session(parent.id)
+        page = self.store.list_users('PARENT', limit='bad', offset='bad')
+        self.assertEqual(page['total'], 1)
+        self.assertEqual(page['users'][0]['login'], 'parent-user')
+        self.assertEqual(page['users'][0]['active_sessions'], 1)
+        self.store.set_banned(parent.id, True, 'Нарушение правил')
+        self.assertIsNone(self.store.user_for_session(token))
+        self.assertIsNone(self.store.authenticate(parent.login, 'strong-pass'))
+        self.assertEqual(self.store.authenticate_with_status(parent.login, 'strong-pass')[1], 'banned')
+        with self.assertRaisesRegex(ValueError, 'Администраторские аккаунты'):
+            self.store.set_banned(admin.id, True)
+        self.store.set_banned(parent.id, False)
+        self.assertEqual(self.store.authenticate(parent.login, 'strong-pass'), parent)
+        token = self.store.create_session(parent.id)
+        self.assertEqual(self.store.revoke_user_sessions(parent.id)['revoked_sessions'], 1)
+        self.assertIsNone(self.store.user_for_session(token))
+        self.store.record_admin_action(admin.id, parent.id, parent.login, 'ban', {'reason':'Проверка'})
+        audit = self.store.admin_audit('bad')
+        self.assertEqual(audit[0]['admin_login'], admin.login)
+        self.assertEqual(audit[0]['details']['reason'], 'Проверка')
+
 
 if __name__ == '__main__':
     unittest.main()

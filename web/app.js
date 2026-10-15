@@ -1033,6 +1033,81 @@ async function authRequest(path, values) {
   return data;
 }
 
+const ADMIN_PLAN_TITLES={free:'Бесплатный',paid:'Адым Плюс',ultra:'Адым Ультра'};
+const ADMIN_ACTION_TITLES={ban:'заблокировал',unban:'разблокировал',set_plan:'изменил тариф',revoke_sessions:'завершил все входы'};
+function adminElement(tag,className,text){const element=document.createElement(tag);if(className)element.className=className;if(text!==undefined)element.textContent=text;return element;}
+function adminDate(timestamp){return timestamp?new Date(Number(timestamp)*1000).toLocaleString('ru-RU',{dateStyle:'short',timeStyle:'short'}):'ещё не было';}
+function adminBadge(text,className=''){const badge=adminElement('span',`admin-badge ${className}`.trim(),text);return badge;}
+function adminMetaLine(label,value){const line=adminElement('span');line.append(document.createTextNode(`${label}: `),adminElement('strong','',value));return line;}
+
+async function loadAdminAudit(){
+  const target=$('adminAuditEntries');target.replaceChildren();
+  const {entries}=await api('admin/audit?limit=40');
+  if(!entries.length){target.append(adminElement('p','helper','Действий пока нет.'));return;}
+  for(const entry of entries){
+    const row=adminElement('div','admin-audit-entry');
+    let detail='';
+    if(entry.action==='set_plan')detail=` · ${ADMIN_PLAN_TITLES[entry.details?.plan]||entry.details?.plan||''}`;
+    if(entry.action==='ban'&&entry.details?.reason)detail=` · ${entry.details.reason}`;
+    row.append(adminElement('strong','',`${entry.admin_login||'Администратор'} ${ADMIN_ACTION_TITLES[entry.action]||entry.action} ${entry.target_login}${detail}`),adminElement('span','',adminDate(entry.created_at)));
+    target.append(row);
+  }
+}
+
+async function runAdminAction(account,action,values,button){
+  if(action==='ban'&&!window.confirm(`Заблокировать аккаунт ${account.login}? Пользователь сразу выйдет из Адым.`))return;
+  if(action==='revoke_sessions'&&!window.confirm(`Завершить все входы аккаунта ${account.login}?`))return;
+  const oldLabel=button.textContent;button.disabled=true;button.textContent='Подождите…';$('adminMessage').textContent='Сохраняем изменение…';
+  try{
+    await api('admin/user',JSON.stringify({user_id:account.id,action,...values}),true,30000);
+    $('adminMessage').textContent=`Готово: ${account.login} обновлён.`;
+    await Promise.all([loadAdminUsers(),loadAdminAudit()]);
+  }catch(error){$('adminMessage').textContent=error.message||String(error);button.disabled=false;button.textContent=oldLabel;}
+}
+
+function renderAdminUsers(page){
+  $('adminTotalUsers').textContent=page.stats?.total??page.total??0;
+  $('adminBlockedUsers').textContent=page.stats?.banned??0;
+  $('adminPaidUsers').textContent=page.stats?.paid??0;
+  const target=$('adminUsers');target.replaceChildren();
+  if(!page.users?.length){target.append(adminElement('p','admin-empty','Аккаунты не найдены.'));return;}
+  for(const account of page.users){
+    const self=account.id===currentUser?.id,protectedAccount=self||account.role==='admin';
+    const card=adminElement('article',`admin-user${account.is_banned?' is-banned':''}${self?' is-self':''}`);
+    const identity=adminElement('div','admin-identity');
+    identity.append(adminElement('strong','',account.login),adminElement('span','',account.email));
+    const badges=adminElement('div','admin-badges');
+    badges.append(adminBadge(account.plan_title||ADMIN_PLAN_TITLES[account.plan]||'Бесплатный'));
+    if(account.is_banned)badges.append(adminBadge('Заблокирован','blocked'));
+    if(account.role==='admin')badges.append(adminBadge(self?'Это вы':'Администратор','admin'));
+    identity.append(badges);
+    const meta=adminElement('div','admin-meta');
+    meta.append(adminMetaLine('Регистрация',adminDate(account.created_at)),adminMetaLine('Последняя активность',adminDate(account.last_activity_at)),adminMetaLine('Входов',String(account.active_sessions||0)),adminMetaLine('За месяц',`${account.assignments||0} задач · ${account.hints||0} подсказок`),adminMetaLine('Расход',`${Number(account.external_cost_rubles||0).toFixed(2)} ₽`));
+    const controls=adminElement('div','admin-controls');
+    if(protectedAccount){controls.append(adminElement('p','helper admin-wide',self?'Ваш администраторский аккаунт защищён от изменений.':'Другой администратор защищён от изменений.'));}
+    else{
+      const select=adminElement('select');select.setAttribute('aria-label',`Тариф аккаунта ${account.login}`);
+      for(const [value,title] of Object.entries(ADMIN_PLAN_TITLES)){const option=adminElement('option','',title);option.value=value;option.selected=value===(account.plan||'free');select.append(option);}
+      const save=adminElement('button','secondary','Сохранить тариф');save.type='button';save.disabled=true;select.addEventListener('change',()=>save.disabled=select.value===(account.plan||'free'));save.addEventListener('click',()=>runAdminAction(account,'set_plan',{plan:select.value},save));
+      controls.append(select,save);
+      if(account.is_banned){const unban=adminElement('button','admin-unban admin-wide','Разблокировать аккаунт');unban.type='button';unban.addEventListener('click',()=>runAdminAction(account,'unban',{},unban));controls.append(unban);}
+      else{
+        const reason=adminElement('input','admin-wide');reason.placeholder='Причина блокировки — необязательно';reason.maxLength=240;reason.setAttribute('aria-label',`Причина блокировки ${account.login}`);
+        const ban=adminElement('button','admin-ban','Заблокировать');ban.type='button';ban.addEventListener('click',()=>runAdminAction(account,'ban',{reason:reason.value},ban));
+        const revoke=adminElement('button','secondary','Завершить все входы');revoke.type='button';revoke.disabled=!(account.active_sessions>0);revoke.addEventListener('click',()=>runAdminAction(account,'revoke_sessions',{},revoke));
+        controls.append(reason,ban,revoke);
+      }
+    }
+    card.append(identity,meta,controls);target.append(card);
+  }
+}
+
+async function loadAdminUsers(){
+  const query=$('adminSearch').value.trim();$('adminMessage').textContent='Загружаем аккаунты…';
+  try{const page=await api(`admin/users?q=${encodeURIComponent(query)}&limit=50`);renderAdminUsers(page);$('adminMessage').textContent=page.total>page.users.length?`Показаны первые ${page.users.length} из ${page.total}. Уточните поиск.`:`Найдено аккаунтов: ${page.total}.`;}
+  catch(error){$('adminMessage').textContent=error.message||String(error);throw error;}
+}
+
 async function startApplication() {
   if (appStarted) return;
   appStarted = true;
@@ -1048,6 +1123,7 @@ function showApplication(user) {
   currentUser = user;
   authenticated = true;
   $('accountLogin').textContent = user.is_admin ? `${user.login} · Админ` : user.login;
+  $('adminPanelBtn').hidden = !user.is_admin;
   $('authPage').hidden = true;
   document.querySelector('.app-header').hidden = false;
   $('setupPage').hidden = false;
@@ -1108,6 +1184,14 @@ $('deleteAccountBtn').addEventListener('click', () => {
   $('deleteAccountDialog').showModal();
   requestAnimationFrame(() => $('deletePassword').focus());
 });
+$('adminPanelBtn').addEventListener('click',async()=>{
+  document.querySelector('.account').open=false;$('adminDialog').showModal();$('adminSearch').focus();
+  try{await Promise.all([loadAdminUsers(),loadAdminAudit()]);}catch{}
+});
+$('closeAdminBtn').addEventListener('click',()=>$('adminDialog').close());
+$('adminDialog').addEventListener('click',event=>{if(event.target===$('adminDialog'))$('adminDialog').close();});
+$('adminSearchForm').addEventListener('submit',event=>{event.preventDefault();loadAdminUsers().catch(()=>{});});
+$('adminRefreshBtn').addEventListener('click',()=>Promise.all([loadAdminUsers(),loadAdminAudit()]).catch(()=>{}));
 $('cancelDeleteAccountBtn').addEventListener('click', () => $('deleteAccountDialog').close());
 $('deleteAccountDialog').addEventListener('click', event => {
   if (event.target === $('deleteAccountDialog')) $('deleteAccountDialog').close();

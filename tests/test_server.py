@@ -147,6 +147,42 @@ class ServerTests(unittest.TestCase):
         self.assertIsNone(summary['remaining']['assignments'])
         self.assertEqual(self.request('/api/metrics/cost',headers={'X-App-Token':self.s.token})[0],200)
 
+    def test_admin_panel_lists_accounts_and_controls_access_and_plans(self):
+        second=self.s.auth.register('managed-user','managed@example.com','password-123','password-123')
+        second_session=self.s.auth.create_session(second.id)
+        token_headers={'X-App-Token':self.s.token}
+        second_headers={'X-App-Token':self.s.token,'Cookie':'parentai_session='+second_session}
+        self.assertEqual(self.request('/api/admin/users',headers=second_headers)[0],403)
+        self.s.auth.set_role('test-user','admin')
+        code,body=self.request('/api/admin/users?q=managed',headers=token_headers)
+        self.assertEqual(code,200)
+        page=json.loads(body)
+        self.assertEqual(page['users'][0]['login'],'managed-user')
+        self.assertEqual(page['stats']['total'],2)
+        headers={'Origin':self.s.origin,'X-App-Token':self.s.token,'Content-Type':'application/json'}
+        plan=json.dumps({'user_id':second.id,'action':'set_plan','plan':'ultra'}).encode()
+        code,body=self.request('/api/admin/user',plan,headers)
+        self.assertEqual(code,200)
+        self.assertEqual(json.loads(body)['user']['plan'],'ultra')
+        self.assertEqual(self.s.usage.subscription(second.id)['plan'],'ultra')
+        ban=json.dumps({'user_id':second.id,'action':'ban','reason':'beta moderation'}).encode()
+        self.assertEqual(self.request('/api/admin/user',ban,headers)[0],200)
+        self.assertEqual(self.request('/api/status',headers=second_headers)[0],401)
+        self.assertIsNone(self.s.auth.authenticate('managed-user','password-123'))
+        login=json.dumps({'identifier':'managed-user','password':'password-123'}).encode()
+        code,body=self.request('/api/auth/login',login,headers,authenticated=False)
+        self.assertEqual(code,403)
+        self.assertIn('заблокирован',json.loads(body)['error'])
+        audit=json.loads(self.request('/api/admin/audit',headers=token_headers)[1])['entries']
+        self.assertEqual([item['action'] for item in audit[:2]],['ban','set_plan'])
+        unban=json.dumps({'user_id':second.id,'action':'unban'}).encode()
+        self.assertEqual(self.request('/api/admin/user',unban,headers)[0],200)
+        self.assertIsNotNone(self.s.auth.authenticate('managed-user','password-123'))
+        protected=json.dumps({'user_id':1,'action':'ban'}).encode()
+        code,body=self.request('/api/admin/user',protected,headers)
+        self.assertEqual(code,400)
+        self.assertIn('защищены',json.loads(body)['error'])
+
     def test_origin_token_and_wav_validation(self):
         self.assertEqual(self.request('/api/reference',b'bad')[0],403)
         headers={'Origin':self.s.origin,'X-App-Token':self.s.token}

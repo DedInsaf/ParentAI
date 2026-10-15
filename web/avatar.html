@@ -55,7 +55,7 @@
     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7.5A2.5 2.5 0 0 1 6.5 5h11A2.5 2.5 0 0 1 20 7.5v9a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 16.5v-9Z"/><path d="M4 9h16M16 14h1"/></svg>
     <span><small>Тариф</small><strong id="headerPlanName">Бесплатный</strong></span>
   </button>
-  <details class="account"><summary><span id="accountLogin"></span><span aria-hidden="true">⌄</span></summary><div class="account-menu"><a href="https://adym.ru/support.html" target="_blank" rel="noopener">Поддержка</a><a href="https://adym.ru/privacy.html" target="_blank" rel="noopener">Конфиденциальность</a><a href="https://adym.ru/terms.html" target="_blank" rel="noopener">Соглашение</a><button id="logoutBtn" type="button" class="quiet">Выйти</button><button id="deleteAccountBtn" type="button" class="danger-quiet">Удалить аккаунт</button></div></details>
+  <details class="account"><summary><span id="accountLogin"></span><span aria-hidden="true">⌄</span></summary><div class="account-menu"><button id="adminPanelBtn" type="button" class="admin-menu-button" hidden>Управление аккаунтами</button><a href="https://adym.ru/support.html" target="_blank" rel="noopener">Поддержка</a><a href="https://adym.ru/privacy.html" target="_blank" rel="noopener">Конфиденциальность</a><a href="https://adym.ru/terms.html" target="_blank" rel="noopener">Соглашение</a><button id="logoutBtn" type="button" class="quiet">Выйти</button><button id="deleteAccountBtn" type="button" class="danger-quiet">Удалить аккаунт</button></div></details>
   <div id="lessonToolbar" class="lesson-toolbar" hidden><button id="pauseBtn" class="secondary" disabled>Сделать перерыв</button><button id="stopBtn" class="quiet" disabled>Закончить</button></div>
 </header>
 <dialog id="billingDialog" class="billing-dialog" aria-labelledby="subscriptionTitle">
@@ -86,6 +86,17 @@
     </div>
     <p class="plan-explainer"><strong>Что считается новой задачей?</strong> Новое условие из домашней работы. Уточнения, попытки ответа и последовательные подсказки внутри этой задачи ничего дополнительно не списывают. Перерыв останавливает таймер занятия. Резервное распознавание включается только тогда, когда основной способ не справился.</p>
     <p id="billingMessage" class="billing-message" role="status">Оплата подписки проходит на защищённой странице Platega через СБП. Списание повторяется раз в месяц; отменить подписку можно по ссылке из письма Platega.</p>
+  </div>
+</dialog>
+<dialog id="adminDialog" class="admin-dialog" aria-labelledby="adminDialogTitle">
+  <div class="admin-shell">
+    <header class="admin-heading"><div><span class="eyebrow">АДМИНИСТРИРОВАНИЕ</span><h2 id="adminDialogTitle">Аккаунты бета-теста</h2><p>Только агрегированные данные. Пароли, разговоры, фотографии и голос недоступны.</p></div><button id="closeAdminBtn" type="button" class="dialog-close" aria-label="Закрыть админ-панель">×</button></header>
+    <div class="admin-stats" aria-label="Сводка аккаунтов"><div><strong id="adminTotalUsers">0</strong><span>аккаунтов</span></div><div><strong id="adminBlockedUsers">0</strong><span>заблокировано</span></div><div><strong id="adminPaidUsers">0</strong><span>с подпиской</span></div></div>
+    <form id="adminSearchForm" class="admin-search"><label for="adminSearch">Найти по логину или почте</label><div><input id="adminSearch" type="search" maxlength="254" placeholder="Например, test-plus"><button type="submit">Найти</button><button id="adminRefreshBtn" type="button" class="secondary">Обновить</button></div></form>
+    <p class="helper">Изменение тарифа управляет доступом в Адым. После подключения Platega активные списания отменяются отдельно в платёжной системе.</p>
+    <p id="adminMessage" class="helper" role="status"></p>
+    <div id="adminUsers" class="admin-users" aria-live="polite"></div>
+    <details class="admin-audit"><summary>Журнал действий администратора</summary><div id="adminAuditEntries" class="admin-audit-entries"></div></details>
   </div>
 </dialog>
 <dialog id="deleteAccountDialog" class="confirm-dialog" aria-labelledby="deleteAccountTitle">

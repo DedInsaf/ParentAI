@@ -96,19 +96,38 @@ class AppServer(ThreadingHTTPServer):
 
     def delete_profile(self, user_id):
         user_id = int(user_id)
+        self.unload_profile(user_id)
+        target = (self.runtime.data / 'profiles' / str(user_id)).resolve()
+        profiles = (self.runtime.data / 'profiles').resolve()
+        if target.parent == profiles:
+            shutil.rmtree(target, ignore_errors=True)
+
+    def unload_profile(self, user_id):
+        """Stop per-user workers and caches without deleting the saved profile."""
+        user_id = int(user_id)
         with self.profile_lock:
             runtime = self.profile_runtimes.pop(user_id, None)
         if runtime:
             runtime.cancel_generation()
             runtime.close()
-        target = (self.runtime.data / 'profiles' / str(user_id)).resolve()
-        profiles = (self.runtime.data / 'profiles').resolve()
-        if target.parent == profiles:
-            shutil.rmtree(target, ignore_errors=True)
         with self.speech_lock:
             for key in [key for key in self.speech_cache if key[0] == user_id]:
                 del self.speech_cache[key]
             self.speech_recent.pop(user_id, None)
+
+    def admin_account(self, user_id):
+        account = self.auth.user_for_admin(user_id)
+        if not account:
+            raise ValueError('Пользователь не найден.')
+        usage = self.usage.admin_overviews([user_id]).get(int(user_id), {})
+        return {**account, **usage}
+
+    def admin_accounts(self, search='', limit=50, offset=0):
+        page = self.auth.list_users(search, limit, offset)
+        overviews = self.usage.admin_overviews(item['id'] for item in page['users'])
+        page['users'] = [{**item, **overviews.get(item['id'], {})} for item in page['users']]
+        page['stats'] = {**self.auth.user_counts(), **self.usage.admin_plan_counts()}
+        return page
 
     def allow_auth_attempt(self, key, action):
         now = time.monotonic()
@@ -305,6 +324,21 @@ class Handler(BaseHTTPRequestHandler):
             headers = {'Set-Cookie': self.session_cookie(token)} if user else None
             return self.send(200, {'token': self.server.token, 'user': user.public() if user else None},
                              headers=headers)
+        if path in ('/api/admin/users', '/api/admin/audit'):
+            if self.headers.get('X-App-Token') != self.server.token:
+                return self.send(403, {'error': 'Invalid token'})
+            user = self.current_user()
+            if not user:
+                return self.send(401, {'error': 'Войдите в аккаунт.'})
+            if user.role != 'admin':
+                return self.send(403, {'error': 'Доступно только администратору.'})
+            query = parse_qs(urlsplit(self.path).query)
+            if path == '/api/admin/audit':
+                limit = query.get('limit', ['40'])[0]
+                return self.send(200, {'entries': self.server.auth.admin_audit(limit)})
+            return self.send(200, self.server.admin_accounts(
+                query.get('q', [''])[0], query.get('limit', ['50'])[0],
+                query.get('offset', ['0'])[0]))
         if path in ('/api/parent/summary', '/api/metrics/cost'):
             if self.headers.get('X-App-Token') != self.server.token:
                 return self.send(403, {'error': 'Invalid token'})
@@ -412,7 +446,10 @@ class Handler(BaseHTTPRequestHandler):
                     raise ValueError('Некорректные данные входа.')
                 if not self.server.allow_auth_attempt(self.client_key(), 'login'):
                     return self.send(429, {'error': 'Слишком много попыток входа. Повторите через несколько минут.'})
-                user = self.server.auth.authenticate(value.get('identifier'), value.get('password'))
+                user, login_status = self.server.auth.authenticate_with_status(
+                    value.get('identifier'), value.get('password'))
+                if login_status == 'banned':
+                    return self.send(403, {'error': 'Аккаунт заблокирован. Обратитесь в поддержку Адым.'})
                 if not user:
                     return self.send(401, {'error': 'Неверный логин, почта или пароль.'})
                 session = self.server.auth.create_session(user.id)
@@ -420,7 +457,6 @@ class Handler(BaseHTTPRequestHandler):
             user = self.current_user()
             if not user:
                 return self.send(401, {'error': 'Войдите в аккаунт.'})
-            runtime = self.server.profile_runtime(user.id)
             if path == '/api/auth/logout':
                 self.server.auth.delete_session(self.session_token())
                 return self.send(200, {'ok': True}, headers={'Set-Cookie': self.clear_session_cookie()})
@@ -438,6 +474,48 @@ class Handler(BaseHTTPRequestHandler):
                 self.server.usage.delete_user_data(user.id)
                 self.server.auth.delete_user(user.id)
                 return self.send(200, {'ok': True}, headers={'Set-Cookie': self.clear_session_cookie()})
+            if path == '/api/admin/user':
+                if user.role != 'admin':
+                    return self.send(403, {'error': 'Доступно только администратору.'})
+                value = json.loads(payload)
+                if not isinstance(value, dict):
+                    raise ValueError('Некорректное действие администратора.')
+                try:
+                    target_id = int(value.get('user_id'))
+                except (TypeError, ValueError):
+                    raise ValueError('Пользователь не найден.') from None
+                target = self.server.auth.user_for_admin(target_id)
+                if not target:
+                    raise ValueError('Пользователь не найден.')
+                if target_id == user.id or target['role'] == 'admin':
+                    raise ValueError('Другие администраторы защищены от изменений в панели.')
+                action = value.get('action')
+                details = {}
+                if action == 'ban':
+                    reason = value.get('reason', '')
+                    result = self.server.auth.set_banned(target_id, True, reason)
+                    self.server.dialogues.cancel_user(target_id)
+                    self.server.unload_profile(target_id)
+                    details = {'reason': ' '.join(str(reason or '').split())[:240]}
+                elif action == 'unban':
+                    result = self.server.auth.set_banned(target_id, False)
+                elif action == 'set_plan':
+                    plan = value.get('plan')
+                    if plan not in ('free', 'paid', 'ultra'):
+                        raise ValueError('Неизвестный тариф.')
+                    self.server.usage.set_subscription(target_id, plan)
+                    result = {'id': target_id, 'login': target['login'], 'plan': plan}
+                    details = {'plan': plan}
+                elif action == 'revoke_sessions':
+                    result = self.server.auth.revoke_user_sessions(target_id)
+                    self.server.dialogues.cancel_user(target_id)
+                    self.server.unload_profile(target_id)
+                else:
+                    raise ValueError('Неизвестное действие администратора.')
+                self.server.auth.record_admin_action(
+                    user.id, target_id, target['login'], action, details)
+                return self.send(200, {'ok': True, 'result': result,
+                                       'user': self.server.admin_account(target_id)})
             if path == '/api/billing/checkout':
                 value = json.loads(payload)
                 plan = value.get('plan') if isinstance(value, dict) else None
@@ -477,6 +555,7 @@ class Handler(BaseHTTPRequestHandler):
                         user.id, user.role == 'admin'))
                 return self.send(200, self.server.usage.control_study_session(
                     user.id, value.get('id'), action, user.role == 'admin'))
+            runtime = self.server.profile_runtime(user.id)
             if path == '/api/avatar-model':
                 return self.send(200, save_model(runtime, payload))
             if path == '/api/avatar':

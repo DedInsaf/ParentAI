@@ -340,6 +340,70 @@ class UsageStore:
                           "payment_subscriptions", "subscriptions"):
                 connection.execute(f"DELETE FROM {table} WHERE user_id=?", (user_id,))
 
+    def admin_overviews(self, user_ids):
+        """Return aggregate-only account activity for the administrator panel."""
+        ids = sorted({int(user_id) for user_id in user_ids if int(user_id) > 0})
+        if not ids:
+            return {}
+        placeholders = ",".join("?" for _ in ids)
+        start, end = self._month_bounds()
+        result = {user_id: {
+            "plan": "free", "plan_title": self.config.plan("free")["title"],
+            "subscription_status": "active", "assignments": 0, "hints": 0,
+            "external_cost_rubles": "0.0000", "last_activity_at": None,
+            "open_sessions": 0,
+        } for user_id in ids}
+        with self._connect() as connection:
+            subscriptions = connection.execute(
+                f"SELECT user_id,plan,status FROM subscriptions WHERE user_id IN ({placeholders})", ids
+            ).fetchall()
+            lessons = connection.execute(
+                f"""SELECT user_id,COUNT(*) AS assignments,COALESCE(SUM(hints),0) AS hints,
+                            MAX(updated_at) AS last_activity_at
+                     FROM lessons WHERE user_id IN ({placeholders}) AND started_at>=? AND started_at<?
+                     GROUP BY user_id""", (*ids, start, end)
+            ).fetchall()
+            costs = connection.execute(
+                f"""SELECT user_id,COALESCE(SUM(cost_microrubles),0) AS cost,
+                            MAX(created_at) AS last_activity_at
+                     FROM usage_events WHERE user_id IN ({placeholders})
+                       AND state IN ('pending','complete') AND created_at>=? AND created_at<?
+                     GROUP BY user_id""", (*ids, start, end)
+            ).fetchall()
+            sessions = connection.execute(
+                f"""SELECT user_id,COUNT(*) AS open_sessions,MAX(updated_at) AS last_activity_at
+                     FROM study_sessions WHERE user_id IN ({placeholders})
+                       AND status IN ('active','paused') GROUP BY user_id""", ids
+            ).fetchall()
+        for row in subscriptions:
+            plan = row["plan"] if row["status"] == "active" else "free"
+            result[row["user_id"]].update(
+                plan=plan, plan_title=self.config.plan(plan)["title"],
+                subscription_status=row["status"])
+        for rows, fields in ((lessons, ("assignments", "hints")),
+                             (sessions, ("open_sessions",))):
+            for row in rows:
+                item = result[row["user_id"]]
+                for field in fields:
+                    item[field] = row[field]
+                item["last_activity_at"] = max(
+                    filter(None, (item["last_activity_at"], row["last_activity_at"])), default=None)
+        for row in costs:
+            item = result[row["user_id"]]
+            item["external_cost_rubles"] = micros_to_rubles(row["cost"])
+            item["last_activity_at"] = max(
+                filter(None, (item["last_activity_at"], row["last_activity_at"])), default=None)
+        return result
+
+    def admin_plan_counts(self):
+        with self._connect() as connection:
+            row = connection.execute(
+                """SELECT COALESCE(SUM(CASE WHEN status='active' AND plan IN ('paid','ultra')
+                                             THEN 1 ELSE 0 END),0) AS paid
+                   FROM subscriptions"""
+            ).fetchone()
+        return {"paid": row["paid"]}
+
     def _active_plan(self, connection, user_id):
         row = connection.execute(
             "SELECT plan,status FROM subscriptions WHERE user_id=?", (user_id,)

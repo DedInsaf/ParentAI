@@ -4,6 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from hashlib import pbkdf2_hmac, sha256
 import hmac
+import json
 import os
 from pathlib import Path
 import re
@@ -94,7 +95,10 @@ class AuthStore:
                     role TEXT NOT NULL DEFAULT 'parent',
                     terms_accepted_at INTEGER,
                     terms_version TEXT,
-                    parent_confirmed INTEGER NOT NULL DEFAULT 0
+                    parent_confirmed INTEGER NOT NULL DEFAULT 0,
+                    is_banned INTEGER NOT NULL DEFAULT 0,
+                    banned_at INTEGER,
+                    ban_reason TEXT NOT NULL DEFAULT ''
                 );
                 CREATE TABLE IF NOT EXISTS sessions (
                     token_hash BLOB PRIMARY KEY,
@@ -103,6 +107,16 @@ class AuthStore:
                     created_at INTEGER NOT NULL
                 );
                 CREATE INDEX IF NOT EXISTS sessions_expires_at ON sessions(expires_at);
+                CREATE TABLE IF NOT EXISTS admin_audit (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    admin_user_id INTEGER NOT NULL,
+                    target_user_id INTEGER NOT NULL,
+                    target_login TEXT NOT NULL,
+                    action TEXT NOT NULL,
+                    details TEXT NOT NULL DEFAULT '{}',
+                    created_at INTEGER NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS admin_audit_created_at ON admin_audit(created_at DESC);
                 """
             )
 
@@ -115,6 +129,12 @@ class AuthStore:
                 connection.execute("ALTER TABLE users ADD COLUMN terms_version TEXT")
             if "parent_confirmed" not in columns:
                 connection.execute("ALTER TABLE users ADD COLUMN parent_confirmed INTEGER NOT NULL DEFAULT 0")
+            if "is_banned" not in columns:
+                connection.execute("ALTER TABLE users ADD COLUMN is_banned INTEGER NOT NULL DEFAULT 0")
+            if "banned_at" not in columns:
+                connection.execute("ALTER TABLE users ADD COLUMN banned_at INTEGER")
+            if "ban_reason" not in columns:
+                connection.execute("ALTER TABLE users ADD COLUMN ban_reason TEXT NOT NULL DEFAULT ''")
 
     def register(self, login, email, password, password_confirmation, role="parent",
                  legal_accepted=True, parent_confirmed=True) -> User:
@@ -152,29 +172,39 @@ class AuthStore:
             raise ValueError("Аккаунт с этой почтой уже существует.")
 
     def authenticate(self, identifier, password) -> User | None:
+        return self.authenticate_with_status(identifier, password)[0]
+
+    def authenticate_with_status(self, identifier, password):
         if not isinstance(identifier, str) or not isinstance(password, str):
-            return None
+            return None, "invalid"
         normalized = _normalized(identifier)
         if not normalized or len(password) > 128:
-            return None
+            return None, "invalid"
         field = "email_normalized" if "@" in normalized else "login_normalized"
         with self._connect() as connection:
             row = connection.execute(f"SELECT * FROM users WHERE {field} = ?", (normalized,)).fetchone()
         if row is None:
             # Keep the expensive path for unknown accounts too, reducing identifier probing signals.
             pbkdf2_hmac("sha256", password.encode("utf-8"), b"\0" * 16, PASSWORD_ITERATIONS)
-            return None
+            return None, "invalid"
         candidate = pbkdf2_hmac(
             "sha256", password.encode("utf-8"), row["password_salt"], row["password_iterations"]
         )
         if not hmac.compare_digest(candidate, row["password_hash"]):
-            return None
-        return User(row["id"], row["login"], row["email"], row["role"])
+            return None, "invalid"
+        if row["is_banned"]:
+            return None, "banned"
+        return User(row["id"], row["login"], row["email"], row["role"]), "ok"
 
     def create_session(self, user_id: int) -> str:
         token = secrets.token_urlsafe(32)
         now = int(time.time())
         with self._connect() as connection:
+            active = connection.execute(
+                "SELECT 1 FROM users WHERE id=? AND is_banned=0", (int(user_id),)
+            ).fetchone()
+            if not active:
+                raise ValueError("Аккаунт заблокирован или удалён.")
             connection.execute("DELETE FROM sessions WHERE expires_at <= ?", (now,))
             connection.execute(
                 "INSERT INTO sessions(token_hash, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)",
@@ -191,7 +221,8 @@ class AuthStore:
             row = connection.execute(
                 """SELECT users.id, users.login, users.email, users.role
                    FROM sessions JOIN users ON users.id = sessions.user_id
-                   WHERE sessions.token_hash = ? AND sessions.expires_at > ?""",
+                   WHERE sessions.token_hash = ? AND sessions.expires_at > ?
+                     AND users.is_banned = 0""",
                 (token_hash, now),
             ).fetchone()
             if row and renew:
@@ -225,6 +256,127 @@ class AuthStore:
             "sha256", password.encode("utf-8"), row["password_salt"], row["password_iterations"]
         )
         return hmac.compare_digest(candidate, row["password_hash"])
+
+    def list_users(self, search="", limit=50, offset=0):
+        """Return bounded account metadata for the administrator panel."""
+        search = _normalized(search) if isinstance(search, str) else ""
+        try:
+            limit = max(1, min(int(limit), 100))
+            offset = max(0, int(offset))
+        except (TypeError, ValueError):
+            limit, offset = 50, 0
+        where, params = "", []
+        if search:
+            where = "WHERE users.login_normalized LIKE ? OR users.email_normalized LIKE ?"
+            pattern = f"%{search}%"
+            params.extend((pattern, pattern))
+        now = int(time.time())
+        with self._connect() as connection:
+            total = connection.execute(
+                f"SELECT COUNT(*) FROM users {where}", params
+            ).fetchone()[0]
+            rows = connection.execute(
+                f"""SELECT users.id,users.login,users.email,users.role,users.created_at,
+                            users.is_banned,users.banned_at,users.ban_reason,
+                            COUNT(sessions.token_hash) AS active_sessions
+                     FROM users
+                     LEFT JOIN sessions ON sessions.user_id=users.id AND sessions.expires_at>?
+                     {where}
+                     GROUP BY users.id
+                     ORDER BY users.created_at DESC,users.id DESC LIMIT ? OFFSET ?""",
+                (now, *params, limit, offset),
+            ).fetchall()
+        return {
+            "total": total,
+            "users": [{
+                "id": row["id"], "login": row["login"], "email": row["email"],
+                "role": row["role"], "created_at": row["created_at"],
+                "is_banned": bool(row["is_banned"]), "banned_at": row["banned_at"],
+                "ban_reason": row["ban_reason"], "active_sessions": row["active_sessions"],
+            } for row in rows],
+        }
+
+    def user_for_admin(self, user_id):
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT id,login,email,role,is_banned FROM users WHERE id=?", (int(user_id),)
+            ).fetchone()
+        return dict(row) if row else None
+
+    def user_counts(self):
+        with self._connect() as connection:
+            row = connection.execute(
+                """SELECT COUNT(*) AS total,
+                          COALESCE(SUM(CASE WHEN is_banned=1 THEN 1 ELSE 0 END),0) AS banned
+                   FROM users"""
+            ).fetchone()
+        return {"total": row["total"], "banned": row["banned"]}
+
+    def set_banned(self, target_user_id, banned, reason=""):
+        target_user_id = int(target_user_id)
+        reason = " ".join(str(reason or "").split())[:240]
+        now = int(time.time())
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT id,login,role FROM users WHERE id=?", (target_user_id,)
+            ).fetchone()
+            if not row:
+                raise ValueError("Пользователь не найден.")
+            if row["role"] == "admin":
+                raise ValueError("Администраторские аккаунты нельзя блокировать из панели.")
+            connection.execute(
+                "UPDATE users SET is_banned=?,banned_at=?,ban_reason=? WHERE id=?",
+                (int(bool(banned)), now if banned else None, reason if banned else "", target_user_id),
+            )
+            if banned:
+                connection.execute("DELETE FROM sessions WHERE user_id=?", (target_user_id,))
+        return {"id": row["id"], "login": row["login"], "is_banned": bool(banned)}
+
+    def revoke_user_sessions(self, target_user_id):
+        target_user_id = int(target_user_id)
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT login,role FROM users WHERE id=?", (target_user_id,)
+            ).fetchone()
+            if not row:
+                raise ValueError("Пользователь не найден.")
+            if row["role"] == "admin":
+                raise ValueError("Сессии администратора нельзя завершить из панели.")
+            cursor = connection.execute("DELETE FROM sessions WHERE user_id=?", (target_user_id,))
+        return {"login": row["login"], "revoked_sessions": cursor.rowcount}
+
+    def record_admin_action(self, admin_user_id, target_user_id, target_login, action, details=None):
+        with self._connect() as connection:
+            connection.execute(
+                """INSERT INTO admin_audit
+                   (admin_user_id,target_user_id,target_login,action,details,created_at)
+                   VALUES (?,?,?,?,?,?)""",
+                (int(admin_user_id), int(target_user_id), str(target_login)[:32], str(action)[:40],
+                 json.dumps(details or {}, ensure_ascii=False), int(time.time())),
+            )
+
+    def admin_audit(self, limit=40):
+        try:
+            limit = max(1, min(int(limit), 100))
+        except (TypeError, ValueError):
+            limit = 40
+        with self._connect() as connection:
+            rows = connection.execute(
+                """SELECT admin_audit.id,admin_audit.admin_user_id,admin_audit.target_user_id,
+                          admin_audit.target_login,admin_audit.action,admin_audit.details,
+                          admin_audit.created_at,users.login AS admin_login
+                   FROM admin_audit LEFT JOIN users ON users.id=admin_audit.admin_user_id
+                   ORDER BY admin_audit.id DESC LIMIT ?""", (limit,)
+            ).fetchall()
+        result = []
+        for row in rows:
+            item = dict(row)
+            try:
+                item["details"] = json.loads(item["details"])
+            except (json.JSONDecodeError, TypeError):
+                item["details"] = {}
+            result.append(item)
+        return result
 
     def delete_user(self, user_id):
         with self._connect() as connection:

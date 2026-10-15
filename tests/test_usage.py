@@ -126,6 +126,20 @@ class UsageTests(unittest.TestCase):
         self.assertEqual(report['usage']['llm_requests'], 4)
         self.assertNotEqual(report['usage']['external_cost_rubles'], '0.0000')
 
+    def test_admin_overview_combines_plan_activity_and_cost_without_content(self):
+        self.store.set_subscription(10, 'paid')
+        event = self.store.reserve(10, 'llm', 'admin-overview', lesson_id='overview-lesson',
+                                   new_lesson=True, estimated_cost=rubles_to_micros('0.10'))
+        self.store.complete(event['id'], cost=rubles_to_micros('0.08'))
+        self.store.lesson_hint(10, 'overview-lesson')
+        overview = self.store.admin_overviews([10, 11])
+        self.assertEqual(overview[10]['plan'], 'paid')
+        self.assertEqual(overview[10]['assignments'], 1)
+        self.assertEqual(overview[10]['hints'], 1)
+        self.assertEqual(overview[10]['external_cost_rubles'], '0.0800')
+        self.assertEqual(overview[11]['plan'], 'free')
+        self.assertEqual(self.store.admin_plan_counts()['paid'], 1)
+
     def test_confirmed_platega_callback_activates_paid_plan(self):
         provider_id = '11111111-1111-4111-8111-111111111111'
         redirect = 'https://pay.platega.io/subscription/11111111'
