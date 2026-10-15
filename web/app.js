@@ -526,7 +526,7 @@ async function record() {
     const chunks = []; let count = 0, peak = 0;
     node.port.onmessage = ({data}) => { chunks.push(data); count += data.length; let sum = 0; peak = 0; for (const x of data) { sum += x*x; peak = Math.max(peak, Math.abs(x)); } $('level').value = Math.min(1, Math.sqrt(sum/data.length)*5); };
     source.connect(node); node.connect(recordContext.destination);
-    const duration = $('voiceMode').value === 'direct' ? 8 : 20;
+    const duration = $('voiceMode').value === 'direct' ? 8 : 30;
     const mode = $('voiceMode').value;
     const started = performance.now();
     while (count < recordContext.sampleRate * duration) {
@@ -549,7 +549,9 @@ async function record() {
     const result = await api('reference?mode=' + mode, wav);
     referenceRejected = false;
     $('reference').src = '/audio/reference.wav?t=' + Date.now(); $('reference').hidden = false;
-    $('voiceHint').textContent = `Запись: ${result.seconds} сек. Прослушайте её, затем нажмите «${mode==='direct'?'Сохранить напоминание':'Создать голос'}».`;
+    $('voiceHint').textContent = mode==='direct'
+      ? `Запись: ${result.seconds} сек. Прослушайте её, затем нажмите «Сохранить напоминание».`
+      : `Чистой речи: ${result.speech_seconds} сек. Длинные паузы убраны. Прослушайте образец, затем нажмите «Создать голос».`;
     status = await api('status');
   } catch(e) { if (!recordCancelled) throw mediaError(e); } finally { source?.disconnect(); node?.disconnect(); mic?.getTracks().forEach(t => t.stop()); await recordContext?.close(); $('level').value = 0; recordingStream = null; recording = false; controls(); }
 }
@@ -923,9 +925,9 @@ function action(id, fn) { $(id).addEventListener('click', async () => {
 }); }
 function updateVoiceMode() {
   const direct = $('voiceMode').value === 'direct';
-  $('recordBtn').textContent = direct ? 'Записать напоминание · 8 сек' : 'Записать образец · 20 сек';
-  $('voiceModeHint').textContent=direct?'Аватар сможет позвать ребёнка вашей настоящей записью.':'Аватар будет создавать новые фразы вашим голосом. Первый ответ может готовиться дольше.';
-  $('readText').textContent = direct ? 'Давай вернёмся к заданию. Если нужна помощь, позови меня.' : 'Привет! Я рядом, если тебе нужна помощь. Давай спокойно разберёмся с заданием. Сначала прочитаем условие, потом подумаем над решением. Не нужно торопиться. У тебя всё получится.';
+  $('recordBtn').textContent = direct ? 'Записать напоминание · 8 сек' : 'Записать образец · 30 сек';
+  $('voiceModeHint').textContent=direct?'Аватар будет воспроизводить только эту точную запись — новые ответы она не озвучит.':'Запишите полный образец: Адым сможет создавать новые фразы голосом родителя. Первый ответ может готовиться дольше.';
+  $('readText').textContent = direct ? 'Давай вернёмся к заданию. Если нужна помощь, позови меня.' : 'Привет! Я рядом, и мы спокойно разберёмся с заданием. Сначала прочитаем условие вслух, затем выделим главное и подумаем над первым шагом. Если сразу не получится, ничего страшного: попробуем ещё раз и найдём другой способ. Говори уверенно, но не торопись. Я верю в тебя, у тебя всё обязательно получится.';
 }
 $('voiceMode').addEventListener('change', () => { voiceModeTouched = true; updateVoiceMode(); controls(); });
 action('cancelRecordBtn', () => { recordCancelled = true; recordingAbort?.abort(); stopTracks(recordingStream); });

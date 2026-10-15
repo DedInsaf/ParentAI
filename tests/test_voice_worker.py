@@ -19,11 +19,15 @@ class Tensor:
 
 
 class Model:
-    def __init__(self,fail_mps=False):self.device='cpu';self.conditioned=0;self.fail_mps=fail_mps;self.devices=[]
+    def __init__(self,fail_mps=False):
+        self.device='cpu';self.conditioned=0;self.fail_mps=fail_mps;self.devices=[]
+        self.conditioning_kwargs=None;self.inference_kwargs=[]
     def to(self,device):self.device=device;return self
-    def get_conditioning_latents(self,audio_path):
+    def get_conditioning_latents(self,audio_path,**kwargs):
+        self.conditioning_kwargs=kwargs
         self.conditioned+=1;return Tensor(),Tensor()
     def inference_stream(self,*args,**kwargs):
+        self.inference_kwargs.append(kwargs)
         self.devices.append(self.device)
         if self.fail_mps and self.device=='mps':raise RuntimeError('Unsupported Metal operation')
         yield Tensor()
@@ -50,6 +54,10 @@ class VoiceWorkerTests(unittest.TestCase):
     def test_speaker_conditioning_is_cached_across_replies(self):
         model=Model();status=self.run_worker(model,2)
         self.assertEqual(model.conditioned,1);self.assertEqual(status['device'],'mps')
+        self.assertEqual(model.conditioning_kwargs,{
+            'max_ref_length':30,'gpt_cond_len':30,'gpt_cond_chunk_len':4,
+            'sound_norm_refs':False})
+        self.assertEqual(model.inference_kwargs[0]['repetition_penalty'],5.0)
 
     def test_unsupported_gpu_operation_falls_back_before_publishing_audio(self):
         model=Model(fail_mps=True);status=self.run_worker(model,1)

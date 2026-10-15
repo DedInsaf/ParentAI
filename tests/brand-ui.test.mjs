@@ -47,3 +47,15 @@ test('administrator has a dedicated protected account management dialog', () => 
   assert.match(script, /runAdminAction\(account,'revoke_sessions'/);
   assert.match(script, /adminPanelBtn'\)\.hidden = !user\.is_admin/);
 });
+
+test('avatar dependency errors distinguish local WebAssembly from internet failures', () => {
+  assert.match(script, /WebAssembly\|wasm\|Content Security\|CompileError/);
+  assert.doesNotMatch(script, /подготовить создание аватара\. Проверьте интернет/);
+});
+
+test('a cloned parent voice is the lesson default and uses a full reference sample', () => {
+  assert.match(html, /<option value="parent" selected>Голос родителя/);
+  assert.doesNotMatch(html, /<option value="yandex" selected>/);
+  assert.match(script, /direct' \? 8 : 30/);
+  assert.match(script, /Записать образец · 30 сек/);
+});

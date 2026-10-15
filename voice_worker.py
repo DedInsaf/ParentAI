@@ -7,6 +7,39 @@ import hashlib
 import time
 
 
+def model_setting(model, name, default):
+    """Read an XTTS setting without depending on a particular config wrapper."""
+    config = getattr(model, 'config', None)
+    if config is None:
+        return default
+    if isinstance(config, dict):
+        return config.get(name, default)
+    return getattr(config, name, default)
+
+
+def conditioning_options(model):
+    """Use the complete reference instead of XTTS' low-level six-second default."""
+    maximum = max(6, min(30, int(model_setting(model, 'max_ref_len', 30))))
+    length = max(6, min(maximum, int(model_setting(model, 'gpt_cond_len', maximum))))
+    chunk = max(2, min(length, int(model_setting(model, 'gpt_cond_chunk_len', 4))))
+    return {
+        'max_ref_length': maximum,
+        'gpt_cond_len': length,
+        'gpt_cond_chunk_len': chunk,
+        'sound_norm_refs': bool(model_setting(model, 'sound_norm_refs', False)),
+    }
+
+
+def inference_options(model):
+    return {
+        'temperature': float(model_setting(model, 'temperature', .75)),
+        'length_penalty': float(model_setting(model, 'length_penalty', 1.0)),
+        'repetition_penalty': float(model_setting(model, 'repetition_penalty', 5.0)),
+        'top_k': int(model_setting(model, 'top_k', 50)),
+        'top_p': float(model_setting(model, 'top_p', .85)),
+    }
+
+
 def load_model():
     import torch
     torch.set_num_threads(max(1,min(4,(os.cpu_count() or 2)//2)))
@@ -29,19 +62,25 @@ def serve(directory):
     tts=load_model(); model=tts.synthesizer.tts_model
     device='mps' if os.getenv('PARENTAI_VOICE_DEVICE','auto')!='cpu' and torch.backends.mps.is_available() else 'cpu'
     cached_key=None;conditioning=None
+    clone_options=conditioning_options(model)
+    generation_options=inference_options(model)
     atomic_json(directory/'ready.json',{'ok':True,'device':device})
     def generate(sentence):
         nonlocal device,conditioning
         emitted=False
         try:
-            for tensor in model.inference_stream(sentence,'ru',*conditioning,stream_chunk_size=20,enable_text_splitting=True):
+            for tensor in model.inference_stream(
+                sentence,'ru',*conditioning,stream_chunk_size=20,
+                enable_text_splitting=True,**generation_options):
                 emitted=True;yield tensor
         except (RuntimeError,NotImplementedError):
             if device!='mps' or emitted:raise
             # Retry before publishing audio, so the answer never repeats midway.
             device='cpu';model.to(device);conditioning=tuple(x.to(device) for x in conditioning)
             atomic_json(directory/'ready.json',{'ok':True,'device':device})
-            yield from model.inference_stream(sentence,'ru',*conditioning,stream_chunk_size=20,enable_text_splitting=True)
+            yield from model.inference_stream(
+                sentence,'ru',*conditioning,stream_chunk_size=20,
+                enable_text_splitting=True,**generation_options)
     last_activity=time.monotonic()
     while True:
         requests=sorted(directory.glob('*.request.json'),key=lambda p:p.stat().st_mtime)
@@ -58,7 +97,12 @@ def serve(directory):
             if key!=cached_key:
                 # Reference feature extraction stays on CPU; synthesis uses Metal.
                 model.to('cpu')
-                conditioning=model.get_conditioning_latents(audio_path=[str(reference)])
+                # The low-level XTTS method otherwise considers only the first
+                # six seconds. Averaging short chunks across the complete clean
+                # sample preserves substantially more of the parent's timbre
+                # and speaking manner.
+                conditioning=model.get_conditioning_latents(
+                    audio_path=[str(reference)],**clone_options)
                 try:
                     model.to(device);conditioning=tuple(x.to(device) for x in conditioning)
                 except (RuntimeError,NotImplementedError):

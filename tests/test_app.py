@@ -27,7 +27,19 @@ class AudioTests(unittest.TestCase):
         rate, audio = wavfile.read(io.BytesIO(data))
         self.assertEqual(rate, 24000)
         self.assertGreater(info['speech_seconds'], 10)
+        self.assertLess(info['seconds'], 20)
         self.assertLess(np.max(np.abs(audio.astype(float))), 32767)
+
+    def test_clone_requires_substantial_speech_but_direct_keeps_exact_pauses(self):
+        t = np.arange(48000 * 20) / 48000
+        sparse = .18 * np.sin(2*np.pi*180*t) * ((t % 4) > 3)
+        with self.assertRaisesRegex(ValueError, 'весь текст'):
+            prepare_reference(wav(sparse))
+        direct, info = prepare_reference(wav(sparse[:48000*8]), direct=True)
+        rate, audio = wavfile.read(io.BytesIO(direct))
+        self.assertEqual(rate, 24000)
+        self.assertGreater(len(audio) / rate, 4)
+        self.assertGreater(info['speech_seconds'], .6)
 
     def test_reject_silence_noise_clipping_short_and_stereo(self):
         rng = np.random.default_rng(4)
