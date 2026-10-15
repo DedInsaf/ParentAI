@@ -245,7 +245,15 @@ async function dependencies() {
     try { detector = await vision.FaceLandmarker.createFromOptions(files, options); }
     catch { options.baseOptions.delegate = 'CPU'; detector = await vision.FaceLandmarker.createFromOptions(files, options); }
     return vision;
-  })().catch(() => { dependenciesPromise = null; throw new Error('Не удалось подготовить создание аватара. Проверьте интернет и обновите страницу.'); });
+  })().catch(error => {
+    dependenciesPromise = null;
+    console.error('Не удалось запустить локальное распознавание лица.', error);
+    const details=String(error?.message||error||'');
+    if(/WebAssembly|wasm|Content Security|CompileError/i.test(details)){
+      throw new Error('Браузер не смог запустить локальное распознавание лица. Обновите страницу и попробуйте ещё раз.');
+    }
+    throw new Error('Не удалось загрузить локальные файлы создания аватара. Обновите страницу и попробуйте ещё раз.');
+  });
   return dependenciesPromise;
 }
 function initScene() {

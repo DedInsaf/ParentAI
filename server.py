@@ -219,7 +219,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header('Cross-Origin-Resource-Policy', 'same-origin')
         self.send_header('X-Frame-Options', 'DENY')
         self.send_header('Content-Security-Policy',
-                         "default-src 'self'; script-src 'self' "
+                         "default-src 'self'; script-src 'self' 'wasm-unsafe-eval' "
                          "'sha256-y0joblgLTLFGhbj/xXhGS1SyGmxly/oZpyENyx9LBXI='; "
                          "style-src 'self' 'unsafe-inline'; "
                          "img-src 'self' data: blob:; media-src 'self' blob:; worker-src 'self' blob:; "

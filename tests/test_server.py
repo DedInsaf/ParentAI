@@ -64,6 +64,8 @@ class ServerTests(unittest.TestCase):
         self.assertTrue(body)
         self.assertEqual(headers['Cache-Control'],'no-cache')
         self.assertIn("default-src 'self'",headers['Content-Security-Policy'])
+        self.assertIn("script-src 'self' 'wasm-unsafe-eval'",headers['Content-Security-Policy'])
+        self.assertNotIn("script-src 'self' 'unsafe-eval'",headers['Content-Security-Policy'])
         etag=headers['ETag']
         code,body=self.request('/app.js',headers={'If-None-Match':etag},authenticated=False)
         self.assertEqual(code,304)
