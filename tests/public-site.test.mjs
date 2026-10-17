@@ -11,7 +11,19 @@ test('public landing uses the Адым brand and explains its meaning', () => {
   const html = read('index.html');
   assert.match(html, /Адым — шаг к самостоятельной учёбе/);
   assert.match(html, /с татарского — «шаг»/);
-  assert.match(html, /Готовим открытое тестирование/);
+  assert.match(html, /Веб-приложение для занятий дома/);
+});
+
+test('landing separates product discovery, web app launch and desktop downloads', () => {
+  const html = read('index.html');
+  const download = read('download.html');
+  assert.match(html, /href="https:\/\/app\.adym\.ru\/"[^>]*>Запустить в браузере/);
+  assert.match(html, /href="\/download\.html"[^>]*>Скачать приложение/);
+  assert.match(download, /href="https:\/\/app\.adym\.ru\/"/);
+  assert.match(download, /Скачать для macOS/);
+  assert.match(download, /Скачать для Windows/);
+  assert.match(download, /Установщик ещё не опубликован/);
+  assert.doesNotMatch(download, /github\.com\/.*archive|refs\/heads\/main/i);
 });
 
 test('public landing shows exact monthly plan limits', () => {
@@ -43,7 +55,7 @@ test('purchase path is clickable but cannot charge before backend launch', () =>
 });
 
 test('public site includes privacy, terms and deployment essentials', () => {
-  for (const name of ['privacy.html', 'terms.html', 'support.html', 'checkout.html', 'checkout-ultra.html', '404.html', 'robots.txt', 'sitemap.xml', '.htaccess']) {
+  for (const name of ['privacy.html', 'terms.html', 'support.html', 'download.html', 'checkout.html', 'checkout-ultra.html', '404.html', 'robots.txt', 'sitemap.xml', '.htaccess']) {
     assert.ok(fs.existsSync(path.join(root, name)), `${name} is missing`);
   }
   assert.match(read('privacy.html'), /support@adym\.ru/i);
@@ -53,6 +65,9 @@ test('public site includes privacy, terms and deployment essentials', () => {
   assert.match(read('terms.html'), /990 ₽ за 30 календарных дней/i);
   assert.match(read('support.html'), /support@adym\.ru/i);
   assert.match(read('support.html'), /OPLAT/);
+  assert.match(read('privacy.html'), /app\.adym\.ru/i);
+  assert.match(read('terms.html'), /app\.adym\.ru/i);
+  assert.match(read('sitemap.xml'), /download\.html/);
   assert.match(read('.htaccess'), /RewriteCond %\{HTTPS\} !=on/);
   assert.match(read('.htaccess'), /X-Forwarded-Proto.*!https/);
 });
