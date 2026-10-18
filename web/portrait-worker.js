@@ -1,5 +1,6 @@
 // Both networks run inside this worker. No photo is sent to a remote service.
-self.onmessage=async ({data:bitmap})=>{
+self.onmessage=async ({data:message})=>{
+  const bitmap=message?.bitmap||message,accessoriesOnly=!!message?.accessoriesOnly;
   let segmenter,session;
   const began=performance.now(),progress=message=>self.postMessage({progress:true,message});
   try {
@@ -17,6 +18,10 @@ self.onmessage=async ({data:bitmap})=>{
       });} catch(error){reject(error);}
     });
     segmenter.close();segmenter=null;
+    if(accessoriesOnly){
+      self.postMessage({...classes,engine:'mediapipe-accessories'},[classes.data.buffer]);
+      return;
+    }
     progress('Аккуратно отделяем волосы и края плеч от фона…');
     // A single WASM thread works on Safari/iOS without SharedArrayBuffer.
     ort.env.wasm.numThreads=1;ort.env.wasm.proxy=false;

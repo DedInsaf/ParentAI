@@ -1,5 +1,16 @@
 import {closeFaceOpenings} from './core.mjs';
 
+export function isFrontOnlyEyeTriangle(front,ids){
+  if(!front?.landmarks||!Array.isArray(ids)||ids.length!==3)return false;
+  const lm=front.landmarks,faceWidth=Math.max(.001,lm[454].x-lm[234].x),faceHeight=Math.max(.001,lm[152].y-lm[10].y);
+  const x=ids.reduce((sum,id)=>sum+lm[id].x,0)/3,y=ids.reduce((sum,id)=>sum+lm[id].y,0)/3;
+  const eyeY=(lm[33].y+lm[263].y)/2;
+  // One frontal photograph owns the glasses, lenses, eyes and temple arms.
+  // Side-photo blending in this band duplicated frames and reflections.
+  return x>=lm[234].x-faceWidth*.12&&x<=lm[454].x+faceWidth*.12&&
+    y>=eyeY-faceHeight*.18&&y<=eyeY+faceHeight*.25;
+}
+
 // Keep the portrait's coordinate system, with sharper facial pixels from the close-up.
 export function bakePortraitFaceAtlas(portrait,detail,indices) {
   const atlas=document.createElement('canvas');atlas.width=portrait.canvas.width;atlas.height=portrait.canvas.height;
@@ -30,6 +41,7 @@ export function bakeFaceAtlas(front,views,indices){
   for(let i=0;i<indices.length;i+=3){
     const ids=indices.slice(i,i+3);
     if(ids.some(id=>id>=468))continue;
+    if(isFrontOnlyEyeTriangle(front,ids))continue;
     const x=ids.reduce((sum,id)=>sum+front.landmarks[id].x,0)/3;
     const amount=Math.max(0,Math.min(.85,(Math.abs(x-nose)/half-.32)/.65));
     if(amount<.03)continue;

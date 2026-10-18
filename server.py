@@ -416,7 +416,10 @@ class Handler(BaseHTTPRequestHandler):
                 or self.headers.get('X-App-Token') != self.server.token):
             return self.send(403, {'error': 'Invalid origin or token'})
         try:
-            size = int(self.headers.get('Content-Length', '0'))
+            try:
+                size = int(self.headers.get('Content-Length', '0'))
+            except (TypeError, ValueError):
+                return self.send(400, {'error': 'Некорректный размер запроса.'})
             limit = MAX_MODEL_BYTES if path == '/api/avatar-model' else 10_000_000
             if not 0 <= size <= limit:
                 return self.send(413, {'error': 'Модель слишком большая' if path == '/api/avatar-model' else 'Запись слишком большая'})
@@ -632,7 +635,7 @@ class Handler(BaseHTTPRequestHandler):
                 mode = query.get('mode', ['clone'])[0]
                 take = query.get('take', ['1'])[0]
                 return self.send(200, runtime.reference(payload, mode, take))
-            if self.path == '/api/generate':
+            if path == '/api/generate':
                 runtime.generate()
                 return self.send(202, {'ok': True})
             self.send(404, {'error': 'Not found'})

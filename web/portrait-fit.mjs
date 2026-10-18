@@ -25,6 +25,30 @@ export function combineCategoryMasks(masks,width,height) {
   return current;
 }
 
+export function portraitAccessoryIssue(lm,{data,width,height}={}) {
+  if(!lm?.[10]||!lm?.[33]||!lm?.[263]||!lm?.[234]||!lm?.[454]||!lm?.[152]||
+     !Number.isInteger(width)||!Number.isInteger(height)||data?.length!==width*height)return '';
+  const faceWidth=Math.max(.001,lm[454].x-lm[234].x),faceHeight=Math.max(.001,lm[152].y-lm[10].y);
+  const eyeY=(lm[33].y+lm[263].y)/2;
+  // Glasses are part of the person's appearance and are intentionally allowed.
+  // The expanded band also includes thick frames and their short temple arms.
+  const glasses={left:lm[234].x-faceWidth*.10,right:lm[454].x+faceWidth*.10,
+    top:eyeY-faceHeight*.17,bottom:eyeY+faceHeight*.24};
+  let upper=0,sides=0;
+  for(let y=0;y<height;y++)for(let x=0;x<width;x++){
+    if(data[y*width+x]!==5)continue;
+    const px=(x+.5)/width,py=(y+.5)/height;
+    if(px>=glasses.left&&px<=glasses.right&&py>=glasses.top&&py<=glasses.bottom)continue;
+    if(py<eyeY-faceHeight*.16)upper++;
+    if((px<glasses.left||px>glasses.right)&&py>lm[10].y-faceHeight*.10&&py<eyeY+faceHeight*.55)sides++;
+  }
+  const threshold=Math.max(40,Math.floor(width*height*faceWidth*faceHeight*.025));
+  if(upper>=threshold||sides>=threshold){
+    return 'Невозможно создать модель с головным убором или наушниками. Снимите их и начните сканирование заново. Очки можно оставить.';
+  }
+  return '';
+}
+
 // Fit to measured classes in image space, rather than average head/body ratios.
 // Labels: background, hair, body skin, face skin, clothes, accessories.
 export function fitPortraitAnchors(lm,{data,width,height}) {

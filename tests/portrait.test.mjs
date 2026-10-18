@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {positionsFor} from '../web/core.mjs';
 import {defaultPortraitAnchors,portraitAnchorIssue,portraitBodyGeometry,matteBodyGeometry,foreheadScalpGeometry,photoHairPatchGeometry,portraitHairGeometry,portraitEarGeometry} from '../web/portrait-geometry.mjs';
-import {fitPortraitAnchors,fitStablePortraitAnchors,combineCategoryMasks} from '../web/portrait-fit.mjs';
+import {fitPortraitAnchors,fitStablePortraitAnchors,combineCategoryMasks,portraitAccessoryIssue} from '../web/portrait-fit.mjs';
 import {OVAL} from '../web/head-geometry.mjs';
 
 function fixture() {
@@ -149,6 +149,21 @@ test('stable portrait fit tolerates a one-pixel segmentation shift',()=>{
   assert.equal(portraitAnchorIssue(stable,lm),'');
   assert.ok(Math.abs(stable.neckLeft.x-direct.neckLeft.x)<=1/width);
   assert.ok(Math.abs(stable.shoulderRight.x-direct.shoulderRight.x)<=1/width);
+});
+
+test('glasses stay allowed while hats and headphones block avatar creation',()=>{
+  const lm=fixture(),width=200,height=200;
+  lm[10]={x:.5,y:.20,z:0};lm[33]={x:.44,y:.36,z:0};lm[263]={x:.56,y:.36,z:0};
+  lm[234]={x:.40,y:.42,z:0};lm[454]={x:.60,y:.42,z:0};lm[152]={x:.5,y:.62,z:0};
+  const mask=()=>new Uint8Array(width*height),paint=(data,x1,x2,y1,y2)=>{
+    for(let y=Math.floor(y1*height);y<Math.ceil(y2*height);y++)for(let x=Math.floor(x1*width);x<Math.ceil(x2*width);x++)data[y*width+x]=5;
+  };
+  const glasses=mask();paint(glasses,.39,.61,.32,.44);
+  assert.equal(portraitAccessoryIssue(lm,{data:glasses,width,height}),'');
+  const hat=mask();paint(hat,.34,.66,.12,.28);
+  assert.match(portraitAccessoryIssue(lm,{data:hat,width,height}),/Снимите их/);
+  const headphones=mask();paint(headphones,.31,.37,.30,.53);paint(headphones,.63,.69,.30,.53);
+  assert.match(portraitAccessoryIssue(lm,{data:headphones,width,height}),/Снимите их/);
 });
 
 function bodyMatte(width=200,height=200){

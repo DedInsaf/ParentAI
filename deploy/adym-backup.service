@@ -1,0 +1,17 @@
+[Unit]
+Description=Back up Adym private application data
+ConditionPathIsDirectory=/opt/adym/data
+
+[Service]
+Type=oneshot
+User=adym
+Group=adym
+WorkingDirectory=/opt/adym
+ExecStart=/opt/adym/.venv/bin/python /opt/adym/scripts/backup.py --data /opt/adym/data --destination /var/backups/adym --keep 14
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadOnlyPaths=/opt/adym
+ReadWritePaths=/var/backups/adym

@@ -191,6 +191,14 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(self.request('/api/reference',b'bad',headers)[0],400)
         self.assertEqual(self.request('/api/generate',b'',headers)[0],400)
 
+    def test_generate_endpoint_accepts_a_safe_query_string(self):
+        headers={'Origin':self.s.origin,'X-App-Token':self.s.token}
+        runtime=self.s.profile_runtime(1)
+        with patch.object(runtime,'generate') as generate:
+            code,_=self.request('/api/generate?source=setup',b'',headers)
+        self.assertEqual(code,202)
+        generate.assert_called_once_with()
+
     def test_private_files_and_traversal_not_served(self):
         (Path(self.temp.name)/'ollama.log').write_text('private')
         for url in ['/audio/ollama.log','/../runtime.py','/audio/../runtime.py']:

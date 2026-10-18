@@ -10,14 +10,25 @@ Group=adym
 WorkingDirectory=/opt/adym
 EnvironmentFile=/opt/adym/parentai.env
 Environment=PYTHONUNBUFFERED=1
-ExecStart=/opt/adym/.venv/bin/python /opt/adym/run_app.py --no-browser --bind 127.0.0.1 --port 8767 --public-origin https://app.adym.ru
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStartPre=/opt/adym/.venv/bin/python /opt/adym/scripts/preflight.py --production
+ExecStart=/opt/adym/.venv/bin/python /opt/adym/run_app.py --no-browser --bind 127.0.0.1 --port 8768 --public-origin https://app.adym.ru
 Restart=on-failure
 RestartSec=5
 TimeoutStopSec=30
+UMask=0077
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+LockPersonality=true
+TasksMax=128
+LimitNOFILE=4096
 ReadWritePaths=/opt/adym/data
 
 [Install]

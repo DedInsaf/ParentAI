@@ -16,7 +16,9 @@ def backup(data: Path, destination: Path, keep: int) -> Path:
     if not data.is_dir():
         raise SystemExit(f"Data directory does not exist: {data}")
     destination.mkdir(parents=True, exist_ok=True)
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    # Manual pre-update backup and the timer can run in the same second.
+    # Microseconds prevent the second run from silently replacing the first.
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
     archive = destination / f"adym-{stamp}.tar.gz"
     with tempfile.TemporaryDirectory(prefix="adym-backup-") as temporary:
         staging = Path(temporary) / "data"

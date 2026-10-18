@@ -12,11 +12,13 @@ from voice_worker import serve
 
 
 class Tensor:
-    def __init__(self,tag=''):self.tag=tag
+    def __init__(self,tag='',length=2400):self.tag=tag;self.shape=(1,length)
     def to(self,device):return self
     def detach(self):return self
     def cpu(self):return self
     def numpy(self):return np.ones(2400,dtype=np.float32)*.1
+    def __mul__(self,value):return Tensor(f'{self.tag}*{value}')
+    def __getitem__(self,key):return self
 
 
 class Model:
@@ -30,6 +32,8 @@ class Model:
         self.conditioning_calls.append(list(audio_path))
         self.conditioning_kwargs=kwargs
         self.conditioned+=1;return Tensor('|'.join(audio_path)),Tensor('speaker')
+    def get_speaker_embedding(self,audio,rate):
+        self.conditioned+=1;return Tensor(f'tail-{rate}-{audio.shape[-1]}')
     def inference_stream(self,*args,**kwargs):
         self.inference_kwargs.append(kwargs)
         self.inference_styles.append(args[2].tag)
@@ -41,11 +45,15 @@ class Model:
 class VoiceWorkerTests(unittest.TestCase):
     def run_worker(self,model,count):
         with tempfile.TemporaryDirectory() as temp:
-            root=Path(temp);ref=root/'reference.wav';ref.write_bytes(b'test speaker identity')
+            root=Path(temp);ref=root/'reference.wav'
+            from scipy.io import wavfile
+            wavfile.write(ref,24000,np.ones(24000*7,dtype=np.int16))
             for i in range(count):
                 out=root/str(i);out.mkdir()
                 (root/f'{i}.request.json').write_text(json.dumps({'reference':str(ref),'output':str(out),'text':'Подсказка.'}))
-            torch=SimpleNamespace(backends=SimpleNamespace(mps=SimpleNamespace(is_available=lambda:True)))
+            torch=SimpleNamespace(
+                backends=SimpleNamespace(mps=SimpleNamespace(is_available=lambda:True)),
+                from_numpy=lambda value:Tensor('audio',len(value)),manual_seed=lambda seed:None)
             tts=SimpleNamespace(synthesizer=SimpleNamespace(tts_model=model))
             # init, request start/end for each reply, then idle exit.
             with patch.dict('sys.modules',{'torch':torch}),patch('voice_worker.load_model',return_value=tts),patch('voice_worker.time.monotonic',side_effect=[0]*(1+count*2)+[400]),patch.dict('os.environ',{'PARENTAI_VOICE_DEVICE':'auto'}):
@@ -58,13 +66,14 @@ class VoiceWorkerTests(unittest.TestCase):
 
     def test_speaker_conditioning_is_cached_across_replies(self):
         model=Model();status=self.run_worker(model,2)
-        self.assertEqual(model.conditioned,1);self.assertEqual(status['device'],'mps')
+        self.assertEqual(model.conditioned,2);self.assertEqual(status['device'],'mps')
         self.assertEqual(model.conditioning_kwargs,{
-            'max_ref_length':30,'gpt_cond_len':30,'gpt_cond_chunk_len':4,
+            'max_ref_length':30,'gpt_cond_len':30,'gpt_cond_chunk_len':30,
             'sound_norm_refs':False})
         self.assertEqual(model.inference_kwargs[0]['repetition_penalty'],5.0)
-        self.assertEqual(model.inference_kwargs[0]['temperature'],.65)
-        self.assertEqual(model.inference_kwargs[0]['top_p'],.8)
+        self.assertEqual(model.inference_kwargs[0]['temperature'],.68)
+        self.assertEqual(model.inference_kwargs[0]['top_k'],45)
+        self.assertEqual(model.inference_kwargs[0]['top_p'],.84)
 
     def test_unsupported_gpu_operation_falls_back_before_publishing_audio(self):
         model=Model(fail_mps=True);status=self.run_worker(model,1)
@@ -74,15 +83,20 @@ class VoiceWorkerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             root=Path(temp);references=[]
             for index in range(3):
-                reference=root/f'reference-{index}.wav';reference.write_bytes(f'voice {index}'.encode());references.append(reference)
+                reference=root/f'reference-{index}.wav'
+                from scipy.io import wavfile
+                wavfile.write(reference,24000,np.ones(24000*7,dtype=np.int16)*(index+1))
+                references.append(reference)
             out=root/'out';out.mkdir()
             (root/'request.request.json').write_text(json.dumps({
                 'references':[str(path) for path in references], 'output':str(out),
                 'text':'Подсказка.', 'style':'supportive'}))
-            model=Model();torch=SimpleNamespace(backends=SimpleNamespace(mps=SimpleNamespace(is_available=lambda:False)))
+            model=Model();torch=SimpleNamespace(
+                backends=SimpleNamespace(mps=SimpleNamespace(is_available=lambda:False)),
+                from_numpy=lambda value:Tensor('audio',len(value)),manual_seed=lambda seed:None)
             tts=SimpleNamespace(synthesizer=SimpleNamespace(tts_model=model))
             with patch.dict('sys.modules',{'torch':torch}),patch('voice_worker.load_model',return_value=tts),patch('voice_worker.time.monotonic',side_effect=[0,0,0,400]):
                 serve(root)
-            self.assertEqual(model.conditioning_calls[0],[str(path) for path in references])
-            self.assertEqual(model.conditioning_calls[1:],[[str(path)] for path in references])
+            self.assertEqual(model.conditioning_calls,[[str(path)] for path in references])
             self.assertEqual(model.inference_styles,[str(references[1])])
+            self.assertEqual(model.conditioned,4)

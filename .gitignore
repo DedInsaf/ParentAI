@@ -2,6 +2,9 @@
 __pycache__/
 .DS_Store
 .idea/
+.pytest_cache/
+node_modules/
+outputs/
 data/
 *.wav
 parentai.env

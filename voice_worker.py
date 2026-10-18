@@ -35,27 +35,45 @@ def inference_options(model):
     # replies. XTTS' more creative defaults can noticeably change age, pitch
     # and accent from one generation to the next.
     return {
-        'temperature': min(.65, float(model_setting(model, 'temperature', .75))),
+        'temperature': min(.68, float(model_setting(model, 'temperature', .75))),
         'length_penalty': float(model_setting(model, 'length_penalty', 1.0)),
         'repetition_penalty': float(model_setting(model, 'repetition_penalty', 5.0)),
-        'top_k': int(model_setting(model, 'top_k', 50)),
-        'top_p': min(.8, float(model_setting(model, 'top_p', .85))),
+        'top_k': min(45, int(model_setting(model, 'top_k', 50))),
+        'top_p': min(.84, float(model_setting(model, 'top_p', .85))),
     }
 
 
-def build_style_conditionings(model, references, options):
-    """Average speaker identity across takes without averaging their delivery."""
-    paths = [str(reference) for reference in references]
-    combined = model.get_conditioning_latents(audio_path=paths, **options)
-    if len(paths) == 1:
-        style_latents = [combined[0]]
+def reference_tail_embedding(model, reference, seconds=6):
+    """Extract identity from the clean end of the strongest recorded take."""
+    import numpy as np
+    import torch
+    from scipy.io import wavfile
+
+    rate, audio = wavfile.read(reference)
+    if audio.ndim == 2:
+        audio = audio.mean(axis=1)
+    if np.issubdtype(audio.dtype, np.integer):
+        limit = max(abs(np.iinfo(audio.dtype).min), np.iinfo(audio.dtype).max)
+        audio = audio.astype(np.float32) / limit
     else:
-        # XTTS normally concatenates every take for both identity and style.
-        # Keep its averaged speaker embedding, but derive GPT prosody from one
-        # coherent recording so neutral, warm and firm takes do not blur.
-        style_latents = [model.get_conditioning_latents(
-            audio_path=[path], **options)[0] for path in paths]
-    speaker = combined[1]
+        audio = audio.astype(np.float32)
+    audio = audio[-int(rate * seconds):]
+    if len(audio) < int(rate * 2):
+        raise ValueError('Слишком короткий образец голоса.')
+    tensor = torch.from_numpy(np.ascontiguousarray(audio))[None]
+    return model.get_speaker_embedding(tensor, rate)
+
+
+def build_style_conditionings(model, references, options):
+    """Keep one coherent delivery and the strongest identity take."""
+    paths = [str(reference) for reference in references]
+    # The user's listening tests favored the complete take over an average of
+    # four-second style chunks.  Each take remains available for its intended
+    # delivery, while the final firm take anchors identity for every reply.
+    style_options = {**options, 'gpt_cond_chunk_len': options['gpt_cond_len']}
+    style_latents = [model.get_conditioning_latents(
+        audio_path=[path], **style_options)[0] for path in paths]
+    speaker = reference_tail_embedding(model, paths[-1]) * 1.24
     return {
         'neutral': (style_latents[0], speaker),
         'supportive': (style_latents[min(1, len(style_latents) - 1)], speaker),
@@ -91,6 +109,9 @@ def serve(directory):
     def generate(sentence):
         nonlocal device,conditioning,conditionings
         emitted=False
+        # Keep short replies reproducible; random seeds were a major source of
+        # audible voice changes between otherwise identical lesson prompts.
+        torch.manual_seed(29)
         try:
             for tensor in model.inference_stream(
                 sentence,'ru',*conditioning,stream_chunk_size=20,

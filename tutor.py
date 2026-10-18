@@ -10,6 +10,15 @@ from usage import estimate_tokens
 
 ENDPOINT = 'https://ai.api.cloud.yandex.net/foundationModels/v1/completion'
 LEVELS = {'начальная школа', 'средняя школа', 'старшая школа'}
+LOCAL_ENV_KEYS = {
+    'YANDEX_API_KEY', 'YANDEX_FOLDER_ID', 'YANDEX_SPEECHKIT_API_KEY',
+    'YANDEX_TTS_API_KEY', 'PLATEGA_MERCHANT_ID', 'PLATEGA_SECRET',
+    'PARENTAI_BIND', 'PARENTAI_PUBLIC_ORIGIN', 'PARENTAI_INVITE_CODE',
+    'PARENTAI_GLOBAL_DAILY_BUDGET_RUBLES',
+    'PARENTAI_GLOBAL_MONTHLY_BUDGET_RUBLES', 'PARENTAI_TUTOR_MODEL',
+    'PARENTAI_STT_ENGINE', 'PARENTAI_STT_MODEL', 'PARENTAI_VOICE_DEVICE',
+    'PARENTAI_ENABLE_XTTS',
+}
 
 
 class ProviderOutputError(ValueError):
@@ -30,7 +39,7 @@ def load_local_env(path):
             continue
         key, value = line.split('=', 1)
         key, value = key.strip(), value.strip().strip('"').strip("'")
-        if key in {'YANDEX_API_KEY', 'YANDEX_FOLDER_ID', 'PARENTAI_TUTOR_MODEL', 'YANDEX_SPEECHKIT_API_KEY', 'YANDEX_TTS_API_KEY', 'PARENTAI_VOICE_DEVICE', 'PARENTAI_ENABLE_XTTS', 'PARENTAI_STT_ENGINE', 'PARENTAI_STT_MODEL', 'PLATEGA_MERCHANT_ID', 'PLATEGA_SECRET'}:
+        if key in LOCAL_ENV_KEYS:
             os.environ.setdefault(key, value)
 
 

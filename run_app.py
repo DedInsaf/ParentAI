@@ -1,6 +1,7 @@
 """One launch: local API, model workers and camera-capable browser UI."""
 import argparse
 import logging
+import signal
 import threading
 import webbrowser
 from runtime import Runtime, ROOT
@@ -15,7 +16,7 @@ def main():
     parser.add_argument('--desktop', action='store_true', help='Окно pywebview (доступ к камере зависит от ОС)')
     parser.add_argument('--no-browser', action='store_true')
     parser.add_argument('--no-models', action='store_true', help='Диагностика интерфейса без загрузки моделей')
-    parser.add_argument('--port', type=int, default=8767)
+    parser.add_argument('--port', type=int, default=8768)
     parser.add_argument('--bind', default=None, help='Адрес прослушивания; для Caddy оставьте 127.0.0.1')
     parser.add_argument('--public-origin', default=None, help='Публичный HTTPS origin, например https://app.adym.ru')
     args = parser.parse_args()
@@ -28,6 +29,20 @@ def main():
         raise SystemExit(f'Не удалось открыть порт {args.port}: {exc}. Используйте --port 0.')
     url = server.origin + '/'
     print(f'Адым: {url}\nДля завершения нажмите Ctrl+C.', flush=True)
+    stopping = threading.Event()
+
+    def stop_server(_signum=None, _frame=None):
+        if stopping.is_set():
+            return
+        stopping.set()
+        # BaseServer.shutdown() must run outside the serve_forever thread.
+        threading.Thread(target=server.shutdown, name='graceful-shutdown', daemon=True).start()
+
+    if not args.desktop:
+        for name in ('SIGTERM', 'SIGINT'):
+            signum = getattr(signal, name, None)
+            if signum is not None:
+                signal.signal(signum, stop_server)
     if not args.no_models:
         runtime.start()
     try:
