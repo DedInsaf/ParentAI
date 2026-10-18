@@ -150,7 +150,8 @@ async function poll() {
       pausePending=false;$('monitorStatus').textContent='Перерыв · связь восстановлена, таймер остановлен';
     }
     online = true;
-    $('connection').textContent = 'Подключено';
+    $('connection').textContent = '';
+    $('connection').hidden = true;
     $('ttsStatus').textContent = `Клонирование: ${status.voice_engine?.message || status.tts}`;
     $('assetsStatus').textContent = `Распознавание: ${status.assets}`;
     const cloneOption=$('voiceMode').querySelector('option[value="clone"]');
@@ -176,7 +177,7 @@ async function poll() {
       loadVoiceTake(voiceTake); referenceLoaded = true;
     }
   } catch {
-    online = false; $('connection').textContent = 'Нет связи · переподключение…';
+    online = false; $('connection').hidden = false; $('connection').textContent = 'Нет связи · переподключаемся…';
     if (running && !paused) { try { await pause(); } catch {} }
   } finally { controls(); }
 }
@@ -712,7 +713,6 @@ function showLesson() {
   $('lessonCameraSlot').appendChild(video.closest('.camera-frame'));
   $('setupPage').hidden = true; $('lessonPage').hidden = false;
   document.body.classList.add('in-lesson');$('lessonToolbar').hidden=false;
-  document.querySelector('h1').textContent = 'Сделаем следующий шаг вместе';
   $('lessonSpeech').textContent = 'Я рядом. Скажи «помоги» и расскажи, что не получается.';
   $('micIntro').hidden=!$('handsFree').checked || !status.speech?.enabled;
   setListenerState('off','Микрофон ещё не включён. Можно написать вопрос.');
@@ -725,7 +725,6 @@ function showSetup() {
   $('readyCameraPreview').hidden=true;
   $('lessonPage').hidden = true; $('setupPage').hidden = false;
   document.body.classList.remove('in-lesson');$('lessonToolbar').hidden=true;
-  document.querySelector('h1').textContent = 'Шаг за шагом к самостоятельности';
   if (location.hash) history.replaceState({}, '', location.pathname + location.search);
   requestAnimationFrame(fit); window.scrollTo(0,0);
 }
