@@ -8,7 +8,7 @@ const script = readFileSync(new URL('../web/app.js', import.meta.url), 'utf8');
 test('product is presented as Adym and explains the Tatar name', () => {
   assert.match(html, /<title>Адым · Шаг к самостоятельной учёбе<\/title>/);
   assert.match(html, /src="\/adym-logo\.png"/);
-  assert.match(html, /brand-tagline">Шаг к самостоятельной учёбе/);
+  assert.match(html, /brand-tagline">Шаг<\/span>/);
   assert.doesNotMatch(html, /<svg viewBox="0 0 44 44"|brand-meaning/);
   assert.match(html, /«АДЫМ» ПО-ТАТАРСКИ — «ШАГ»/);
   assert.match(html, /Шаг к самостоятельной учёбе/);
