@@ -7,11 +7,23 @@ import { fileURLToPath } from 'node:url';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'public-site');
 const read = (name) => fs.readFileSync(path.join(root, name), 'utf8');
 
-test('public landing uses the Адым brand and explains its meaning', () => {
+test('public landing uses the channel logo without duplicating its wordmark', () => {
   const html = read('index.html');
   assert.match(html, /Адым — шаг к самостоятельной учёбе/);
-  assert.match(html, /с татарского — «шаг»/);
+  assert.match(html, /assets\/adym-logo\.png/);
+  assert.match(html, /brand-tagline">шаг к самостоятельной учёбе/);
+  assert.doesNotMatch(html, /<strong>Адым<\/strong>/);
+  assert.ok(fs.statSync(path.join(root, 'assets', 'adym-logo.png')).size < 300_000);
   assert.match(html, /Веб-приложение для занятий дома/);
+});
+
+test('every public page uses the new logo and current brand styles', () => {
+  for (const name of ['index.html', 'download.html', 'privacy.html', 'terms.html', 'support.html', 'checkout.html', 'checkout-ultra.html', '404.html']) {
+    const html = read(name);
+    assert.match(html, /assets\/adym-logo\.png/);
+    assert.doesNotMatch(html, /assets\/logo\.svg|assets\/favicon\.svg/);
+    assert.match(html, /site\.css\?v=20261018-1/);
+  }
 });
 
 test('landing separates product discovery, web app launch and desktop downloads', () => {
