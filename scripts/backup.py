@@ -28,7 +28,8 @@ def backup(data: Path, destination: Path, keep: int) -> Path:
         for database in ("users.sqlite3", "usage.sqlite3"):
             source = data / database
             if source.is_file():
-                with sqlite3.connect(source) as source_db, sqlite3.connect(staging / database) as target_db:
+                source_uri = f"file:{source.as_posix()}?mode=ro"
+                with sqlite3.connect(source_uri, uri=True) as source_db, sqlite3.connect(staging / database) as target_db:
                     source_db.backup(target_db)
         profiles = data / "profiles"
         if profiles.is_dir():
