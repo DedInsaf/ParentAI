@@ -128,6 +128,11 @@ class AuthStore:
                     ON account_events(user_id, created_at DESC);
                 CREATE INDEX IF NOT EXISTS account_events_created
                     ON account_events(created_at DESC);
+                CREATE TABLE IF NOT EXISTS device_registrations (
+                    device_hash BLOB PRIMARY KEY,
+                    user_id INTEGER UNIQUE REFERENCES users(id) ON DELETE SET NULL,
+                    registered_at INTEGER NOT NULL
+                );
                 """
             )
 
@@ -159,7 +164,7 @@ class AuthStore:
                 connection.execute("ALTER TABLE sessions ADD COLUMN last_seen_at INTEGER")
 
     def register(self, login, email, password, password_confirmation, role="parent",
-                 legal_accepted=True, parent_confirmed=True) -> User:
+                 legal_accepted=True, parent_confirmed=True, device_token=None) -> User:
         if role not in ("parent", "admin"):
             raise ValueError("Неизвестная роль пользователя.")
         display_login, normalized_login = _validate_login(login)
@@ -171,8 +176,19 @@ class AuthStore:
             raise ValueError("Подтвердите совершеннолетие и принятие документов.")
         salt = os.urandom(16)
         digest = pbkdf2_hmac("sha256", password.encode("utf-8"), salt, PASSWORD_ITERATIONS)
+        device_hash = None
+        if device_token is not None:
+            if not isinstance(device_token, str) or not 20 <= len(device_token) <= 200:
+                raise ValueError("Не удалось определить устройство. Обновите страницу и повторите.")
+            device_hash = sha256(device_token.encode("utf-8")).digest()
         try:
             with self._connect() as connection:
+                if device_hash is not None and connection.execute(
+                        "SELECT 1 FROM device_registrations WHERE device_hash=?", (device_hash,)
+                ).fetchone():
+                    raise ValueError(
+                        "На этом устройстве уже создан аккаунт. Войдите в него или восстановите доступ."
+                    )
                 cursor = connection.execute(
                     """INSERT INTO users
                        (login, login_normalized, email, email_normalized, password_salt,
@@ -188,18 +204,41 @@ class AuthStore:
                     "INSERT INTO account_events(user_id,event,created_at) VALUES (?, 'registered', ?)",
                     (user_id, int(time.time())),
                 )
+                if device_hash is not None:
+                    connection.execute(
+                        "INSERT INTO device_registrations(device_hash,user_id,registered_at) VALUES (?,?,?)",
+                        (device_hash, user_id, int(time.time())),
+                    )
                 return User(user_id, display_login, display_email, role)
         except sqlite3.IntegrityError:
             with self._connect() as connection:
+                device_taken = device_hash is not None and connection.execute(
+                    "SELECT 1 FROM device_registrations WHERE device_hash = ?", (device_hash,)
+                ).fetchone()
                 login_taken = connection.execute(
                     "SELECT 1 FROM users WHERE login_normalized = ?", (normalized_login,)
                 ).fetchone()
+            if device_taken:
+                raise ValueError(
+                    "На этом устройстве уже создан аккаунт. Войдите в него или восстановите доступ."
+                )
             if login_taken:
                 raise ValueError("Этот логин уже занят.")
             raise ValueError("Аккаунт с этой почтой уже существует.")
 
     def authenticate(self, identifier, password) -> User | None:
         return self.authenticate_with_status(identifier, password)[0]
+
+    def remember_device(self, user_id, device_token):
+        """Associate an existing account with a browser without exposing the raw token."""
+        if not isinstance(device_token, str) or not 20 <= len(device_token) <= 200:
+            return
+        device_hash = sha256(device_token.encode("utf-8")).digest()
+        with self._connect() as connection:
+            connection.execute(
+                "INSERT OR IGNORE INTO device_registrations(device_hash,user_id,registered_at) VALUES (?,?,?)",
+                (device_hash, int(user_id), int(time.time())),
+            )
 
     def authenticate_with_status(self, identifier, password):
         if not isinstance(identifier, str) or not isinstance(password, str):

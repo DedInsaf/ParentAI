@@ -17,6 +17,11 @@ from usage import LimitExceeded, estimate_tokens
 
 REPEAT_WORDS = ("повтори", "ещё раз", "не расслышал", "не расслышала")
 NEXT_WORDS = ("дальше", "следующая подсказка", "не знаю", "не понимаю", "подскажи ещё")
+NEW_TASK_WORDS = (
+    "другое задание", "другая задача", "другой пример", "новое задание",
+    "новая задача", "новый пример", "следующее задание", "следующая задача",
+    "перейдём к другому", "перейдем к другому",
+)
 
 # PRODUCT INVARIANT: answers are spoken in the parent's voice unless the
 # parent explicitly chooses another provider in the lesson settings. Do not
@@ -139,6 +144,27 @@ def _answers_match(value, acceptable_answers):
     return any(offered.intersection(_answer_variants(answer)) for answer in acceptable_answers if answer)
 
 
+def _looks_like_new_task(value, session):
+    """Conservatively detect a complete second task, never a short answer or clarification."""
+    text = " ".join((value or "").casefold().replace("ё", "е").split())
+    if not text or not session.get('plan') or not session.get('attempt'):
+        return False
+    if any(marker in text for marker in NEW_TASK_WORDS):
+        return True
+    if re.search(r'\b(?:это|здесь|тут|такой|этот)\b', text) and len(text.split()) < 12:
+        return False
+    # Short numbers, equations stated as an answer, and requests for another hint
+    # must stay inside the current task.
+    if len(text.split()) <= 6 and not re.search(
+            r'\b(?:реши|решить|вычисли|найди|сколько|докажи|определи|задача|задание|пример|уравнение)\b', text):
+        return False
+    task_word = re.search(
+        r'\b(?:реши|решить|вычисли|найди|сколько|докажи|определи|сравни|упрости|'
+        r'задача|задание|пример|уравнение)\b', text)
+    has_content = bool(re.search(r'\d', text)) or len(text.split()) >= 10
+    return bool(task_word and has_content)
+
+
 def voice_excerpt(text, limit=240):
     """Keep cloud speech to one v3 billing block without chopping a word."""
     clean = " ".join((text or "").split())
@@ -176,7 +202,8 @@ class Dialogues:
         recent.append(now)
 
     def start(self, question, level, session=None, voice=DEFAULT_REPLY_VOICE,
-              user_id=0, request_id=None, unlimited=False, study_session=None):
+              user_id=0, request_id=None, unlimited=False, study_session=None,
+              switch_action=None):
         if voice not in ("parent", "yandex"):
             raise ValueError("Неизвестный голос ответа.")
         if not isinstance(question, str) or not question.strip() or len(question) > 4000:
@@ -216,6 +243,8 @@ class Dialogues:
                 raise ValueError('Сначала дождись ответа или отмени запрос.')
             if len(self.jobs) >= 100:
                 raise ValueError('Слишком много запросов. Сделайте перерыв.')
+            if switch_action not in (None, 'continue', 'new'):
+                raise ValueError('Некорректный выбор задания.')
             if session is not None:
                 item = self.sessions.get(session)
                 if not item or item['user_id'] != user_id:
@@ -227,6 +256,17 @@ class Dialogues:
                 # must start a fresh task instead of reopening old hints.
                 if item.get('finished'):
                     session = None
+                elif switch_action == 'new':
+                    if self.usage and user_id:
+                        self.usage.switch_lesson(user_id, session)
+                    item['finished'] = True
+                    item['updated'] = now
+                    session = None
+                elif switch_action != 'continue' and _looks_like_new_task(question, item):
+                    if user_id and self.recent[user_id]:
+                        self.recent[user_id].pop()
+                    return {'id': None, 'session': session, 'study_session': study_session,
+                            'duplicate': False, 'switch_required': True}
             session = session or uuid.uuid4().hex
             self.sessions.setdefault(session, dict(history=[], attempt=0, updated=now, plan=None,
                                                    user_id=user_id, study_session=study_session,
@@ -265,6 +305,19 @@ class Dialogues:
                 return
             job['cancel'].set()
             job['state'] = 'cancelled'
+
+    def switch(self, session_id, user_id=None):
+        """Explicitly close an unfinished task before the child starts another one."""
+        with self.lock:
+            session = self.sessions.get(session_id)
+            if not session or (user_id is not None and session['user_id'] != user_id):
+                return
+            if session.get('finished'):
+                return
+            if self.usage and session['user_id']:
+                self.usage.switch_lesson(session['user_id'], session_id)
+            session['finished'] = True
+            session['updated'] = time.monotonic()
 
     def audio(self, key, chunk=None, user_id=None):
         with self.lock:

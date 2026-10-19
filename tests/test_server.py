@@ -258,8 +258,24 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(self.request('/api/auth/register',json.dumps(value).encode(),headers,
                                       authenticated=False)[0],201)
 
+    def test_one_public_registration_is_allowed_per_browser_device(self):
+        headers={'Origin':self.s.origin,'X-App-Token':self.s.token,'Content-Type':'application/json'}
+        first={'login':'device-one','email':'device-one@example.com','password':'password-123',
+               'password_confirmation':'password-123','legal_accepted':True,'parent_confirmed':True}
+        code,_,response_headers=self.request('/api/auth/register',json.dumps(first).encode(),headers,
+                                             authenticated=False,include_headers=True)
+        self.assertEqual(code,201)
+        cookies=response_headers.get_all('Set-Cookie')
+        self.assertEqual(len(cookies),2)
+        device=next(SimpleCookie(value)['adym_device'].value for value in cookies if 'adym_device=' in value)
+        second={**first,'login':'device-two','email':'device-two@example.com'}
+        blocked={**headers,'Cookie':'adym_device='+device}
+        code,body=self.request('/api/auth/register',json.dumps(second).encode(),blocked,authenticated=False)
+        self.assertEqual(code,400)
+        self.assertIn('уже создан аккаунт',json.loads(body)['error'])
+
     def test_speech_dialog_and_reply_audio_are_protected(self):
-        for path in ('/api/speech','/api/dialog','/api/dialog-cancel'):
+        for path in ('/api/speech','/api/dialog','/api/dialog-cancel','/api/dialog-switch'):
             self.assertEqual(self.request(path,b'{}')[0],403)
         self.assertEqual(self.request('/api/dialog/guess')[0],403)
         self.assertEqual(self.request('/api/dialog-audio/guess')[0],403)

@@ -4,7 +4,7 @@
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="theme-color" content="#faf7f2"><title>Адым · Шаг к самостоятельной учёбе</title>
 <link rel="icon" href="/adym-logo.png" type="image/png">
-<link rel="stylesheet" href="style.css?v=20261018-3">
+<link rel="stylesheet" href="style.css?v=20261019-1">
 <script type="importmap">{"imports":{"three":"/vendor/three.module.js"}}</script>
 </head>
 <body class="auth-pending">
@@ -197,10 +197,15 @@
     <section class="card tutor"><div class="section-title"><h2>Что не получается?</h2><span class="hint-chip">Подсказка за подсказкой</span></div><p id="tutorStatus" role="status">Можно спросить голосом или написать здесь.</p>
       <div id="tutorMessages" role="log" aria-label="Обсуждение задания"></div>
       <form id="tutorForm"><label for="assignment">Твой вопрос или задание</label><textarea id="assignment" rows="3" maxlength="4000" placeholder="Например: не понимаю, как решить 2x + 3 = 11"></textarea><div class="buttons"><button id="askBtn" type="submit">Дай подсказку</button><button id="cancelHelpBtn" class="secondary" type="button" hidden>Отменить</button><button id="clearHelpBtn" class="quiet" type="button">Новое задание</button></div></form>
+      <section id="taskSwitchPrompt" class="task-switch" role="alertdialog" aria-labelledby="taskSwitchTitle" hidden>
+        <strong id="taskSwitchTitle">Похоже, это уже другое задание</strong>
+        <p>Закрыть предыдущее и начать новое? Предыдущее будет учтено как начатое, но не как решённое.</p>
+        <div class="buttons"><button id="switchTaskBtn" type="button">Перейти к новому</button><button id="continueTaskBtn" class="secondary" type="button">Продолжить предыдущее</button></div>
+      </section>
       <details class="lesson-settings"><summary>Настройки с родителем</summary><label for="schoolLevel">Как объяснять</label><select id="schoolLevel"><option value="начальная школа">1–4 класс</option><option value="средняя школа">5–9 класс</option><option value="старшая школа">10–11 класс</option></select><label for="replyVoice">Каким голосом отвечать</label><select id="replyVoice"><option value="parent" selected>Голос родителя · если доступен</option><option value="yandex">Голос Адым</option></select><p class="muted" id="replyVoiceHint">Адым озвучивает новые подсказки обычным голосом, а напоминания может произносить записью родителя.</p><p class="muted" id="tutorPrivacy">Микрофон включён только во время занятия. Запись вопроса обрабатывается для распознавания и не сохраняется. Текст новой задачи передаётся сервису генерации подсказок. Камера ребёнка не записывается; аватар и голос родителя доступны только профилю семьи.</p></details>
     </section>
     <section class="card child-camera"><div class="section-title"><h2>Ты в кадре</h2><span class="privacy-chip small">Только здесь</span></div><div id="lessonCameraSlot"></div><p id="monitorStatus" role="status">Готово к занятию</p><button id="retryCameraBtn" type="button" class="secondary" hidden>Включить камеру</button><p class="helper">Смотри в тетрадь, думай, пробуй. Я подожду.</p></section>
   </aside>
 </main>
-<script type="module" src="app.js?v=20261018-1"></script>
+<script type="module" src="app.js?v=20261019-1"></script>
 </body></html>

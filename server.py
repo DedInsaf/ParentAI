@@ -228,7 +228,8 @@ class Handler(BaseHTTPRequestHandler):
         if self.server.origin.startswith('https://'):
             self.send_header('Strict-Transport-Security', 'max-age=31536000; includeSubDomains')
         for name, value in (headers or {}).items():
-            self.send_header(name, value)
+            for item in value if isinstance(value, (list, tuple)) else (value,):
+                self.send_header(name, item)
 
     def send(self, code, body, kind='application/json', headers=None, cache='no-store'):
         if kind == 'application/json':
@@ -268,6 +269,14 @@ class Handler(BaseHTTPRequestHandler):
         except CookieError:
             return None
 
+    def device_token(self):
+        try:
+            cookie = SimpleCookie(self.headers.get('Cookie', ''))
+            value = cookie.get('adym_device')
+            return value.value if value else None
+        except CookieError:
+            return None
+
     def current_user(self):
         return self.server.auth.user_for_session(self.session_token())
 
@@ -288,6 +297,13 @@ class Handler(BaseHTTPRequestHandler):
     def clear_session_cookie(self):
         secure = '; Secure' if self.server.origin.startswith('https://') else ''
         return f'parentai_session=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict{secure}'
+
+    def device_cookie(self, token):
+        max_age = 2 * 365 * 24 * 60 * 60
+        expires = formatdate(time.time() + max_age, usegmt=True)
+        secure = '; Secure' if self.server.origin.startswith('https://') else ''
+        return (f'adym_device={token}; Path=/; Max-Age={max_age}; Expires={expires}; '
+                f'HttpOnly; SameSite=Strict{secure}')
 
     def platega_webhook(self):
         if not self.server.platega.valid_callback(
@@ -320,7 +336,11 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(403, {'error': 'Invalid origin'})
             token = self.session_token()
             user = self.server.auth.user_for_session(token, renew=True)
-            headers = {'Set-Cookie': self.session_cookie(token)} if user else None
+            device_token = self.device_token() or secrets.token_urlsafe(32)
+            if user:
+                self.server.auth.remember_device(user.id, device_token)
+            cookies = ([self.session_cookie(token)] if user else []) + [self.device_cookie(device_token)]
+            headers = {'Set-Cookie': cookies}
             return self.send(200, {'token': self.server.token, 'user': user.public() if user else None},
                              headers=headers)
         if path in ('/api/admin/users', '/api/admin/audit'):
@@ -434,11 +454,14 @@ class Handler(BaseHTTPRequestHandler):
                     return self.send(429, {'error': 'Слишком много попыток регистрации. Повторите позже.'})
                 if value.get('legal_accepted') is not True or value.get('parent_confirmed') is not True:
                     raise ValueError('Регистрацию должен подтвердить совершеннолетний родитель, приняв документы.')
+                device_token = self.device_token() or secrets.token_urlsafe(32)
                 user = self.server.auth.register(
                     value.get('login'), value.get('email'), value.get('password'),
-                    value.get('password_confirmation'), legal_accepted=True, parent_confirmed=True)
+                    value.get('password_confirmation'), legal_accepted=True, parent_confirmed=True,
+                    device_token=device_token)
                 session = self.server.auth.create_session(user.id)
-                return self.send(201, {'user': user.public()}, headers={'Set-Cookie': self.session_cookie(session)})
+                return self.send(201, {'user': user.public()}, headers={'Set-Cookie': [
+                    self.session_cookie(session), self.device_cookie(device_token)]})
             if path == '/api/auth/login':
                 value = json.loads(payload)
                 if not isinstance(value, dict):
@@ -452,7 +475,10 @@ class Handler(BaseHTTPRequestHandler):
                 if not user:
                     return self.send(401, {'error': 'Неверный логин, почта или пароль.'})
                 session = self.server.auth.create_session(user.id)
-                return self.send(200, {'user': user.public()}, headers={'Set-Cookie': self.session_cookie(session)})
+                device_token = self.device_token() or secrets.token_urlsafe(32)
+                self.server.auth.remember_device(user.id, device_token)
+                return self.send(200, {'user': user.public()}, headers={'Set-Cookie': [
+                    self.session_cookie(session), self.device_cookie(device_token)]})
             user = self.current_user()
             if not user:
                 return self.send(401, {'error': 'Войдите в аккаунт.'})
@@ -582,12 +608,19 @@ class Handler(BaseHTTPRequestHandler):
                     value.get('question'), value.get('level'), session=value.get('session'),
                     voice=value.get('voice','parent'), user_id=user.id,
                     request_id=value.get('request_id'), unlimited=user.role == 'admin',
-                    study_session=value.get('study_session')))
+                    study_session=value.get('study_session'),
+                    switch_action=value.get('switch_action')))
             if path == '/api/dialog-cancel':
                 value = json.loads(payload)
                 if not isinstance(value, dict) or not isinstance(value.get('id'), str):
                     raise ValueError('Некорректный запрос.')
                 self.server.dialogues.cancel(value['id'], user.id)
+                return self.send(200, {'ok': True})
+            if path == '/api/dialog-switch':
+                value = json.loads(payload)
+                if not isinstance(value, dict) or not isinstance(value.get('session'), str):
+                    raise ValueError('Некорректное задание.')
+                self.server.dialogues.switch(value['session'], user.id)
                 return self.send(200, {'ok': True})
             if path == '/api/tutor':
                 value = json.loads(payload)

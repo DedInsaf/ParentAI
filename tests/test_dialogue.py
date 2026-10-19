@@ -214,6 +214,57 @@ class DialogueTests(unittest.TestCase):
                 self.assertEqual(tutor.calls,2)
             finally:manager.close()
 
+    def test_a_different_task_requires_choice_and_starts_a_fresh_plan(self):
+        class PlanTutor:
+            calls=0
+            model='test-model'
+            def public_status(self):return {'enabled':True}
+            def create_plan(self,question,level):
+                self.calls+=1
+                return {'plan':{'solution':'4','hints':['Подумай.']*3,
+                    'control_questions':['Какой ответ?']*3,'common_errors':[],
+                    'answer_criterion':'Ответ 4','acceptable_answers':['4'],
+                    'final_explanation':'Ответ 4.'},'usage':{}}
+        with tempfile.TemporaryDirectory() as temp:
+            tutor=PlanTutor();manager=Dialogues(Runtime(temp),tutor)
+            try:
+                first=manager.start('Сколько будет 2 + 2?','начальная школа')
+                manager.jobs[first['id']]['thread'].join(1)
+                choice=manager.start('Реши пример 7 + 5','начальная школа',first['session'])
+                self.assertTrue(choice['switch_required'])
+                self.assertEqual(tutor.calls,1)
+                new=manager.start('Реши пример 7 + 5','начальная школа',first['session'],
+                                  switch_action='new')
+                manager.jobs[new['id']]['thread'].join(1)
+                self.assertNotEqual(new['session'],first['session'])
+                self.assertEqual(tutor.calls,2)
+            finally:manager.close()
+
+    def test_child_can_confirm_that_a_suspected_task_is_a_continuation(self):
+        class PlanTutor:
+            calls=0
+            model='test-model'
+            def public_status(self):return {'enabled':True}
+            def create_plan(self,question,level):
+                self.calls+=1
+                return {'plan':{'solution':'12','hints':['Подумай.']*3,
+                    'control_questions':['Какой ответ?']*3,'common_errors':[],
+                    'answer_criterion':'Ответ 12','acceptable_answers':['12'],
+                    'final_explanation':'Ответ 12.'},'usage':{}}
+        with tempfile.TemporaryDirectory() as temp:
+            tutor=PlanTutor();manager=Dialogues(Runtime(temp),tutor)
+            try:
+                first=manager.start('Реши пример 7 + 5','начальная школа')
+                manager.jobs[first['id']]['thread'].join(1)
+                choice=manager.start('Вычисли 7 + 5 другим способом','начальная школа',first['session'])
+                self.assertTrue(choice['switch_required'])
+                continued=manager.start('Вычисли 7 + 5 другим способом','начальная школа',first['session'],
+                                        switch_action='continue')
+                manager.jobs[continued['id']]['thread'].join(1)
+                self.assertEqual(continued['session'],first['session'])
+                self.assertEqual(tutor.calls,1)
+            finally:manager.close()
+
     def test_spoken_answer_variants_are_safe_and_equivalent(self):
         self.assertTrue(_answers_match('Ответ будет четыре', ['4']))
         self.assertTrue(_answers_match('У меня вышло 4 сантиметра', ['4 см']))

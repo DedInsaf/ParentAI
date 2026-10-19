@@ -563,6 +563,16 @@ class UsageStore:
                 (int(bool(solved_independently)), int(bool(difficult)), int(time.time()), lesson_id, user_id),
             )
 
+    def switch_lesson(self, user_id, lesson_id):
+        """Close an active task because the child deliberately moved to another one."""
+        if not lesson_id:
+            return
+        with self._connect() as connection:
+            connection.execute(
+                "UPDATE lessons SET status='switched', updated_at=? WHERE id=? AND user_id=? AND status='active'",
+                (int(time.time()), lesson_id, user_id),
+            )
+
     def abandon_empty_lesson(self, user_id, lesson_id):
         """A provider failure before the first answer must not consume an assignment."""
         with self._connect() as connection:

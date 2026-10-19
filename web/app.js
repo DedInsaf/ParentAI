@@ -26,6 +26,7 @@ let online = false, recordCancelled = false, recordingStream, recordingAbort, re
 let referenceLoaded = false, voiceModeTouched = false, voiceTake = 1;
 let lessonStarted = 0, lessonElapsed = 0, tutorBusy = false, lessonCameraEnabled = false, lessonPresenceEnabled = false;
 let activeCues=[], audioStarted=0, dialogId=null, taskFinished=false, studySessionId=null, lessonLimitSeconds=null, lessonLimitHandled=false, helpEpoch=0;
+let taskSwitchPending=null;
 let questionRecording=false, questionStop=false, questionCancel=false, questionAbort, questionStream;
 let currentJob=null;
 let previewYaw=0,showWireframe=false,scanEpoch=0;
@@ -115,8 +116,8 @@ function controls() {
   $('retryCameraBtn').disabled = !running || paused || pendingActions.has('retryCameraBtn');
   $('lessonVoiceBtn').disabled = !running || paused || tutorBusy || questionRecording || !(status.phrases?.length);
   $('stopSpeechBtn').disabled = !playing;
-  $('askBtn').disabled = tutorBusy || questionRecording || listenerPending || !online || !status.tutor?.enabled;
-  $('voiceQuestionBtn').disabled = !running || paused || !online || tutorBusy || listenerPending || !status.speech?.enabled;
+  $('askBtn').disabled = tutorBusy || !!taskSwitchPending || questionRecording || listenerPending || !online || !status.tutor?.enabled;
+  $('voiceQuestionBtn').disabled = !running || paused || !online || tutorBusy || !!taskSwitchPending || listenerPending || !status.speech?.enabled;
   $('handsFree').disabled=!status.speech?.enabled && !listener;
   $('voiceQuestionBtn').textContent = questionRecording ? 'Закончить вопрос' : 'Записать вопрос';
   $('readyHandsFree').disabled=running || !status.speech?.enabled;
@@ -596,7 +597,7 @@ async function start() {
   let study;
   try { study = await api('study-session', JSON.stringify({action:'start'})); }
   catch(error){stopCamera();throw error;}
-  studySessionId=study.id;lessonLimitSeconds=study.limit_seconds;lessonLimitHandled=false;pausePending=false;dialogId=null;taskFinished=false;
+  studySessionId=study.id;lessonLimitSeconds=study.limit_seconds;lessonLimitHandled=false;pausePending=false;dialogId=null;taskFinished=false;hideTaskSwitch();
   stopAudio(); running = true; paused = false; presence.reset(); lessonElapsed = Number(study.elapsed_seconds||0)*1000; lessonStarted = performance.now(); showLesson();
   if(lessonCameraEnabled) startLessonPresence();
   else $('monitorStatus').textContent='Камера выключена родителем';
@@ -773,11 +774,21 @@ function chatMessage(role, text) {
   const content = document.createElement('span'); content.textContent = text;
   box.append(label, content); $('tutorMessages').appendChild(box); box.scrollIntoView({block:'nearest'});
 }
+function hideTaskSwitch() {
+  taskSwitchPending=null;
+  $('taskSwitchPrompt').hidden=true;
+}
+function showTaskSwitch(question) {
+  taskSwitchPending={question};
+  $('taskSwitchPrompt').hidden=false;
+  $('taskSwitchPrompt').scrollIntoView({block:'nearest'});
+  controls();
+}
 function cancelTutor() {
   helpEpoch++; questionCancel=true; questionAbort?.abort(); stopTracks(questionStream);
   listener?.sttAbort?.abort();tutorBusy=false;followupUntil=0;stopAudio();
   if(currentJob) api('dialog-cancel',JSON.stringify({id:currentJob})).catch(()=>{});
-  currentJob=null; controls();
+  currentJob=null;hideTaskSwitch();controls();
 }
 async function askTutor(event) {
   event.preventDefault();
@@ -786,10 +797,11 @@ async function askTutor(event) {
   $('assignment').value = '';
   await answerQuestion(question);
 }
-async function answerQuestion(question) {
+async function answerQuestion(question,switchAction=null,renderQuestion=true) {
+  if(taskSwitchPending&&!switchAction)return;
   const epoch=++helpEpoch;
   if(taskFinished){$('tutorMessages').replaceChildren();taskFinished=false;$('assignment').placeholder='Например: не понимаю, как решить 2x + 3 = 11';}
-  chatMessage('user',question);stopAudio();tutorBusy=true;controls();clearError();
+  if(renderQuestion)chatMessage('user',question);stopAudio();tutorBusy=true;controls();clearError();
   let displayed=false,received=0;const completions=[];
   const getAudio=async(key,chunk,cues,text)=>{
     const url='/api/dialog-audio/'+key+(chunk===null?'':'?chunk='+chunk);
@@ -802,7 +814,8 @@ async function answerQuestion(question) {
   try {
     await context().resume();$('tutorStatus').textContent='Думаю, как помочь…';
     const started=await api('dialog',JSON.stringify({question,level:$('schoolLevel').value,session:dialogId,
-      study_session:studySessionId,voice:$('replyVoice').value,request_id:requestId()}));
+      study_session:studySessionId,voice:$('replyVoice').value,request_id:requestId(),switch_action:switchAction}));
+    if(started.switch_required){showTaskSwitch(question);$('tutorStatus').textContent='Это новое задание или продолжение предыдущего?';return;}
     if(epoch!==helpEpoch){await api('dialog-cancel',JSON.stringify({id:started.id}));return;}
     dialogId=started.session;currentJob=started.id;
     const deadline=performance.now()+660000;
@@ -862,7 +875,7 @@ async function startHandsFree(){
     entry.node=new AudioWorkletNode(ctx,'lesson-listener');const gate=new SpeechGate(ctx.sampleRate);
     entry.node.port.onmessage=({data})=>{
       if(epoch!==listenEpoch)return;
-      const suppressed=!running||paused||document.hidden||tutorBusy||questionRecording||listenerPending||playing||performance.now()<echoUntil||presence.state==='absent';
+      const suppressed=!running||paused||document.hidden||tutorBusy||!!taskSwitchPending||questionRecording||listenerPending||playing||performance.now()<echoUntil||presence.state==='absent';
       const samples=gate.push(data,suppressed);
       const message=tutorBusy?'Готовлю ответ · микрофон на паузе':listenerPending?'Распознаю вопрос…':suppressed?(presence.state==='absent'?'Жду возвращения к камере':'Микрофон на паузе · слушаю после ответа'):gate.active.length?'Слышу речь…':'Слушаю · скажи «помоги» или задай вопрос';
       setListenerState(listenerPending?'processing':suppressed?'waiting':gate.active.length?'speech':'listening',message);
@@ -1011,7 +1024,9 @@ action('viewFrontBtn',()=>{previewYaw=0;});action('viewSideBtn',()=>{previewYaw=
 action('previewMotionBtn',()=>playVoice('preview'));
 $('tutorForm').addEventListener('submit', askTutor);
 $('cancelHelpBtn').addEventListener('click', cancelTutor);
-$('clearHelpBtn').addEventListener('click', () => { cancelTutor(); dialogId=null;taskFinished=false;followupUntil=0; $('tutorMessages').replaceChildren(); $('assignment').value = ''; $('assignment').placeholder='Например: не понимаю, как решить 2x + 3 = 11'; $('assignment').focus(); });
+$('clearHelpBtn').addEventListener('click', async () => { const previous=dialogId;cancelTutor();dialogId=null;taskFinished=false;followupUntil=0;if(previous)await api('dialog-switch',JSON.stringify({session:previous})).catch(fail);$('tutorMessages').replaceChildren();$('assignment').value='';$('assignment').placeholder='Например: не понимаю, как решить 2x + 3 = 11';$('assignment').focus(); });
+$('switchTaskBtn').addEventListener('click',()=>{const pending=taskSwitchPending;if(!pending)return;hideTaskSwitch();$('tutorMessages').replaceChildren();answerQuestion(pending.question,'new',true);});
+$('continueTaskBtn').addEventListener('click',()=>{const pending=taskSwitchPending;if(!pending)return;hideTaskSwitch();answerQuestion(pending.question,'continue',false);});
 window.addEventListener('popstate', () => { if (running) stop(); });
 document.addEventListener('visibilitychange', () => { if (document.hidden) { recordCancelled = true; recordingAbort?.abort(); stopTracks(recordingStream);if(scanning)cancelScan();window.speechSynthesis?.cancel();stopHandsFree();stopCamera(); } if (document.hidden && running && !paused) { pause().catch(()=>{}); $('monitorStatus').textContent = 'Перерыв · окно скрыто'; } });
 window.addEventListener('beforeunload', () => {

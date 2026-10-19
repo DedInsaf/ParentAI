@@ -206,6 +206,10 @@ body.in-lesson #readyHint:empty{display:none}
 .tutor form label{margin-top:10px!important}
 .tutor .buttons button{font-size:14px}
 .tutor .lesson-settings p{font-size:12px}
+.task-switch{margin-top:16px;padding:16px 18px;border:1px solid #d6c596;border-radius:18px;background:#fff8e5}
+.task-switch strong{display:block;color:var(--ink);font-size:15px}
+.task-switch p{margin:7px 0 0;color:var(--muted);font-size:13px;line-height:1.45}
+.task-switch .buttons{margin-top:12px}
 .in-lesson .app-header{margin-bottom:20px}
 
 /* A guided full-screen capture keeps voice instructions visible and legible. */

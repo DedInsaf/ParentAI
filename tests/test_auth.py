@@ -41,6 +41,18 @@ class AuthStoreTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'почтой уже существует'):
             self.store.register('other-user', 'ONE@example.com', 'strong-pass', 'strong-pass')
 
+    def test_device_can_create_only_one_account_even_after_account_deletion(self):
+        device='persistent-browser-device-token-12345'
+        user=self.store.register('device-user','device@example.com','strong-pass','strong-pass',
+                                 device_token=device)
+        with self.assertRaisesRegex(ValueError,'устройстве уже создан аккаунт'):
+            self.store.register('device-other','other@example.com','strong-pass','strong-pass',
+                                device_token=device)
+        self.store.delete_user(user.id)
+        with self.assertRaisesRegex(ValueError,'устройстве уже создан аккаунт'):
+            self.store.register('device-third','third@example.com','strong-pass','strong-pass',
+                                device_token=device)
+
     def test_session_creation_lookup_and_revocation(self):
         user = self.store.register('valid-user', 'one@example.com', 'strong-pass', 'strong-pass')
         token = self.store.create_session(user.id)

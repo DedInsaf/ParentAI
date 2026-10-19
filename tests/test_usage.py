@@ -103,6 +103,16 @@ class UsageTests(unittest.TestCase):
             columns = {row[1] for row in connection.execute('PRAGMA table_info(usage_events)')}
         self.assertFalse({'prompt', 'transcript', 'audio', 'photo'} & columns)
 
+    def test_switching_tasks_closes_old_lesson_without_marking_it_solved(self):
+        self.store.ensure_lesson(8, 'old-task')
+        self.store.lesson_hint(8, 'old-task')
+        self.store.switch_lesson(8, 'old-task')
+        with sqlite3.connect(self.store.path) as connection:
+            row=connection.execute(
+                'SELECT status,solved_independently,hints FROM lessons WHERE id=?',
+                ('old-task',)).fetchone()
+        self.assertEqual(row,('switched',0,1))
+
     def test_restart_releases_interrupted_usage_reservations(self):
         event = self.store.reserve(4, 'stt', 'interrupted-speech', duration_ms=3000,
                                    billed_units=15, estimated_cost=self.store.config.stt_cost(15))
