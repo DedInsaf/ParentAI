@@ -19,6 +19,7 @@ class BackupTests(unittest.TestCase):
                 database.execute('CREATE TABLE users (login TEXT)')
                 database.execute("INSERT INTO users VALUES ('family')")
             archive = backup(data, destination, 14)
+            self.assertEqual(archive.stat().st_mode & 0o777, 0o600)
             with tarfile.open(archive) as source:
                 names = source.getnames()
                 self.assertIn('data/users.sqlite3', names)

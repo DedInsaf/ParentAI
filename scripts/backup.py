@@ -20,7 +20,9 @@ def backup(data: Path, destination: Path, keep: int) -> Path:
     # Microseconds prevent the second run from silently replacing the first.
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
     archive = destination / f"adym-{stamp}.tar.gz"
-    with tempfile.TemporaryDirectory(prefix="adym-backup-") as temporary:
+    # Stage beside the archives: the hardened systemd unit explicitly grants
+    # write access there, while its private /tmp may be unavailable.
+    with tempfile.TemporaryDirectory(prefix=".adym-backup-", dir=destination) as temporary:
         staging = Path(temporary) / "data"
         staging.mkdir()
         for database in ("users.sqlite3", "usage.sqlite3"):
@@ -33,6 +35,7 @@ def backup(data: Path, destination: Path, keep: int) -> Path:
             shutil.copytree(profiles, staging / "profiles")
         with tarfile.open(archive, "w:gz") as output:
             output.add(staging, arcname="data")
+    archive.chmod(0o600)
     archives = sorted(destination.glob("adym-*.tar.gz"), reverse=True)
     for old in archives[max(1, keep):]:
         old.unlink()
