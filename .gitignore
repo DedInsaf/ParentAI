@@ -8,6 +8,8 @@ outputs/
 data/
 *.wav
 parentai.env
+analytics/*.sqlite3
+analytics/*.sqlite3-*
 web/vendor/
 *.env
 *.log
