@@ -14,4 +14,6 @@ PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
 ReadOnlyPaths=/opt/adym
-ReadWritePaths=/var/backups/adym
+# SQLite may need to read or create its WAL/SHM companions while taking a
+# consistent online backup. The service still runs as the unprivileged app user.
+ReadWritePaths=/opt/adym/data /var/backups/adym
