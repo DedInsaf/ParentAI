@@ -34,12 +34,11 @@
       <button class="full auth-submit" type="submit">Войти в аккаунт</button>
     </form>
     <form id="registerForm" hidden>
-      <h2>Создать аккаунт</h2><p class="muted">Код приглашения нужен только во время закрытого бета-теста.</p>
+      <h2>Создать аккаунт</h2><p class="muted">Регистрацию оформляет совершеннолетний родитель.</p>
       <label for="registerLogin">Логин</label><input id="registerLogin" name="login" type="text" autocomplete="username" minlength="3" maxlength="32" pattern="[A-Za-zА-Яа-яЁё0-9][A-Za-zА-Яа-яЁё0-9._-]{2,31}" title="От 3 до 32 символов: буквы, цифры, точка, дефис и подчёркивание" required>
       <label for="registerEmail">Почта</label><input id="registerEmail" name="email" type="email" autocomplete="email" maxlength="254" required>
       <label for="registerPassword">Пароль</label><input id="registerPassword" name="password" type="password" autocomplete="new-password" minlength="8" maxlength="128" required><small class="field-hint">Минимум 8 символов</small>
       <label for="registerPasswordConfirmation">Подтвердите пароль</label><input id="registerPasswordConfirmation" name="password_confirmation" type="password" autocomplete="new-password" minlength="8" maxlength="128" required>
-      <label for="registerInvite">Код приглашения</label><input id="registerInvite" name="invite_code" type="text" autocomplete="off" maxlength="128"><small class="field-hint">Для закрытого бета-теста — если код выдал администратор</small>
       <label class="toggle-row"><input name="parent_confirmed" type="checkbox" required><span>Я совершеннолетний родитель или законный представитель ребёнка</span></label>
       <label class="toggle-row"><input name="legal_accepted" type="checkbox" required><span>Принимаю <a href="https://adym.ru/terms.html" target="_blank" rel="noopener">пользовательское соглашение</a> и <a href="https://adym.ru/privacy.html" target="_blank" rel="noopener">политику конфиденциальности</a></span></label>
       <button class="full auth-submit" type="submit">Создать аккаунт</button>

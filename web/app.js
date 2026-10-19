@@ -1143,7 +1143,7 @@ function renderAdminUsers(page){
     if(account.role==='admin')badges.append(adminBadge(self?'Это вы':'Администратор','admin'));
     identity.append(badges);
     const meta=adminElement('div','admin-meta');
-    meta.append(adminMetaLine('Регистрация',adminDate(account.created_at)),adminMetaLine('Последняя активность',adminDate(account.last_activity_at)),adminMetaLine('Входов',String(account.active_sessions||0)),adminMetaLine('За месяц',`${account.assignments||0} задач · ${account.hints||0} подсказок`),adminMetaLine('Расход',`${Number(account.external_cost_rubles||0).toFixed(2)} ₽`));
+    meta.append(adminMetaLine('Регистрация',adminDate(account.created_at)),adminMetaLine('Последний вход',adminDate(account.last_login_at)),adminMetaLine('Последняя активность',adminDate(account.last_activity_at||account.last_seen_at)),adminMetaLine('Всего входов',String(account.login_count||0)),adminMetaLine('Активных входов',String(account.active_sessions||0)),adminMetaLine('За месяц',`${account.assignments||0} задач · ${account.hints||0} подсказок`),adminMetaLine('Расход',`${Number(account.external_cost_rubles||0).toFixed(2)} ₽`));
     const controls=adminElement('div','admin-controls');
     if(protectedAccount){controls.append(adminElement('p','helper admin-wide',self?'Ваш администраторский аккаунт защищён от изменений.':'Другой администратор защищён от изменений.'));}
     else{

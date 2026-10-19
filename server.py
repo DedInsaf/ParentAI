@@ -63,7 +63,6 @@ class AppServer(ThreadingHTTPServer):
         self.payment_locks = defaultdict(threading.Lock)
         self.auth_lock = threading.RLock()
         self.auth_attempts = defaultdict(deque)
-        self.invite_code = os.getenv('PARENTAI_INVITE_CODE', '').strip()
         self.token = secrets.token_urlsafe(32)
         bind = bind or os.getenv('PARENTAI_BIND', '127.0.0.1')
         super().__init__((bind, port), Handler)
@@ -433,9 +432,6 @@ class Handler(BaseHTTPRequestHandler):
                     raise ValueError('Некорректные данные регистрации.')
                 if not self.server.allow_auth_attempt(self.client_key(), 'register'):
                     return self.send(429, {'error': 'Слишком много попыток регистрации. Повторите позже.'})
-                if self.server.invite_code and not secrets.compare_digest(
-                        str(value.get('invite_code') or ''), self.server.invite_code):
-                    raise ValueError('Неверный код приглашения.')
                 if value.get('legal_accepted') is not True or value.get('parent_confirmed') is not True:
                     raise ValueError('Регистрацию должен подтвердить совершеннолетний родитель, приняв документы.')
                 user = self.server.auth.register(

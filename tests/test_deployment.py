@@ -21,7 +21,6 @@ class DeploymentTests(unittest.TestCase):
         self.values = {
             'PARENTAI_PUBLIC_ORIGIN': 'https://app.adym.ru',
             'PARENTAI_BIND': '127.0.0.1',
-            'PARENTAI_INVITE_CODE': 'long-random-beta-code',
             'PARENTAI_GLOBAL_DAILY_BUDGET_RUBLES': '300',
             'PARENTAI_GLOBAL_MONTHLY_BUDGET_RUBLES': '3000',
             'PARENTAI_STT_ENGINE': 'local',
@@ -71,6 +70,12 @@ class DeploymentTests(unittest.TestCase):
         self.assertIn('scripts/backup.py', service)
         self.assertIn('UMask=0077', service)
         self.assertIn('Persistent=true', timer)
+
+    def test_safe_database_export_has_a_timer(self):
+        service = (PROJECT_ROOT / 'deploy/adym-db-export.service').read_text(encoding='utf-8')
+        timer = (PROJECT_ROOT / 'deploy/adym-db-export.timer').read_text(encoding='utf-8')
+        self.assertIn('scripts/export_admin_db.py', service)
+        self.assertIn('OnUnitActiveSec=5min', timer)
 
 
 if __name__ == '__main__':

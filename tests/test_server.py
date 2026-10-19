@@ -251,14 +251,10 @@ class ServerTests(unittest.TestCase):
         self.assertIsNone(self.s.auth.authenticate('test-user','password-123'))
         self.assertEqual(self.request('/api/status',headers={'X-App-Token':self.s.token})[0],401)
 
-    def test_closed_beta_registration_checks_invite_code(self):
-        self.s.invite_code='beta-secret'
+    def test_public_registration_does_not_require_invite_code(self):
         headers={'Origin':self.s.origin,'X-App-Token':self.s.token,'Content-Type':'application/json'}
         value={'login':'invited-user','email':'invited@example.com','password':'password-123',
                'password_confirmation':'password-123','legal_accepted':True,'parent_confirmed':True}
-        self.assertEqual(self.request('/api/auth/register',json.dumps(value).encode(),headers,
-                                      authenticated=False)[0],400)
-        value['invite_code']='beta-secret'
         self.assertEqual(self.request('/api/auth/register',json.dumps(value).encode(),headers,
                                       authenticated=False)[0],201)
 

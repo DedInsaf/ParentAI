@@ -22,12 +22,10 @@ class TutorTests(unittest.TestCase):
             path = Path(temporary) / 'parentai.env'
             path.write_text(
                 'PARENTAI_PUBLIC_ORIGIN=https://app.adym.ru\n'
-                'PARENTAI_INVITE_CODE=private-beta-code\n'
                 'PARENTAI_GLOBAL_DAILY_BUDGET_RUBLES=123\n', encoding='utf-8')
             with patch.dict(os.environ, {}, clear=True):
                 load_local_env(path)
                 self.assertEqual(os.environ['PARENTAI_PUBLIC_ORIGIN'], 'https://app.adym.ru')
-                self.assertEqual(os.environ['PARENTAI_INVITE_CODE'], 'private-beta-code')
                 self.assertEqual(os.environ['PARENTAI_GLOBAL_DAILY_BUDGET_RUBLES'], '123')
 
     def test_disabled_status_does_not_expose_secrets(self):

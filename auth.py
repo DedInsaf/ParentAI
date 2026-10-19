@@ -117,6 +117,17 @@ class AuthStore:
                     created_at INTEGER NOT NULL
                 );
                 CREATE INDEX IF NOT EXISTS admin_audit_created_at ON admin_audit(created_at DESC);
+                CREATE TABLE IF NOT EXISTS account_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    event TEXT NOT NULL,
+                    created_at INTEGER NOT NULL,
+                    details TEXT NOT NULL DEFAULT '{}'
+                );
+                CREATE INDEX IF NOT EXISTS account_events_user_created
+                    ON account_events(user_id, created_at DESC);
+                CREATE INDEX IF NOT EXISTS account_events_created
+                    ON account_events(created_at DESC);
                 """
             )
 
@@ -135,6 +146,17 @@ class AuthStore:
                 connection.execute("ALTER TABLE users ADD COLUMN banned_at INTEGER")
             if "ban_reason" not in columns:
                 connection.execute("ALTER TABLE users ADD COLUMN ban_reason TEXT NOT NULL DEFAULT ''")
+            if "last_login_at" not in columns:
+                connection.execute("ALTER TABLE users ADD COLUMN last_login_at INTEGER")
+            if "login_count" not in columns:
+                connection.execute("ALTER TABLE users ADD COLUMN login_count INTEGER NOT NULL DEFAULT 0")
+            if "last_seen_at" not in columns:
+                connection.execute("ALTER TABLE users ADD COLUMN last_seen_at INTEGER")
+            if "last_logout_at" not in columns:
+                connection.execute("ALTER TABLE users ADD COLUMN last_logout_at INTEGER")
+            session_columns = {row[1] for row in connection.execute("PRAGMA table_info(sessions)")}
+            if "last_seen_at" not in session_columns:
+                connection.execute("ALTER TABLE sessions ADD COLUMN last_seen_at INTEGER")
 
     def register(self, login, email, password, password_confirmation, role="parent",
                  legal_accepted=True, parent_confirmed=True) -> User:
@@ -161,7 +183,12 @@ class AuthStore:
                      digest, PASSWORD_ITERATIONS, int(time.time()), role, int(time.time()),
                      TERMS_VERSION, 1),
                 )
-                return User(cursor.lastrowid, display_login, display_email, role)
+                user_id = cursor.lastrowid
+                connection.execute(
+                    "INSERT INTO account_events(user_id,event,created_at) VALUES (?, 'registered', ?)",
+                    (user_id, int(time.time())),
+                )
+                return User(user_id, display_login, display_email, role)
         except sqlite3.IntegrityError:
             with self._connect() as connection:
                 login_taken = connection.execute(
@@ -207,8 +234,16 @@ class AuthStore:
                 raise ValueError("Аккаунт заблокирован или удалён.")
             connection.execute("DELETE FROM sessions WHERE expires_at <= ?", (now,))
             connection.execute(
-                "INSERT INTO sessions(token_hash, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)",
-                (sha256(token.encode()).digest(), user_id, now + SESSION_LIFETIME, now),
+                "INSERT INTO sessions(token_hash,user_id,expires_at,created_at,last_seen_at) VALUES (?,?,?,?,?)",
+                (sha256(token.encode()).digest(), user_id, now + SESSION_LIFETIME, now, now),
+            )
+            connection.execute(
+                "UPDATE users SET last_login_at=?,last_seen_at=?,login_count=login_count+1 WHERE id=?",
+                (now, now, user_id),
+            )
+            connection.execute(
+                "INSERT INTO account_events(user_id,event,created_at) VALUES (?, 'login', ?)",
+                (user_id, now),
             )
         return token
 
@@ -227,8 +262,13 @@ class AuthStore:
             ).fetchone()
             if row and renew:
                 connection.execute(
-                    "UPDATE sessions SET expires_at = ? WHERE token_hash = ?",
-                    (now + SESSION_LIFETIME, token_hash),
+                    """UPDATE sessions SET expires_at=?,last_seen_at=?
+                       WHERE token_hash=? AND COALESCE(last_seen_at,0)<?""",
+                    (now + SESSION_LIFETIME, now, token_hash, now - 300),
+                )
+                connection.execute(
+                    "UPDATE users SET last_seen_at=? WHERE id=? AND COALESCE(last_seen_at,0)<?",
+                    (now, row["id"], now - 300),
                 )
         return User(row["id"], row["login"], row["email"], row["role"]) if row else None
 
@@ -277,6 +317,7 @@ class AuthStore:
             ).fetchone()[0]
             rows = connection.execute(
                 f"""SELECT users.id,users.login,users.email,users.role,users.created_at,
+                            users.last_login_at,users.login_count,users.last_seen_at,users.last_logout_at,
                             users.is_banned,users.banned_at,users.ban_reason,
                             COUNT(sessions.token_hash) AS active_sessions
                      FROM users
@@ -291,6 +332,8 @@ class AuthStore:
             "users": [{
                 "id": row["id"], "login": row["login"], "email": row["email"],
                 "role": row["role"], "created_at": row["created_at"],
+                "last_login_at": row["last_login_at"], "login_count": row["login_count"],
+                "last_seen_at": row["last_seen_at"], "last_logout_at": row["last_logout_at"],
                 "is_banned": bool(row["is_banned"]), "banned_at": row["banned_at"],
                 "ban_reason": row["ban_reason"], "active_sessions": row["active_sessions"],
             } for row in rows],
@@ -388,4 +431,15 @@ class AuthStore:
         if not isinstance(token, str) or not token:
             return
         with self._connect() as connection:
-            connection.execute("DELETE FROM sessions WHERE token_hash = ?", (sha256(token.encode()).digest(),))
+            token_hash = sha256(token.encode()).digest()
+            row = connection.execute(
+                "SELECT user_id FROM sessions WHERE token_hash=?", (token_hash,)
+            ).fetchone()
+            connection.execute("DELETE FROM sessions WHERE token_hash = ?", (token_hash,))
+            if row:
+                now = int(time.time())
+                connection.execute("UPDATE users SET last_logout_at=? WHERE id=?", (now, row["user_id"]))
+                connection.execute(
+                    "INSERT INTO account_events(user_id,event,created_at) VALUES (?, 'logout', ?)",
+                    (row["user_id"], now),
+                )

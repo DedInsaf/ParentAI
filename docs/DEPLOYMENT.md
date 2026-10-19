@@ -72,12 +72,11 @@ sudo chmod 600 /opt/adym/parentai.env
 sudo -u adym nano /opt/adym/parentai.env
 ```
 
-Минимальная конфигурация закрытой беты:
+Минимальная конфигурация публичной беты:
 
 ```dotenv
 PARENTAI_BIND=127.0.0.1
 PARENTAI_PUBLIC_ORIGIN=https://app.adym.ru
-PARENTAI_INVITE_CODE=длинный-случайный-код-не-короче-16-символов
 PARENTAI_GLOBAL_DAILY_BUDGET_RUBLES=300
 PARENTAI_GLOBAL_MONTHLY_BUDGET_RUBLES=3000
 PARENTAI_TUTOR_MODEL=yandexgpt-5.1
@@ -104,15 +103,23 @@ sudo -u adym /opt/adym/.venv/bin/python /opt/adym/scripts/preflight.py --product
 sudo install -m 644 /opt/adym/deploy/adym.service /etc/systemd/system/adym.service
 sudo install -m 644 /opt/adym/deploy/adym-backup.service /etc/systemd/system/adym-backup.service
 sudo install -m 644 /opt/adym/deploy/adym-backup.timer /etc/systemd/system/adym-backup.timer
+sudo install -m 644 /opt/adym/deploy/adym-db-export.service /etc/systemd/system/adym-db-export.service
+sudo install -m 644 /opt/adym/deploy/adym-db-export.timer /etc/systemd/system/adym-db-export.timer
 sudo install -m 644 /opt/adym/deploy/Caddyfile.example /etc/caddy/Caddyfile
 sudo install -d -o adym -g adym -m 700 /var/backups/adym
 sudo caddy validate --config /etc/caddy/Caddyfile
 sudo systemctl daemon-reload
-sudo systemctl enable --now adym adym-backup.timer
+sudo systemctl enable --now adym adym-backup.timer adym-db-export.timer
 sudo systemctl reload caddy
 ```
 
 Caddy автоматически получает и обновляет доверенный TLS-сертификат, когда A-запись уже указывает на VDS и порты 80/443 доступны. Камера и микрофон в браузере требуют такого HTTPS.
+
+### Просмотр базы в VS Code или PyCharm
+
+Не открывайте рабочие SQLite-файлы через сетевую папку: это может повредить базу. Таймер раз в пять минут создаёт безопасную аналитическую копию `/opt/adym/data/admin-export.sqlite3`. В ней нет хешей паролей, ключей сессий, заданий, расшифровок речи, фотографий и аудио.
+
+В VS Code подключитесь к `root@185.198.152.118` через Remote SSH, откройте папку `/opt/adym` и файл `data/admin-export.sqlite3` расширением SQLite Viewer. В PyCharm Professional создайте SSH/SFTP-подключение к тому же серверу и скачивайте этот файл для просмотра через Database Tools. Не подключайте IDE напрямую к `users.sqlite3` и `usage.sqlite3` на запись.
 
 Создайте администратора без продуктовых лимитов и сохраните показанный пароль в менеджере паролей:
 

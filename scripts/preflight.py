@@ -91,10 +91,6 @@ def validate(values: dict[str, str], root: Path = ROOT, *, production: bool = Fa
     if production and bind not in {"127.0.0.1", "::1", "localhost"}:
         errors.append("PARENTAI_BIND должен быть локальным: внешний доступ принимает только Caddy.")
 
-    invite = values.get("PARENTAI_INVITE_CODE", "").strip()
-    if production and (len(invite) < 16 or "замените" in invite.casefold()):
-        errors.append("Для закрытой беты задайте случайный PARENTAI_INVITE_CODE длиной от 16 символов.")
-
     daily = _positive_budget(values.get("PARENTAI_GLOBAL_DAILY_BUDGET_RUBLES", ""))
     monthly = _positive_budget(values.get("PARENTAI_GLOBAL_MONTHLY_BUDGET_RUBLES", ""))
     if production and daily is None:
