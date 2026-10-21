@@ -3,12 +3,12 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 import numpy as np
 from scipy.io import wavfile
 from voice import prepare_reference
 from runtime import Runtime, PHRASES
-from qwen_voice_worker import generation_budget
+from qwen_voice_worker import create_voice_prompt, generation_budget
 
 
 def wav(x, rate=48000):
@@ -59,6 +59,12 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(generation_budget('Коротко.'), 192)
         self.assertEqual(generation_budget('а' * 100), 300)
         self.assertEqual(generation_budget('а' * 1000), 384)
+
+    def test_qwen_prompt_uses_voice_identity_without_reference_text_leak(self):
+        model = Mock()
+        create_voice_prompt(model, Path('/tmp/reference.wav'))
+        model.create_voice_clone_prompt.assert_called_once_with(
+            ref_audio='/tmp/reference.wav', ref_text=None, x_vector_only_mode=True)
 
     def frontal_profile(self):
         import base64

@@ -7,16 +7,15 @@ import sys
 import time
 
 
-REFERENCE_TEXT = (
-    "Сегодня мы спокойно разберём задание по шагам. Сначала прочитаем условие, "
-    "затем найдём главное и подумаем, с чего лучше начать. Не торопись, говори "
-    "ясно и делай небольшие паузы."
-)
-
-
 def generation_budget(text):
     """Bound CPU time while leaving enough 12 Hz audio tokens for a phrase."""
     return max(192, min(384, len(text) * 3))
+
+
+def create_voice_prompt(model, reference):
+    """Clone identity without letting reference words leak into new speech."""
+    return model.create_voice_clone_prompt(
+        ref_audio=str(reference), ref_text=None, x_vector_only_mode=True)
 
 
 def load_model():
@@ -72,10 +71,10 @@ def serve(directory):
             reference = references[0]
             digest = hashlib.sha256(reference.read_bytes()).digest()
             if digest != cached_key:
-                cached_prompt = model.create_voice_clone_prompt(
-                    ref_audio=str(reference), ref_text=REFERENCE_TEXT,
-                    x_vector_only_mode=False,
-                )
+                # ICL mode can leak the tail of the reference recording into
+                # the new reply. Speaker-vector mode trades a little likeness
+                # for reliably speaking the requested text.
+                cached_prompt = create_voice_prompt(model, reference)
                 cached_key = digest
             text = str(value.get("text") or "").strip()
             if not text:
