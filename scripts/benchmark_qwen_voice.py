@@ -15,7 +15,7 @@ DEFAULT_REFERENCE_TEXT = (
 
 
 def generation_budget(text):
-    return max(96, min(384, len(text) * 3))
+    return max(192, min(384, len(text) * 3))
 
 
 def main():
@@ -57,7 +57,15 @@ def main():
         text=args.text,
         language="Russian",
         voice_clone_prompt=prompt,
-        do_sample=False,
+        do_sample=True,
+        top_k=50,
+        top_p=1.0,
+        temperature=.9,
+        repetition_penalty=1.05,
+        subtalker_dosample=True,
+        subtalker_top_k=50,
+        subtalker_top_p=1.0,
+        subtalker_temperature=.9,
         max_new_tokens=args.max_new_tokens or generation_budget(args.text),
     )
     finished = time.monotonic()

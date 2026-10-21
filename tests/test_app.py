@@ -56,7 +56,7 @@ class AudioTests(unittest.TestCase):
 
 class RuntimeTests(unittest.TestCase):
     def test_qwen_generation_budget_is_bounded_for_small_cpu_server(self):
-        self.assertEqual(generation_budget('Коротко.'), 96)
+        self.assertEqual(generation_budget('Коротко.'), 192)
         self.assertEqual(generation_budget('а' * 100), 300)
         self.assertEqual(generation_budget('а' * 1000), 384)
 

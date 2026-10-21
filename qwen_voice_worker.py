@@ -16,7 +16,7 @@ REFERENCE_TEXT = (
 
 def generation_budget(text):
     """Bound CPU time while leaving enough 12 Hz audio tokens for a phrase."""
-    return max(96, min(384, len(text) * 3))
+    return max(192, min(384, len(text) * 3))
 
 
 def load_model():
@@ -85,7 +85,14 @@ def serve(directory):
                 continue
             wavs, sample_rate = model.generate_voice_clone(
                 text=text, language="Russian", voice_clone_prompt=cached_prompt,
-                do_sample=False, max_new_tokens=generation_budget(text),
+                # Greedy decoding frequently became monotonous, garbled or
+                # failed to emit EOS. These are the Qwen authors' generation
+                # defaults and give the codec predictor natural variation.
+                do_sample=True, top_k=50, top_p=1.0, temperature=.9,
+                repetition_penalty=1.05,
+                subtalker_dosample=True, subtalker_top_k=50,
+                subtalker_top_p=1.0, subtalker_temperature=.9,
+                max_new_tokens=generation_budget(text),
             )
             audio = np.asarray(wavs[0], dtype=np.float32).reshape(-1)
             if not len(audio) or not np.isfinite(audio).all():
