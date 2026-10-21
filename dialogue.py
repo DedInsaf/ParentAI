@@ -481,7 +481,11 @@ class Dialogues:
                     target=bank / ('reference.wav' if index == 1 else f'reference-{index}.wav')
                     shutil.copyfile(source, target);references.append(target)
             job['state'] = 'speaking'
-            spoken = voice_excerpt(answer)
+            # The complete answer is already visible as text. On the small
+            # CPU beta server Qwen voices only a concise first part, otherwise
+            # one unlucky non-terminating generation can occupy it for 10 min.
+            spoken = voice_excerpt(
+                answer, 140 if getattr(runtime.voice_engine, 'provider', '') == 'qwen' else 240)
             def update(value):
                 with self.lock:
                     job['chunks'] = list(value.get('chunks', []))

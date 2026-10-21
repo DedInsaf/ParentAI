@@ -8,6 +8,7 @@ import numpy as np
 from scipy.io import wavfile
 from voice import prepare_reference
 from runtime import Runtime, PHRASES
+from qwen_voice_worker import generation_budget
 
 
 def wav(x, rate=48000):
@@ -54,6 +55,11 @@ class AudioTests(unittest.TestCase):
 
 
 class RuntimeTests(unittest.TestCase):
+    def test_qwen_generation_budget_is_bounded_for_small_cpu_server(self):
+        self.assertEqual(generation_budget('Коротко.'), 96)
+        self.assertEqual(generation_budget('а' * 100), 300)
+        self.assertEqual(generation_budget('а' * 1000), 384)
+
     def frontal_profile(self):
         import base64
         photo='data:image/jpeg;base64,'+base64.b64encode(b'\xff\xd8\xfffixture').decode()

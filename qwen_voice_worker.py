@@ -14,6 +14,11 @@ REFERENCE_TEXT = (
 )
 
 
+def generation_budget(text):
+    """Bound CPU time while leaving enough 12 Hz audio tokens for a phrase."""
+    return max(96, min(384, len(text) * 3))
+
+
 def load_model():
     import torch
     from qwen_tts import Qwen3TTSModel
@@ -80,7 +85,7 @@ def serve(directory):
                 continue
             wavs, sample_rate = model.generate_voice_clone(
                 text=text, language="Russian", voice_clone_prompt=cached_prompt,
-                do_sample=False, max_new_tokens=1024,
+                do_sample=False, max_new_tokens=generation_budget(text),
             )
             audio = np.asarray(wavs[0], dtype=np.float32).reshape(-1)
             if not len(audio) or not np.isfinite(audio).all():
