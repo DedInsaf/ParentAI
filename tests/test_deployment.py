@@ -49,6 +49,12 @@ class DeploymentTests(unittest.TestCase):
         self.assertTrue(any('дневной' in item for item in errors))
         self.assertTrue(any('задаются только вместе' in item for item in errors))
 
+    def test_qwen_requires_its_isolated_runtime_and_local_model(self):
+        values = {**self.values, 'PARENTAI_VOICE_PROVIDER': 'qwen'}
+        errors, _ = validate(values, self.root, production=True, check_assets=False)
+        self.assertTrue(any('Python-окружение Qwen' in item for item in errors))
+        self.assertTrue(any('модель Qwen3-TTS' in item for item in errors))
+
     def test_env_reader_does_not_interpret_comments_or_quotes(self):
         path = self.root / 'parentai.env'
         path.write_text("# secret settings\nPARENTAI_BIND='127.0.0.1'\nEMPTY=\n", encoding='utf-8')

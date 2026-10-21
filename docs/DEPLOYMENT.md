@@ -10,7 +10,7 @@
 - входящие порты 22, 80 и 443. Внутренний порт 8768 наружу не открывать;
 - рабочие `YANDEX_API_KEY` и `YANDEX_FOLDER_ID`. Platega можно добавить позже.
 
-На 2 vCPU ответы Whisper и YandexGPT подходят для небольшой закрытой беты, но одновременные голосовые вопросы будут ждать CPU. XTTS на этом сервере и в коммерческой бете не включать.
+На 2 vCPU ответы Whisper и YandexGPT подходят для небольшой закрытой беты, но одновременные голосовые вопросы будут ждать CPU. Экспериментальная Qwen3-TTS работает и на CPU, однако короткая фраза занимает примерно 2–5 минут, а модель использует около 3,5 ГБ RAM со swap. Сервер ставит Qwen, распознавание и следующие запросы в безопасную очередь. XTTS на этом сервере и в коммерческой бете не включать.
 
 ## 1. Подготовка Ubuntu
 
@@ -64,6 +64,18 @@ sudo -u adym /opt/adym/.venv/bin/python /opt/adym/setup_speech.py
 
 `setup_speech.py` загружает около 1 ГБ весов Whisper в `data/models`. Без этого локальное распознавание не будет готово, а приложение начнёт зависеть от резервного SpeechKit.
 
+Необязательный экспериментальный голос родителя устанавливается отдельно, чтобы его зависимости не меняли рабочее окружение приложения:
+
+```bash
+sudo apt install -y sox libsox-fmt-all
+sudo -u adym python3 -m venv /opt/adym/.venv-qwen
+sudo -u adym /opt/adym/.venv-qwen/bin/pip install --upgrade pip
+sudo -u adym /opt/adym/.venv-qwen/bin/pip install qwen-tts==0.1.1
+sudo -u adym /opt/adym/.venv-qwen/bin/hf download Qwen/Qwen3-TTS-12Hz-0.6B-Base --local-dir /opt/adym/data/models/qwen3-tts-0.6b-base
+```
+
+Окружение и модель занимают примерно 4 ГБ диска. Модель загружается только после реального запроса, обслуживает один ответ за раз и автоматически освобождает память после короткого простоя.
+
 ## 3. Секретные настройки
 
 ```bash
@@ -82,6 +94,9 @@ PARENTAI_GLOBAL_MONTHLY_BUDGET_RUBLES=3000
 PARENTAI_TUTOR_MODEL=yandexgpt-5.1
 PARENTAI_STT_ENGINE=local
 PARENTAI_STT_MODEL=openai/whisper-small
+PARENTAI_VOICE_PROVIDER=qwen
+PARENTAI_QWEN_PYTHON=.venv-qwen/bin/python
+PARENTAI_QWEN_MODEL=data/models/qwen3-tts-0.6b-base
 PARENTAI_ENABLE_XTTS=0
 YANDEX_API_KEY=ваш-ключ
 YANDEX_FOLDER_ID=ваш-id-каталога

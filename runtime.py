@@ -33,7 +33,7 @@ def atomic_json(path, value):
 
 
 class Runtime:
-    def __init__(self, data=DATA):
+    def __init__(self, data=DATA, voice_engine=None):
         self.data = Path(data)
         self.data.mkdir(parents=True, exist_ok=True)
         self.lock = threading.RLock()
@@ -48,10 +48,17 @@ class Runtime:
         # Deployments that cannot use XTTS under their chosen licence must opt
         # out explicitly with PARENTAI_ENABLE_XTTS=0; never silently make a
         # third-party voice the default.
-        self.xtts_enabled = os.getenv('PARENTAI_ENABLE_XTTS', '1').strip().lower() not in ('0','false','no')
+        configured_provider = os.getenv('PARENTAI_VOICE_PROVIDER', '').strip().lower()
+        legacy_xtts = os.getenv('PARENTAI_ENABLE_XTTS', '1').strip().lower() not in ('0','false','no')
+        self.voice_provider = configured_provider or ('xtts' if legacy_xtts else 'none')
+        self.voice_clone_enabled = self.voice_provider in ('xtts', 'qwen')
+        # Kept in the status payload for older clients; it now means that a
+        # cloning provider is available, not specifically XTTS.
+        self.xtts_enabled = self.voice_clone_enabled
         from voice_engine import VoiceEngine
-        self.voice_engine=VoiceEngine()
-        self.reference_mode = 'clone' if self.xtts_enabled else 'direct'
+        self._owns_voice_engine = voice_engine is None
+        self.voice_engine=voice_engine or VoiceEngine()
+        self.reference_mode = 'clone' if self.voice_clone_enabled else 'direct'
         self.reference_takes = []
         self.status = {'tts': 'Не загружена', 'assets': 'Ожидание загрузки', 'voice': 'idle',
                        'progress': '', 'error': '', 'reference': False,
@@ -69,7 +76,7 @@ class Runtime:
         try:
             reference_settings = json.loads((self.data / 'reference.json').read_text())
             saved_mode = reference_settings['mode']
-            self.reference_mode = saved_mode if saved_mode == 'direct' or self.xtts_enabled else 'direct'
+            self.reference_mode = saved_mode if saved_mode == 'direct' or self.voice_clone_enabled else 'direct'
         except (OSError, ValueError, KeyError, TypeError):
             reference_settings = {}
         saved_takes = reference_settings.get('takes') if isinstance(reference_settings, dict) else None
@@ -103,14 +110,16 @@ class Runtime:
     def snapshot(self):
         with self.lock:
             return {**self.status, 'phrases': list(self.manifest), 'reference_mode': self.reference_mode,
-                    'xtts_enabled': self.xtts_enabled}
+                    'xtts_enabled': self.voice_clone_enabled,
+                    'voice_clone_enabled': self.voice_clone_enabled,
+                    'voice_provider': self.voice_provider}
 
     def set(self, **values):
         with self.lock:
             self.status.update(values)
 
     def start(self):
-        if self.xtts_enabled and self.reference_mode=="clone" and self.status["reference"]:
+        if self.voice_clone_enabled and self.reference_mode=="clone" and self.status["reference"]:
             self.voice_engine.warm(self.reference_paths())
         threading.Thread(target=self.start_assets, daemon=True).start()
 
@@ -229,8 +238,8 @@ class Runtime:
             raise ValueError('Неизвестный образец голоса') from None
         if take not in ((1,) if mode == 'direct' else (1, 2, 3)):
             raise ValueError('Неизвестный образец голоса')
-        if mode == 'clone' and not self.xtts_enabled:
-            raise ValueError('XTTS-v2 выключен: его лицензия не разрешает коммерческое использование. Выберите запись без клонирования.')
+        if mode == 'clone' and not self.voice_clone_enabled:
+            raise ValueError('Клонирование голоса сейчас выключено: лицензия XTTS-v2 не подходит, а Qwen не настроен. Выберите точную запись без клонирования.')
         with self.lock:
             if self.status['voice'] in BUSY or self.reply_busy:
                 raise ValueError('Сначала остановите создание голоса.')
@@ -264,8 +273,8 @@ class Runtime:
                 raise ValueError('Создание голоса уже идёт.')
             if not self.status['reference']:
                 raise ValueError('Сначала запишите и прослушайте голос.')
-            if self.reference_mode == 'clone' and not self.xtts_enabled:
-                raise ValueError('XTTS-v2 выключен до подтверждения коммерческой лицензии.')
+            if self.reference_mode == 'clone' and not self.voice_clone_enabled:
+                raise ValueError('Клонирование голоса выключено из-за лицензии XTTS-v2; Qwen не настроен.')
             self.cancel.clear()
             self.status.update(voice='generating', error='', progress='Подготовка голоса…')
             self.worker = threading.Thread(target=self._generate, daemon=True)
@@ -280,6 +289,17 @@ class Runtime:
     def _synthesize(self, bank):
         if self.cancel.is_set() or self.stop.is_set():
             raise InterruptedError('Создание голоса отменено')
+        if self.voice_provider == 'qwen':
+            # Exact recordings are both instant and more natural for recurring
+            # presence reminders. Qwen is reserved for genuinely new replies.
+            references = self.reference_paths()
+            if len(references) < 3:
+                raise ValueError('Для Qwen запишите все три образца голоса.')
+            for index, source_index in enumerate((0, 1, 2, 2)):
+                shutil.copyfile(references[source_index], bank / f'phrase-{index}.wav')
+            self.set(tts='Qwen будет озвучивать новые ответы в общей очереди',
+                     progress='Записи готовы. Новые ответы могут создаваться несколько минут.')
+            return
         self.set(tts='Модель прогревается для быстрых ответов',progress='Загружаю модель голоса…')
         styles = ('firm', 'supportive', 'firm', 'firm')
         for i,text in enumerate(PHRASES):
@@ -328,4 +348,5 @@ class Runtime:
         self.cancel_generation()
         if self.worker:
             self.worker.join(timeout=8)
-        self.voice_engine.close()
+        if self._owns_voice_engine:
+            self.voice_engine.close()

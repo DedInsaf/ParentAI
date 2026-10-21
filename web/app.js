@@ -157,17 +157,22 @@ async function poll() {
     $('assetsStatus').textContent = `Распознавание: ${status.assets}`;
     const cloneOption=$('voiceMode').querySelector('option[value="clone"]');
     const parentReplyOption=$('replyVoice').querySelector('option[value="parent"]');
-    cloneOption.disabled=!status.xtts_enabled;
-    parentReplyOption.disabled=!status.xtts_enabled;
-    cloneOption.textContent=status.xtts_enabled?'Напоминания и новые ответы моим голосом':'Новые ответы голосом родителя пока недоступны';
-    parentReplyOption.textContent=status.xtts_enabled?'Голос родителя · основной':'Голос родителя · недоступен';
-    if(!status.xtts_enabled&&$('replyVoice').value==='parent'){
+    const cloneEnabled=status.voice_clone_enabled??status.xtts_enabled;
+    const qwen=status.voice_provider==='qwen';
+    cloneOption.disabled=!cloneEnabled;
+    parentReplyOption.disabled=!cloneEnabled;
+    cloneOption.textContent=cloneEnabled?(qwen?'Новые ответы моим голосом · Qwen, медленно':'Напоминания и новые ответы моим голосом'):'Новые ответы голосом родителя пока недоступны';
+    parentReplyOption.textContent=cloneEnabled?(qwen?'Голос родителя · Qwen, 2–5 минут':'Голос родителя · основной'):'Голос родителя · недоступен';
+    $('qwenWarning').hidden=!qwen;
+    if(!cloneEnabled&&$('replyVoice').value==='parent'){
       $('replyVoice').value='yandex';
       $('replyVoiceHint').textContent='Адым озвучивает новые подсказки обычным голосом, а напоминания может произносить записью родителя.';
-    }else if(status.xtts_enabled){
+    }else if(qwen){
+      $('replyVoiceHint').textContent='Qwen сохраняет голос родителя, но на тестовом сервере ответ может готовиться 2–5 минут. Голос Адым отвечает значительно быстрее.';
+    }else if(cloneEnabled){
       $('replyVoiceHint').textContent='Можно выбрать голос родителя или обычный голос Адым.';
     }
-    if(!status.xtts_enabled&&$('voiceMode').value==='clone'){$('voiceMode').value='direct';updateVoiceMode();}
+    if(!cloneEnabled&&$('voiceMode').value==='clone'){$('voiceMode').value='direct';updateVoiceMode();}
     renderParentSummary(status.usage);
     renderSubscription(status.usage, status.billing);
     if (!tutorBusy && !questionRecording && !listenerPending) $('tutorStatus').textContent = status.tutor?.enabled?'Задай вопрос голосом или напиши его. Будем пробовать по шагам.':'Подсказки временно недоступны. Попробуй немного позже.';
@@ -836,7 +841,7 @@ async function answerQuestion(question,switchAction=null,renderQuestion=true) {
       }
       if(result.state==='error')throw new Error(result.warning);
       if(result.state==='cancelled')break;
-      $('tutorStatus').textContent=result.state==='speaking'?'Озвучиваю подсказку…':'Думаю, как помочь…';
+      $('tutorStatus').textContent=result.state==='speaking'?(status.voice_provider==='qwen'?'Qwen создаёт голос родителя · обычно 2–5 минут…':'Озвучиваю подсказку…'):'Думаю, как помочь…';
       if(performance.now()>deadline)throw new Error('Ответ занял слишком много времени.');
       await sleep(180);
     }

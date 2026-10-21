@@ -72,3 +72,10 @@ test('a cloned parent voice is the lesson default and combines three expressive 
   assert.match(script, /Дальше: второй образец — поддерживаю/);
   assert.match(script, /voiceProfileReady/);
 });
+
+test('experimental Qwen voice has an explicit wait and capacity warning', () => {
+  assert.match(html, /id="qwenWarning"/);
+  assert.match(html, /2–5 минут/);
+  assert.match(script, /Qwen создаёт голос родителя/);
+  assert.match(script, /voice_provider==='qwen'/);
+});

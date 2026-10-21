@@ -1,4 +1,4 @@
-"""One bounded XTTS worker shared by lesson replies; no model in HTTP threads."""
+"""One bounded voice-cloning worker shared by lesson replies; no model in HTTP threads."""
 import json
 import os
 import subprocess
@@ -13,6 +13,9 @@ from pathlib import Path
 
 class VoiceEngine:
     def __init__(self):
+        configured=os.getenv('PARENTAI_VOICE_PROVIDER','').strip().lower()
+        legacy=os.getenv('PARENTAI_ENABLE_XTTS','1').strip().lower() not in ('0','false','no')
+        self.provider=configured or ('xtts' if legacy else 'none')
         self.lock=threading.RLock()
         self.request_lock=threading.Lock()
         self.storage=None
@@ -39,11 +42,21 @@ class VoiceEngine:
                 (directory/name).unlink(missing_ok=True)
             self.log=(directory/'worker.log').open('wb')
             cache=ROOT/'data'/'.cache';cache.mkdir(parents=True,exist_ok=True)
-            env={**os.environ,'MPLCONFIGDIR':str(cache/'matplotlib'),'XDG_CACHE_HOME':str(cache),'PYTORCH_ENABLE_MPS_FALLBACK':'1'}
-            self.process=subprocess.Popen([sys.executable,str(ROOT/'voice_worker.py'),'--serve',str(directory)],
+            env={**os.environ,'MPLCONFIGDIR':str(cache/'matplotlib'),'XDG_CACHE_HOME':str(cache),
+                 'HF_HOME':str(cache/'huggingface'),'TOKENIZERS_PARALLELISM':'false',
+                 'OMP_NUM_THREADS':'2','MKL_NUM_THREADS':'2','PYTORCH_ENABLE_MPS_FALLBACK':'1'}
+            worker=ROOT/('qwen_voice_worker.py' if self.provider=='qwen' else 'voice_worker.py')
+            executable=(Path(os.getenv('PARENTAI_QWEN_PYTHON','')) if self.provider=='qwen' else Path(sys.executable))
+            if self.provider=='qwen' and (not str(executable) or not executable.is_file()):
+                executable=ROOT/'.venv-qwen/bin/python'
+            self.process=subprocess.Popen([str(executable),str(worker),'--serve',str(directory)],
                                           cwd=ROOT,stdout=self.log,stderr=self.log,env=env)
 
     def warm(self,reference):
+        # Loading Qwen speculatively costs about 3.5 GB and gives a small CPU
+        # server no useful headroom. Load it only when a real reply is ready.
+        if self.provider == 'qwen':
+            return
         with self.lock:
             if self.warming or self.closed:return
             self.warming=True
@@ -71,13 +84,17 @@ class VoiceEngine:
             if self.storage is None:return {'state':'idle','message':'Модель голоса не загружена'}
             root=Path(self.storage.name)
             if (root/'fatal.json').is_file():
-                return {'state':'error','message':'XTTS недоступен. Проверьте установленную модель голоса.'}
+                name='Qwen' if self.provider=='qwen' else 'XTTS'
+                return {'state':'error','provider':self.provider,'message':f'{name} недоступен. Проверьте модель голоса.'}
             if not self.process or self.process.poll() is not None:
                 return {'state':'idle','message':'Модель голоса не загружена'}
             ready=(root/'ready.json').is_file() and not self.warming
             try:device=json.loads((root/'ready.json').read_text()).get('device','cpu')
             except (OSError,ValueError):device='cpu'
-            return {'state':'ready' if ready else 'loading','device':device,'message':('Голос готов · Apple GPU' if device=='mps' else 'Голос готов · CPU') if ready else 'Подготавливаю голос к занятию…'}
+            if ready and self.provider=='qwen': message='Qwen готов · экспериментальный CPU-режим'
+            elif ready: message='Голос готов · Apple GPU' if device=='mps' else 'Голос готов · CPU'
+            else: message='Подготавливаю голос к занятию… это может занять несколько минут'
+            return {'state':'ready' if ready else 'loading','device':device,'provider':self.provider,'message':message}
 
     def synthesize(self,reference,output,text,cancel,on_update=lambda _:None,style='neutral'):
         with self.request_lock:
@@ -108,16 +125,21 @@ class VoiceEngine:
                         if value.get('state')=='error': raise ValueError(value.get('error','Ошибка XTTS.'))
                     with self.lock:
                         if not self.process or self.process.poll() is not None:
-                            raise ValueError('Модель XTTS не запустилась. Проверьте установку голоса.')
+                            raise ValueError('Модель голоса не запустилась. Проверьте установку Qwen/XTTS.')
             except BaseException:
                 self.release(owned_process)
                 raise
             finally:
                 request.unlink(missing_ok=True)
 
-    def release(self,expected=None):
+    def busy(self):
+        return self.request_lock.locked()
+
+    def release(self,expected=None,idle_only=False):
+        if idle_only and self.request_lock.locked():
+            return False
         with self.lock:
-            if expected is not None and self.process is not expected: return
+            if expected is not None and self.process is not expected: return False
             self.warm_cancel.set()
             process=self.process
             if process and process.poll() is None:
@@ -127,6 +149,7 @@ class VoiceEngine:
                     process.kill();process.wait(timeout=3)
             self.process=None
             if self.log: self.log.close();self.log=None
+            return True
 
     def close(self):
         self.closed=True

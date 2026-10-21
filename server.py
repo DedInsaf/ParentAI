@@ -89,7 +89,10 @@ class AppServer(ThreadingHTTPServer):
         with self.profile_lock:
             runtime = self.profile_runtimes.get(user_id)
             if runtime is None:
-                runtime = Runtime(self.runtime.data / 'profiles' / str(user_id))
+                # One shared engine means one Qwen model and one queue for the
+                # whole server; parallel models would exhaust a 4 GB VPS.
+                runtime = Runtime(self.runtime.data / 'profiles' / str(user_id),
+                                  voice_engine=self.runtime.voice_engine)
                 self.profile_runtimes[user_id] = runtime
             return runtime
 
@@ -586,10 +589,14 @@ class Handler(BaseHTTPRequestHandler):
             if path == '/api/avatar':
                 return self.send(200, runtime.avatar(json.loads(payload)))
             if path == '/api/speech':
-                # XTTS and Whisper are both large CPU models. A speculative
-                # XTTS warm-up must not compete with recognition for RAM/CPU.
-                # It will be started again only after the tutor has an answer.
-                runtime.voice_engine.release()
+                # Qwen/XTTS and Whisper cannot safely share this 4 GB server.
+                # Never kill another child's active reply and never risk OOM.
+                if runtime.voice_engine.busy():
+                    raise ValueError(
+                        'Сейчас сервер создаёт голос для другого ответа. '
+                        'Подождите несколько минут или временно выберите быстрый голос Адым.'
+                    )
+                runtime.voice_engine.release(idle_only=True)
                 return self.send(200, self.server.recognize(
                     user.id, payload, self.headers.get('X-Request-Id'), user.role == 'admin'))
             if path == '/api/voice-warm':
@@ -598,7 +605,7 @@ class Handler(BaseHTTPRequestHandler):
                         runtime.voice_engine.warm(runtime.reference_paths())
                 return self.send(202,{'ok':True})
             if path == '/api/voice-release':
-                runtime.voice_engine.release()
+                runtime.voice_engine.release(idle_only=True)
                 return self.send(200,{'ok':True})
             if path == '/api/dialog':
                 value = json.loads(payload)

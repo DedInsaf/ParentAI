@@ -103,6 +103,8 @@ small{font-size:12px}
 .preview{grid-column:2;grid-row:3;position:sticky;top:24px}
 [data-step-panel]{grid-column:1;grid-row:3}
 .tip{background:#f7ecdf;color:#66523d;border-radius:20px;padding:15px 18px;font-size:14px;margin:18px 0}
+.qwen-warning{display:grid;gap:5px;margin:16px 0;padding:15px 18px;border:1px solid #dfbb78;border-radius:18px;background:#fff4d9;color:#62491f;font-size:13px;line-height:1.5}
+.qwen-warning strong{font-size:14px}.qwen-warning[hidden]{display:none}
 .helper span{font-size:20px;color:#9b7355;margin-right:6px}
 #scene{position:relative;height:410px;overflow:hidden;border-radius:24px;background:radial-gradient(ellipse at 50% 40%,#f3eddb,#e6eadf 78%)}
 #scene canvas{display:block}

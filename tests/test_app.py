@@ -233,6 +233,22 @@ class RuntimeTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'лицензия'):
             disabled.reference(wav(speech()), mode='clone')
 
+    def test_qwen_provider_uses_exact_recordings_for_recurring_reminders(self):
+        with patch.dict('os.environ', {'PARENTAI_VOICE_PROVIDER': 'qwen'}):
+            runtime = Runtime(Path(self.temp.name) / 'qwen')
+        self.addCleanup(runtime.close)
+        for take in (1, 2, 3):
+            runtime.reference(wav(speech()), mode='clone', take=take)
+        bank = runtime.data / 'qwen-bank'; bank.mkdir()
+        with patch.object(runtime.voice_engine, 'synthesize') as synth:
+            runtime._synthesize(bank)
+            synth.assert_not_called()
+        self.assertEqual(runtime.snapshot()['voice_provider'], 'qwen')
+        self.assertTrue(runtime.snapshot()['voice_clone_enabled'])
+        self.assertEqual((bank / 'phrase-0.wav').read_bytes(), runtime.reference_path(1).read_bytes())
+        self.assertEqual((bank / 'phrase-1.wav').read_bytes(), runtime.reference_path(2).read_bytes())
+        self.assertEqual((bank / 'phrase-3.wav').read_bytes(), runtime.reference_path(3).read_bytes())
+
     def test_cancellation_does_not_publish_bank(self):
         self.r.cancel.set()
         self.r.reference(wav(speech()[:48000*8]), mode='direct')

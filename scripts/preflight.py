@@ -115,9 +115,20 @@ def validate(values: dict[str, str], root: Path = ROOT, *, production: bool = Fa
     if production and not _model_ready(root, model):
         errors.append("Локальный Whisper не установлен: выполните setup_speech.py.")
 
+    provider = values.get("PARENTAI_VOICE_PROVIDER", "").strip().casefold()
     xtts = values.get("PARENTAI_ENABLE_XTTS", "0").strip().casefold()
-    if production and xtts not in {"0", "false", "no"}:
+    provider = provider or ("xtts" if xtts not in {"0", "false", "no"} else "none")
+    if provider not in {"none", "xtts", "qwen"}:
+        errors.append("PARENTAI_VOICE_PROVIDER должен быть none, xtts или qwen.")
+    elif production and provider == "xtts":
         errors.append("XTTS-v2 нужно выключить для публичной/платной беты из-за лицензии модели.")
+    elif provider == "qwen":
+        qwen_python = Path(values.get("PARENTAI_QWEN_PYTHON", root / ".venv-qwen/bin/python"))
+        qwen_model = Path(values.get("PARENTAI_QWEN_MODEL", root / "data/models/qwen3-tts-0.6b-base"))
+        if not qwen_python.is_file():
+            errors.append("Не найдено отдельное Python-окружение Qwen.")
+        if not (qwen_model / "config.json").is_file():
+            errors.append("Не найдена локальная модель Qwen3-TTS.")
 
     merchant = bool(values.get("PLATEGA_MERCHANT_ID", "").strip())
     secret = bool(values.get("PLATEGA_SECRET", "").strip())
