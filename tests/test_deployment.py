@@ -1,11 +1,29 @@
 from pathlib import Path
+import os
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from scripts.preflight import ROOT as PROJECT_ROOT, read_env, validate
+from tutor import load_local_env
 
 
 class DeploymentTests(unittest.TestCase):
+    def test_qwen_settings_are_loaded_from_private_environment(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'parentai.env'
+            path.write_text(
+                'PARENTAI_VOICE_PROVIDER=qwen\n'
+                'PARENTAI_QWEN_PYTHON=.venv-qwen/bin/python\n'
+                'PARENTAI_QWEN_MODEL=data/models/qwen\n'
+                'PARENTAI_QWEN_IDLE_SECONDS=45\n',
+                encoding='utf-8',
+            )
+            with patch.dict(os.environ, {}, clear=True):
+                load_local_env(path)
+                self.assertEqual(os.environ['PARENTAI_VOICE_PROVIDER'], 'qwen')
+                self.assertEqual(os.environ['PARENTAI_QWEN_IDLE_SECONDS'], '45')
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
