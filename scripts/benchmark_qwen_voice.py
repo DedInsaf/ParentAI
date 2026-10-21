@@ -14,6 +14,10 @@ DEFAULT_REFERENCE_TEXT = (
 )
 
 
+def generation_budget(text):
+    return max(96, min(384, len(text) * 3))
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", required=True)
@@ -26,6 +30,7 @@ def main():
         default="Отлично, ты идёшь верным путём. Давай сделаем следующий шаг вместе.",
     )
     parser.add_argument("--threads", type=int, default=2)
+    parser.add_argument("--max-new-tokens", type=int)
     args = parser.parse_args()
 
     import soundfile as sf
@@ -53,7 +58,7 @@ def main():
         language="Russian",
         voice_clone_prompt=prompt,
         do_sample=False,
-        max_new_tokens=768,
+        max_new_tokens=args.max_new_tokens or generation_budget(args.text),
     )
     finished = time.monotonic()
     output = Path(args.output)
