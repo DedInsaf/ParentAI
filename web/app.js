@@ -14,6 +14,7 @@ const clearError = () => { $('error').hidden = true; };
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const requestId = () => globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 let token, currentUser, authenticated = false, appStarted = false;
+const requestedPlan = new URLSearchParams(location.search).get('plan');
 let status = {}, stream, detector, avatarTopology, THREE, renderer, scene, camera, mesh, avatarGroup, modelAvatar;
 let audioContext, analyser, audioSource, pcm, playing = false, recording = false, scanning = false;
 let browserUtterance = null, browserSpeechStarted = 0;
@@ -228,15 +229,18 @@ function renderSubscription(summary, billing) {
   const button = $('buyPaidBtn'), ultraButton = $('buyUltraBtn');
   const waiting = ['pending','subscription_activated'].includes(summary.payment?.status);
   const hasPaidPlan = current === 'paid' || current === 'ultra';
-  button.disabled = summary.plan.unlimited || hasPaidPlan || waiting || !billing.provider?.enabled;
-  ultraButton.disabled = summary.plan.unlimited || hasPaidPlan || waiting || !billing.provider?.enabled;
+  const buyerIdentified = !!currentUser?.email && !!currentUser?.telegram_username;
+  button.disabled = summary.plan.unlimited || hasPaidPlan || waiting || !billing.provider?.enabled || !buyerIdentified;
+  ultraButton.disabled = summary.plan.unlimited || hasPaidPlan || waiting || !billing.provider?.enabled || !buyerIdentified;
   button.textContent = summary.plan.unlimited ? 'У вас доступ без ограничений' : current === 'paid' ?
     'Подписка активна' : hasPaidPlan ? 'Смена тарифа — через поддержку' : waiting ? 'Ожидаем подтверждение Platega' :
     `Оформить за ${paid.monthly_price_rubles ?? 490} ₽/месяц`;
   ultraButton.textContent = summary.plan.unlimited ? 'У вас доступ без ограничений' : current === 'ultra' ?
     'Подписка активна' : hasPaidPlan ? 'Смена тарифа — через поддержку' : waiting ? 'Ожидаем подтверждение Platega' :
     `Оформить за ${ultra.monthly_price_rubles ?? 990} ₽/месяц`;
-  if (!billing.provider?.enabled && current === 'free') {
+  if (!buyerIdentified && current === 'free') {
+    $('billingMessage').textContent = 'Перед оплатой сохраните Telegram username родителя в блоке «Данные покупателя».';
+  } else if (!billing.provider?.enabled && current === 'free') {
     $('billingMessage').textContent = 'Покупка подписки временно недоступна. Пока можно пользоваться бесплатным тарифом.';
   } else if (waiting) {
     $('billingMessage').textContent = 'Подписка создана в Platega и ожидает подтверждения. Нажмите кнопку ещё раз, чтобы вернуться к оплате.';
@@ -1157,6 +1161,7 @@ function renderAdminUsers(page){
     const card=adminElement('article',`admin-user${account.is_banned?' is-banned':''}${self?' is-self':''}`);
     const identity=adminElement('div','admin-identity');
     identity.append(adminElement('strong','',account.login),adminElement('span','',account.email));
+    identity.append(adminElement('span','',account.telegram_username || 'Telegram не указан'));
     const badges=adminElement('div','admin-badges');
     badges.append(adminBadge(account.plan_title||ADMIN_PLAN_TITLES[account.plan]||'Бесплатный'));
     if(account.is_banned)badges.append(adminBadge('Заблокирован','blocked'));
@@ -1204,12 +1209,18 @@ function showApplication(user) {
   currentUser = user;
   authenticated = true;
   $('accountLogin').textContent = user.is_admin ? `${user.login} · Админ` : user.login;
+  $('billingEmail').value = user.email || '';
+  $('billingTelegram').value = user.telegram_username || '';
+  $('billingContactMessage').textContent = user.telegram_username ? 'Данные покупателя сохранены.' : 'Укажите Telegram перед покупкой подписки.';
   $('adminPanelBtn').hidden = !user.is_admin;
   $('authPage').hidden = true;
   document.querySelector('.app-header').hidden = false;
   $('setupPage').hidden = false;
   document.body.classList.remove('auth-pending');
   startApplication();
+  if (requestedPlan === 'paid' || requestedPlan === 'ultra') {
+    requestAnimationFrame(() => $('billingDialog').showModal());
+  }
 }
 
 $('loginTab').addEventListener('click', () => authMode('login'));
@@ -1245,6 +1256,29 @@ for (const [formId, path] of [['loginForm', 'login'], ['registerForm', 'register
     } finally { authBusy(form, false); }
   });
 }
+$('billingContactForm').addEventListener('submit', async event => {
+  event.preventDefault();
+  const button = $('saveBillingContactBtn');
+  const label = button.textContent;
+  button.disabled = true;
+  button.textContent = 'Сохраняем…';
+  $('billingContactMessage').textContent = '';
+  try {
+    const data = await api('account/billing-contact', JSON.stringify({
+      telegram_username: $('billingTelegram').value,
+    }), true, 15000);
+    currentUser = data.user;
+    $('billingTelegram').value = data.user.telegram_username;
+    $('billingContactMessage').textContent = 'Данные покупателя сохранены. Можно переходить к оплате.';
+    await poll();
+  } catch (error) {
+    $('billingContactMessage').textContent = error.message || String(error);
+    $('billingTelegram').focus();
+  } finally {
+    button.disabled = false;
+    button.textContent = label;
+  }
+});
 $('logoutBtn').addEventListener('click', async () => {
   $('logoutBtn').disabled = true;
   try {
@@ -1294,6 +1328,11 @@ $('deleteAccountForm').addEventListener('submit', async event => {
 });
 async function buyPlan(plan, buttonId) {
   clearError();
+  if (!currentUser?.telegram_username) {
+    $('billingContactMessage').textContent = 'Сначала укажите и сохраните Telegram username родителя.';
+    $('billingTelegram').focus();
+    return;
+  }
   pendingActions.add(buttonId); controls();
   try {
     const checkout = await api('billing/checkout', JSON.stringify({plan}), true, 30000);
@@ -1315,7 +1354,7 @@ try {
   const session = await response.json();
   token = session.token;
   if (session.user) showApplication(session.user);
-  else authMode('login');
+  else authMode(requestedPlan === 'paid' || requestedPlan === 'ultra' ? 'register' : 'login');
 } catch (error) {
   $('authError').textContent = error.message || String(error);
   $('authError').hidden = false;

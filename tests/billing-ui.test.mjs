@@ -30,3 +30,12 @@ test('plans use parent-friendly sessions and include Plus and Ultra', () => {
   assert.match(script, /remaining\.sessions/);
   assert.match(script, /study-session/);
 });
+
+test('buyer identity is collected before subscription checkout', () => {
+  assert.match(html, /id="registerTelegram"[^>]+required/);
+  assert.match(html, /id="billingContactForm"/);
+  assert.match(html, /id="billingEmail"[^>]+readonly/);
+  assert.match(html, /id="billingTelegram"/);
+  assert.match(script, /account\/billing-contact/);
+  assert.match(script, /currentUser\?\.telegram_username/);
+});

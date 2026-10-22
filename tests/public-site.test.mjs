@@ -49,7 +49,7 @@ test('public landing shows exact monthly plan limits', () => {
   assert.match(html, /продлеваться каждые 30 календарных дней/i);
 });
 
-test('purchase path is clickable but cannot charge before backend launch', () => {
+test('purchase path requires an identified account before Platega', () => {
   const html = read('index.html');
   const checkout = read('checkout.html');
   const ultra = read('checkout-ultra.html');
@@ -58,10 +58,11 @@ test('purchase path is clickable but cannot charge before backend launch', () =>
   assert.match(checkout, /Адым Плюс[\s\S]*490 ₽/);
   assert.match(ultra, /Адым Ультра[\s\S]*990 ₽/);
   assert.doesNotMatch(ultra, /490 ₽/);
-  assert.match(checkout, /data-payment-placeholder/);
-  assert.match(ultra, /data-payment-placeholder/);
-  assert.match(checkout, /Оплата временно недоступна/);
-  assert.match(checkout, /деньги не списывались/i);
+  assert.match(checkout, /https:\/\/app\.adym\.ru\/\?plan=paid/);
+  assert.match(ultra, /https:\/\/app\.adym\.ru\/\?plan=ultra/);
+  assert.match(checkout, /Оплата без личного кабинета недоступна/);
+  assert.match(checkout, /почту и Telegram username/);
+  assert.doesNotMatch(checkout, /data-payment-placeholder/);
   assert.doesNotMatch(html, /PLATEGA_|merchant|secret/i);
   assert.doesNotMatch(checkout, /PLATEGA_|merchant|secret/i);
 });
@@ -72,6 +73,7 @@ test('public site includes privacy, terms and deployment essentials', () => {
   }
   assert.match(read('privacy.html'), /support@adym\.ru/i);
   assert.match(read('privacy.html'), /Platega/i);
+  assert.match(read('privacy.html'), /Telegram username/i);
   assert.match(read('terms.html'), /Пользовательское соглашение/i);
   assert.match(read('terms.html'), /490 ₽ за 30 календарных дней/i);
   assert.match(read('terms.html'), /990 ₽ за 30 календарных дней/i);

@@ -77,6 +77,8 @@ small{font-size:12px}
 .subscription-heading{display:flex;justify-content:space-between;align-items:flex-start;gap:24px}
 .subscription-heading h2{font-size:29px;letter-spacing:-.8px}.subscription-heading p{color:var(--muted);font-size:15px;max-width:720px;margin-bottom:0}
 .billing-dialog-actions{display:flex;align-items:center;gap:10px;flex-shrink:0}
+.billing-contact{display:grid;grid-template-columns:minmax(230px,1fr) minmax(210px,.72fr) minmax(190px,.65fr) auto;gap:12px;align-items:end;margin:20px 0;padding:17px 18px;border:1px solid #dfe7d8;border-radius:19px;background:#fffdf8}
+.billing-contact>div{align-self:center}.billing-contact strong{display:block;margin:3px 0 2px}.billing-contact p{margin:0;color:var(--muted);font-size:11px}.billing-contact label{font-size:11px;font-weight:800;color:var(--muted)}.billing-contact input{display:block;width:100%;min-height:43px;margin-top:5px;padding:9px 11px;border:1px solid #d9dfd4;border-radius:12px;background:#fff;color:var(--ink);font:inherit}.billing-contact input[readonly]{background:#f2f2ec;color:#68726b}.billing-contact button{min-height:43px}.billing-contact-message{grid-column:2/-1;min-height:14px;color:#47705f!important}
 .dialog-close{display:grid;place-items:center;width:42px;height:42px;min-height:42px;padding:0;border-radius:50%;background:#eef1e9;color:#53645b;font-size:25px;font-weight:400;line-height:1}.dialog-close:hover:enabled{background:#e2e9dd;color:var(--ink);box-shadow:none}
 .plan-badge{flex-shrink:0;padding:10px 17px;border-radius:999px;background:#355f4e;color:white;font-size:14px;font-weight:700}
 .plan-comparison{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:24px}
@@ -263,7 +265,7 @@ body.in-lesson #readyHint:empty{display:none}
 .section-title{flex-wrap:wrap;gap:8px}
 .section-title h2{font-size:19px}
 #setupPage,#lessonPage{grid-template-columns:1fr;gap:18px}
-.billing-dialog{width:calc(100vw - 20px);max-height:calc(100dvh - 20px);overflow:auto}.billing-dialog-shell{padding:21px;border-radius:25px}.subscription-heading{display:block;padding-right:42px}.subscription-heading h2{font-size:25px}.billing-dialog-actions{position:absolute;top:18px;right:18px}.billing-dialog-actions .plan-badge{display:none}.plan-comparison{grid-template-columns:1fr}.plan-card{padding:18px}.plan-card.featured{padding:17px}
+.billing-dialog{width:calc(100vw - 20px);max-height:calc(100dvh - 20px);overflow:auto}.billing-dialog-shell{padding:21px;border-radius:25px}.subscription-heading{display:block;padding-right:42px}.subscription-heading h2{font-size:25px}.billing-dialog-actions{position:absolute;top:18px;right:18px}.billing-dialog-actions .plan-badge{display:none}.billing-contact{grid-template-columns:1fr}.billing-contact-message{grid-column:1}.plan-comparison{grid-template-columns:1fr}.plan-card{padding:18px}.plan-card.featured{padding:17px}
 .setup-steps{gap:2px;padding:6px;border-radius:21px}
 .setup-steps button{font-size:12px;gap:6px;padding:10px 5px;min-height:48px;border-radius:16px}
 .setup-steps button span{width:25px;height:25px;font-size:11px}

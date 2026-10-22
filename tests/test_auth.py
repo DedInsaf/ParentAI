@@ -16,7 +16,8 @@ class AuthStoreTests(unittest.TestCase):
         self.store = AuthStore(self.temp.name + '/users.sqlite3')
 
     def test_registration_and_login_by_name_or_email(self):
-        user = self.store.register('Родитель-1', 'Parent@Example.com', 'strong-pass', 'strong-pass')
+        user = self.store.register('Родитель-1', 'Parent@Example.com', 'strong-pass', 'strong-pass',
+                                   telegram_username='@parent_one')
         self.assertEqual(self.store.authenticate('родитель-1', 'strong-pass'), user)
         self.assertEqual(self.store.authenticate('parent@example.COM', 'strong-pass'), user)
         self.assertIsNone(self.store.authenticate('Родитель-1', 'wrong-pass'))
@@ -24,6 +25,19 @@ class AuthStoreTests(unittest.TestCase):
             row = connection.execute('SELECT password_salt, password_hash FROM users').fetchone()
         self.assertNotEqual(row[0], b'strong-pass')
         self.assertNotEqual(row[1], b'strong-pass')
+        self.assertEqual(user.telegram_username, '@parent_one')
+
+    def test_billing_contact_is_required_and_logged_before_checkout(self):
+        user = self.store.register('buyer-user', 'buyer@example.com', 'strong-pass', 'strong-pass')
+        with self.assertRaisesRegex(ValueError, 'Перед оплатой'):
+            self.store.record_checkout_identity(user.id, 'paid')
+        updated = self.store.update_billing_contact(user.id, 'buyer_name')
+        self.assertEqual(updated.telegram_username, '@buyer_name')
+        self.store.record_checkout_identity(user.id, 'paid')
+        with sqlite3.connect(self.store.path) as connection:
+            events = [row[0] for row in connection.execute(
+                "SELECT event FROM account_events WHERE user_id=? ORDER BY id", (user.id,))]
+        self.assertEqual(events[-2:], ['billing_contact_updated', 'checkout_identity_verified'])
 
     def test_registration_validation_and_unique_fields(self):
         cases = [

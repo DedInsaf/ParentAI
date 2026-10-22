@@ -457,11 +457,13 @@ class Handler(BaseHTTPRequestHandler):
                     return self.send(429, {'error': 'Слишком много попыток регистрации. Повторите позже.'})
                 if value.get('legal_accepted') is not True or value.get('parent_confirmed') is not True:
                     raise ValueError('Регистрацию должен подтвердить совершеннолетний родитель, приняв документы.')
+                if not isinstance(value.get('telegram_username'), str) or not value['telegram_username'].strip():
+                    raise ValueError('Укажите Telegram username родителя для идентификации покупателя.')
                 device_token = self.device_token() or secrets.token_urlsafe(32)
                 user = self.server.auth.register(
                     value.get('login'), value.get('email'), value.get('password'),
                     value.get('password_confirmation'), legal_accepted=True, parent_confirmed=True,
-                    device_token=device_token)
+                    device_token=device_token, telegram_username=value.get('telegram_username'))
                 session = self.server.auth.create_session(user.id)
                 return self.send(201, {'user': user.public()}, headers={'Set-Cookie': [
                     self.session_cookie(session), self.device_cookie(device_token)]})
@@ -502,6 +504,13 @@ class Handler(BaseHTTPRequestHandler):
                 self.server.usage.delete_user_data(user.id)
                 self.server.auth.delete_user(user.id)
                 return self.send(200, {'ok': True}, headers={'Set-Cookie': self.clear_session_cookie()})
+            if path == '/api/account/billing-contact':
+                value = json.loads(payload)
+                if not isinstance(value, dict):
+                    raise ValueError('Некорректные контактные данные.')
+                updated = self.server.auth.update_billing_contact(
+                    user.id, value.get('telegram_username'))
+                return self.send(200, {'user': updated.public()})
             if path == '/api/admin/user':
                 if user.role != 'admin':
                     return self.send(403, {'error': 'Доступно только администратору.'})
@@ -559,6 +568,9 @@ class Handler(BaseHTTPRequestHandler):
                         'Сначала отмените действующую подписку через Platega или обратитесь в поддержку. '
                         'Это защищает от двух одновременных списаний.'
                     )
+                # The buyer must be identified and the check must be logged before
+                # we create or return a Platega payment link.
+                self.server.auth.record_checkout_identity(user.id, plan)
                 with self.server.payment_locks[user.id]:
                     pending = self.server.usage.pending_checkout(user.id)
                     if pending:

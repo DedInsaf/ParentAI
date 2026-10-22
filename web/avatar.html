@@ -37,6 +37,7 @@
       <h2>Создать аккаунт</h2><p class="muted">Регистрацию оформляет совершеннолетний родитель.</p>
       <label for="registerLogin">Логин</label><input id="registerLogin" name="login" type="text" autocomplete="username" minlength="3" maxlength="32" pattern="[A-Za-zА-Яа-яЁё0-9][A-Za-zА-Яа-яЁё0-9._-]{2,31}" title="От 3 до 32 символов: буквы, цифры, точка, дефис и подчёркивание" required>
       <label for="registerEmail">Почта</label><input id="registerEmail" name="email" type="email" autocomplete="email" maxlength="254" required>
+      <label for="registerTelegram">Telegram username</label><input id="registerTelegram" name="telegram_username" type="text" autocomplete="off" minlength="5" maxlength="33" pattern="@?[A-Za-z0-9_]{5,32}" placeholder="@username" title="От 5 до 32 латинских букв, цифр или подчёркиваний" required><small class="field-hint">Нужен для идентификации покупателя и связи по вопросам оплаты</small>
       <label for="registerPassword">Пароль</label><input id="registerPassword" name="password" type="password" autocomplete="new-password" minlength="8" maxlength="128" required><small class="field-hint">Минимум 8 символов</small>
       <label for="registerPasswordConfirmation">Подтвердите пароль</label><input id="registerPasswordConfirmation" name="password_confirmation" type="password" autocomplete="new-password" minlength="8" maxlength="128" required>
       <label class="toggle-row"><input name="parent_confirmed" type="checkbox" required><span>Я совершеннолетний родитель или законный представитель ребёнка</span></label>
@@ -64,6 +65,13 @@
       <div><span class="eyebrow">ТАРИФ И ПОДПИСКА</span><h2 id="subscriptionTitle">Выберите подходящий тариф</h2><p>Лимиты прозрачны, а текущий тариф всегда доступен в шапке приложения.</p></div>
       <div class="billing-dialog-actions"><span id="currentPlanHero" class="plan-badge">Бесплатный</span><button id="closeBillingBtn" type="button" class="dialog-close" aria-label="Закрыть окно тарифов">×</button></div>
     </div>
+    <form id="billingContactForm" class="billing-contact">
+      <div><span class="eyebrow">ДАННЫЕ ПОКУПАТЕЛЯ</span><strong>Оплата доступна только из аккаунта</strong><p>Перед переходом в Platega мы сохраняем почту и Telegram родителя.</p></div>
+      <label>Почта<input id="billingEmail" type="email" readonly aria-readonly="true"></label>
+      <label>Telegram username<input id="billingTelegram" name="telegram_username" type="text" minlength="5" maxlength="33" pattern="@?[A-Za-z0-9_]{5,32}" placeholder="@username" required></label>
+      <button id="saveBillingContactBtn" type="submit" class="secondary">Сохранить</button>
+      <p id="billingContactMessage" class="billing-contact-message" role="status"></p>
+    </form>
     <div class="plan-comparison">
       <article id="freePlanCard" class="plan-card">
         <div class="plan-card-title"><div><span class="plan-name">Бесплатный</span><strong>0 ₽</strong></div><span id="freePlanState" class="plan-state">Текущий тариф</span></div>
@@ -92,7 +100,7 @@
   <div class="admin-shell">
     <header class="admin-heading"><div><span class="eyebrow">АДМИНИСТРИРОВАНИЕ</span><h2 id="adminDialogTitle">Аккаунты бета-теста</h2><p>Только агрегированные данные. Пароли, разговоры, фотографии и голос недоступны.</p></div><button id="closeAdminBtn" type="button" class="dialog-close" aria-label="Закрыть админ-панель">×</button></header>
     <div class="admin-stats" aria-label="Сводка аккаунтов"><div><strong id="adminTotalUsers">0</strong><span>аккаунтов</span></div><div><strong id="adminBlockedUsers">0</strong><span>заблокировано</span></div><div><strong id="adminPaidUsers">0</strong><span>с подпиской</span></div></div>
-    <form id="adminSearchForm" class="admin-search"><label for="adminSearch">Найти по логину или почте</label><div><input id="adminSearch" type="search" maxlength="254" placeholder="Например, test-plus"><button type="submit">Найти</button><button id="adminRefreshBtn" type="button" class="secondary">Обновить</button></div></form>
+    <form id="adminSearchForm" class="admin-search"><label for="adminSearch">Найти по логину, почте или Telegram</label><div><input id="adminSearch" type="search" maxlength="254" placeholder="Например, @parent"><button type="submit">Найти</button><button id="adminRefreshBtn" type="button" class="secondary">Обновить</button></div></form>
     <p class="helper">Изменение тарифа управляет доступом в Адым. После подключения Platega активные списания отменяются отдельно в платёжной системе.</p>
     <p id="adminMessage" class="helper" role="status"></p>
     <div id="adminUsers" class="admin-users" aria-live="polite"></div>

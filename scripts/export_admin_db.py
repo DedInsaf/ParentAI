@@ -36,7 +36,7 @@ def export_database(data_dir: Path, output: Path) -> None:
                        'UTC timestamps; no passwords, tokens, prompts, photos or audio' AS privacy_note;
 
                 CREATE TABLE accounts AS
-                SELECT id,login,email,role,created_at,terms_accepted_at,terms_version,
+                SELECT id,login,email,telegram_username,role,created_at,terms_accepted_at,terms_version,
                        parent_confirmed,is_banned,banned_at,ban_reason,last_login_at,
                        login_count,last_seen_at,last_logout_at
                   FROM auth.users;
@@ -75,7 +75,7 @@ def export_database(data_dir: Path, output: Path) -> None:
                   FROM usage.usage_events GROUP BY day,user_id;
 
                 CREATE VIEW account_overview AS
-                SELECT a.id,a.login,a.email,a.role,a.created_at,a.last_login_at,a.login_count,
+                SELECT a.id,a.login,a.email,a.telegram_username,a.role,a.created_at,a.last_login_at,a.login_count,
                        a.last_seen_at,a.is_banned,COALESCE(s.plan,'free') AS plan,
                        COALESCE(s.status,'active') AS subscription_status,
                        COUNT(DISTINCT l.id) AS lessons_total,

@@ -17,8 +17,9 @@ import unicodedata
 PASSWORD_ITERATIONS = 600_000
 # Remember a device, but do not leave a stolen session valid for years.
 SESSION_LIFETIME = 30 * 24 * 60 * 60
-TERMS_VERSION = "2026-10-15"
+TERMS_VERSION = "2026-10-22"
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+TELEGRAM_RE = re.compile(r"^[A-Za-z0-9_]{5,32}$")
 
 
 @dataclass(frozen=True)
@@ -27,10 +28,12 @@ class User:
     login: str
     email: str
     role: str = "parent"
+    telegram_username: str = ""
 
     def public(self):
         return {"id": self.id, "login": self.login, "email": self.email,
-                "role": self.role, "is_admin": self.role == "admin"}
+                "role": self.role, "telegram_username": self.telegram_username,
+                "is_admin": self.role == "admin"}
 
 
 def _normalized(value: str) -> str:
@@ -63,6 +66,17 @@ def _validate_password(value):
         raise ValueError("Пароль должен содержать не менее 8 символов.")
     if len(value) > 128:
         raise ValueError("Пароль слишком длинный.")
+
+
+def _validate_telegram(value) -> str:
+    if not isinstance(value, str):
+        raise ValueError("Введите Telegram username.")
+    username = unicodedata.normalize("NFKC", value).strip()
+    if username.startswith("@"):
+        username = username[1:]
+    if not TELEGRAM_RE.fullmatch(username):
+        raise ValueError("Введите Telegram username: от 5 до 32 латинских букв, цифр или _.")
+    return "@" + username
 
 
 class AuthStore:
@@ -159,16 +173,22 @@ class AuthStore:
                 connection.execute("ALTER TABLE users ADD COLUMN last_seen_at INTEGER")
             if "last_logout_at" not in columns:
                 connection.execute("ALTER TABLE users ADD COLUMN last_logout_at INTEGER")
+            if "telegram_username" not in columns:
+                connection.execute("ALTER TABLE users ADD COLUMN telegram_username TEXT NOT NULL DEFAULT ''")
+            if "billing_contact_updated_at" not in columns:
+                connection.execute("ALTER TABLE users ADD COLUMN billing_contact_updated_at INTEGER")
             session_columns = {row[1] for row in connection.execute("PRAGMA table_info(sessions)")}
             if "last_seen_at" not in session_columns:
                 connection.execute("ALTER TABLE sessions ADD COLUMN last_seen_at INTEGER")
 
     def register(self, login, email, password, password_confirmation, role="parent",
-                 legal_accepted=True, parent_confirmed=True, device_token=None) -> User:
+                 legal_accepted=True, parent_confirmed=True, device_token=None,
+                 telegram_username=None) -> User:
         if role not in ("parent", "admin"):
             raise ValueError("Неизвестная роль пользователя.")
         display_login, normalized_login = _validate_login(login)
         display_email, normalized_email = _validate_email(email)
+        telegram = _validate_telegram(telegram_username) if telegram_username is not None else ""
         _validate_password(password)
         if password != password_confirmation:
             raise ValueError("Пароли не совпадают.")
@@ -193,11 +213,12 @@ class AuthStore:
                     """INSERT INTO users
                        (login, login_normalized, email, email_normalized, password_salt,
                         password_hash, password_iterations, created_at, role,
-                        terms_accepted_at, terms_version, parent_confirmed)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        terms_accepted_at, terms_version, parent_confirmed, telegram_username,
+                        billing_contact_updated_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (display_login, normalized_login, display_email, normalized_email, salt,
                      digest, PASSWORD_ITERATIONS, int(time.time()), role, int(time.time()),
-                     TERMS_VERSION, 1),
+                     TERMS_VERSION, 1, telegram, int(time.time()) if telegram else None),
                 )
                 user_id = cursor.lastrowid
                 connection.execute(
@@ -209,7 +230,7 @@ class AuthStore:
                         "INSERT INTO device_registrations(device_hash,user_id,registered_at) VALUES (?,?,?)",
                         (device_hash, user_id, int(time.time())),
                     )
-                return User(user_id, display_login, display_email, role)
+                return User(user_id, display_login, display_email, role, telegram)
         except sqlite3.IntegrityError:
             with self._connect() as connection:
                 device_taken = device_hash is not None and connection.execute(
@@ -260,7 +281,8 @@ class AuthStore:
             return None, "invalid"
         if row["is_banned"]:
             return None, "banned"
-        return User(row["id"], row["login"], row["email"], row["role"]), "ok"
+        return User(row["id"], row["login"], row["email"], row["role"],
+                    row["telegram_username"]), "ok"
 
     def create_session(self, user_id: int) -> str:
         token = secrets.token_urlsafe(32)
@@ -293,7 +315,7 @@ class AuthStore:
         token_hash = sha256(token.encode()).digest()
         with self._connect() as connection:
             row = connection.execute(
-                """SELECT users.id, users.login, users.email, users.role
+                """SELECT users.id, users.login, users.email, users.role, users.telegram_username
                    FROM sessions JOIN users ON users.id = sessions.user_id
                    WHERE sessions.token_hash = ? AND sessions.expires_at > ?
                      AND users.is_banned = 0""",
@@ -309,7 +331,46 @@ class AuthStore:
                     "UPDATE users SET last_seen_at=? WHERE id=? AND COALESCE(last_seen_at,0)<?",
                     (now, row["id"], now - 300),
                 )
-        return User(row["id"], row["login"], row["email"], row["role"]) if row else None
+        return User(row["id"], row["login"], row["email"], row["role"],
+                    row["telegram_username"]) if row else None
+
+    def update_billing_contact(self, user_id, telegram_username) -> User:
+        """Store the buyer contact required before starting a payment."""
+        telegram = _validate_telegram(telegram_username)
+        now = int(time.time())
+        with self._connect() as connection:
+            cursor = connection.execute(
+                "UPDATE users SET telegram_username=?,billing_contact_updated_at=? WHERE id=?",
+                (telegram, now, int(user_id)),
+            )
+            if cursor.rowcount != 1:
+                raise ValueError("Пользователь не найден.")
+            row = connection.execute(
+                "SELECT id,login,email,role,telegram_username FROM users WHERE id=?",
+                (int(user_id),),
+            ).fetchone()
+            connection.execute(
+                """INSERT INTO account_events(user_id,event,created_at,details)
+                   VALUES (?, 'billing_contact_updated', ?, '{}')""",
+                (int(user_id), now),
+            )
+        return User(row["id"], row["login"], row["email"], row["role"],
+                    row["telegram_username"])
+
+    def record_checkout_identity(self, user_id, plan) -> None:
+        """Verify and audit buyer identity before a payment is created."""
+        now = int(time.time())
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT email,telegram_username FROM users WHERE id=?", (int(user_id),)
+            ).fetchone()
+            if not row or not row["email"] or not row["telegram_username"]:
+                raise ValueError("Перед оплатой укажите почту и Telegram username в аккаунте.")
+            connection.execute(
+                """INSERT INTO account_events(user_id,event,created_at,details)
+                   VALUES (?, 'checkout_identity_verified', ?, ?)""",
+                (int(user_id), now, json.dumps({"plan": str(plan)}, ensure_ascii=False)),
+            )
 
     def set_role(self, identifier, role):
         if role not in ("parent", "admin"):
@@ -346,16 +407,16 @@ class AuthStore:
             limit, offset = 50, 0
         where, params = "", []
         if search:
-            where = "WHERE users.login_normalized LIKE ? OR users.email_normalized LIKE ?"
+            where = "WHERE users.login_normalized LIKE ? OR users.email_normalized LIKE ? OR users.telegram_username LIKE ?"
             pattern = f"%{search}%"
-            params.extend((pattern, pattern))
+            params.extend((pattern, pattern, pattern))
         now = int(time.time())
         with self._connect() as connection:
             total = connection.execute(
                 f"SELECT COUNT(*) FROM users {where}", params
             ).fetchone()[0]
             rows = connection.execute(
-                f"""SELECT users.id,users.login,users.email,users.role,users.created_at,
+                f"""SELECT users.id,users.login,users.email,users.telegram_username,users.role,users.created_at,
                             users.last_login_at,users.login_count,users.last_seen_at,users.last_logout_at,
                             users.is_banned,users.banned_at,users.ban_reason,
                             COUNT(sessions.token_hash) AS active_sessions
@@ -370,6 +431,7 @@ class AuthStore:
             "total": total,
             "users": [{
                 "id": row["id"], "login": row["login"], "email": row["email"],
+                "telegram_username": row["telegram_username"],
                 "role": row["role"], "created_at": row["created_at"],
                 "last_login_at": row["last_login_at"], "login_count": row["login_count"],
                 "last_seen_at": row["last_seen_at"], "last_logout_at": row["last_logout_at"],
@@ -381,7 +443,7 @@ class AuthStore:
     def user_for_admin(self, user_id):
         with self._connect() as connection:
             row = connection.execute(
-                "SELECT id,login,email,role,is_banned FROM users WHERE id=?", (int(user_id),)
+                "SELECT id,login,email,telegram_username,role,is_banned FROM users WHERE id=?", (int(user_id),)
             ).fetchone()
         return dict(row) if row else None
 

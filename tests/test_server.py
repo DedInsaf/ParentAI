@@ -23,7 +23,8 @@ class ServerTests(unittest.TestCase):
         self.r = Runtime(self.temp.name)
         self.s = AppServer(self.r)
         self.s.tutor = Tutor()
-        user = self.s.auth.register('test-user', 'test@example.com', 'password-123', 'password-123')
+        user = self.s.auth.register('test-user', 'test@example.com', 'password-123', 'password-123',
+                                    telegram_username='@test_parent')
         self.session = self.s.auth.create_session(user.id)
         self.thread = threading.Thread(target=self.s.serve_forever, daemon=True)
         self.thread.start()
@@ -136,6 +137,7 @@ class ServerTests(unittest.TestCase):
         headers={'Origin':self.s.origin,'X-App-Token':self.s.token,'Content-Type':'application/json'}
         payload=json.dumps({'login':'new-user','email':'new@example.com','password':'password-123',
                             'password_confirmation':'password-123','role':'admin',
+                            'telegram_username':'@new_parent',
                             'legal_accepted':True,'parent_confirmed':True}).encode()
         code,body=self.request('/api/auth/register',payload,headers,authenticated=False)
         self.assertEqual(code,201)
@@ -236,6 +238,15 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(code,400)
         self.assertIn('родитель',json.loads(body)['error'])
 
+    def test_registration_requires_telegram_buyer_identity(self):
+        headers={'Origin':self.s.origin,'X-App-Token':self.s.token,'Content-Type':'application/json'}
+        payload=json.dumps({'login':'buyer-user','email':'buyer@example.com','password':'password-123',
+                            'password_confirmation':'password-123','legal_accepted':True,
+                            'parent_confirmed':True}).encode()
+        code,body=self.request('/api/auth/register',payload,headers,authenticated=False)
+        self.assertEqual(code,400)
+        self.assertIn('Telegram',json.loads(body)['error'])
+
     def test_account_deletion_requires_password_and_removes_private_data(self):
         headers={'Origin':self.s.origin,'X-App-Token':self.s.token,'Content-Type':'application/json'}
         self.assertEqual(self.request('/api/avatar-model',glb(),headers)[0],200)
@@ -254,14 +265,16 @@ class ServerTests(unittest.TestCase):
     def test_public_registration_does_not_require_invite_code(self):
         headers={'Origin':self.s.origin,'X-App-Token':self.s.token,'Content-Type':'application/json'}
         value={'login':'invited-user','email':'invited@example.com','password':'password-123',
-               'password_confirmation':'password-123','legal_accepted':True,'parent_confirmed':True}
+               'password_confirmation':'password-123','telegram_username':'@invited_parent',
+               'legal_accepted':True,'parent_confirmed':True}
         self.assertEqual(self.request('/api/auth/register',json.dumps(value).encode(),headers,
                                       authenticated=False)[0],201)
 
     def test_one_public_registration_is_allowed_per_browser_device(self):
         headers={'Origin':self.s.origin,'X-App-Token':self.s.token,'Content-Type':'application/json'}
         first={'login':'device-one','email':'device-one@example.com','password':'password-123',
-               'password_confirmation':'password-123','legal_accepted':True,'parent_confirmed':True}
+               'password_confirmation':'password-123','telegram_username':'@device_parent',
+               'legal_accepted':True,'parent_confirmed':True}
         code,_,response_headers=self.request('/api/auth/register',json.dumps(first).encode(),headers,
                                              authenticated=False,include_headers=True)
         self.assertEqual(code,201)
