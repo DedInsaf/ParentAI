@@ -17,7 +17,9 @@ import unicodedata
 PASSWORD_ITERATIONS = 600_000
 # Remember a device, but do not leave a stolen session valid for years.
 SESSION_LIFETIME = 30 * 24 * 60 * 60
-TERMS_VERSION = "2026-10-22"
+TERMS_VERSION = "2026-10-23"
+PRIVACY_CONSENT_VERSION = "2026-10-23"
+AVATAR_CONSENT_VERSION = "2026-10-23"
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 TELEGRAM_RE = re.compile(r"^[A-Za-z0-9_]{5,32}$")
 
@@ -29,11 +31,17 @@ class User:
     email: str
     role: str = "parent"
     telegram_username: str = ""
+    terms_version: str = ""
+    privacy_consent_version: str = ""
+    avatar_consent_version: str = ""
 
     def public(self):
         return {"id": self.id, "login": self.login, "email": self.email,
                 "role": self.role, "telegram_username": self.telegram_username,
-                "is_admin": self.role == "admin"}
+                "is_admin": self.role == "admin",
+                "legal_current": (self.terms_version == TERMS_VERSION and
+                                  self.privacy_consent_version == PRIVACY_CONSENT_VERSION),
+                "avatar_consent_current": self.avatar_consent_version == AVATAR_CONSENT_VERSION}
 
 
 def _normalized(value: str) -> str:
@@ -177,12 +185,20 @@ class AuthStore:
                 connection.execute("ALTER TABLE users ADD COLUMN telegram_username TEXT NOT NULL DEFAULT ''")
             if "billing_contact_updated_at" not in columns:
                 connection.execute("ALTER TABLE users ADD COLUMN billing_contact_updated_at INTEGER")
+            if "privacy_consent_at" not in columns:
+                connection.execute("ALTER TABLE users ADD COLUMN privacy_consent_at INTEGER")
+            if "privacy_consent_version" not in columns:
+                connection.execute("ALTER TABLE users ADD COLUMN privacy_consent_version TEXT")
+            if "avatar_consent_at" not in columns:
+                connection.execute("ALTER TABLE users ADD COLUMN avatar_consent_at INTEGER")
+            if "avatar_consent_version" not in columns:
+                connection.execute("ALTER TABLE users ADD COLUMN avatar_consent_version TEXT")
             session_columns = {row[1] for row in connection.execute("PRAGMA table_info(sessions)")}
             if "last_seen_at" not in session_columns:
                 connection.execute("ALTER TABLE sessions ADD COLUMN last_seen_at INTEGER")
 
     def register(self, login, email, password, password_confirmation, role="parent",
-                 legal_accepted=True, parent_confirmed=True, device_token=None,
+                 legal_accepted=True, privacy_accepted=True, parent_confirmed=True, device_token=None,
                  telegram_username=None) -> User:
         if role not in ("parent", "admin"):
             raise ValueError("Неизвестная роль пользователя.")
@@ -192,8 +208,8 @@ class AuthStore:
         _validate_password(password)
         if password != password_confirmation:
             raise ValueError("Пароли не совпадают.")
-        if not legal_accepted or not parent_confirmed:
-            raise ValueError("Подтвердите совершеннолетие и принятие документов.")
+        if not legal_accepted or not privacy_accepted or not parent_confirmed:
+            raise ValueError("Подтвердите совершеннолетие, соглашение и согласие на обработку данных.")
         salt = os.urandom(16)
         digest = pbkdf2_hmac("sha256", password.encode("utf-8"), salt, PASSWORD_ITERATIONS)
         device_hash = None
@@ -214,11 +230,12 @@ class AuthStore:
                        (login, login_normalized, email, email_normalized, password_salt,
                         password_hash, password_iterations, created_at, role,
                         terms_accepted_at, terms_version, parent_confirmed, telegram_username,
-                        billing_contact_updated_at)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        billing_contact_updated_at,privacy_consent_at,privacy_consent_version)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (display_login, normalized_login, display_email, normalized_email, salt,
                      digest, PASSWORD_ITERATIONS, int(time.time()), role, int(time.time()),
-                     TERMS_VERSION, 1, telegram, int(time.time()) if telegram else None),
+                     TERMS_VERSION, 1, telegram, int(time.time()) if telegram else None,
+                     int(time.time()), PRIVACY_CONSENT_VERSION),
                 )
                 user_id = cursor.lastrowid
                 connection.execute(
@@ -230,7 +247,8 @@ class AuthStore:
                         "INSERT INTO device_registrations(device_hash,user_id,registered_at) VALUES (?,?,?)",
                         (device_hash, user_id, int(time.time())),
                     )
-                return User(user_id, display_login, display_email, role, telegram)
+                return User(user_id, display_login, display_email, role, telegram,
+                            TERMS_VERSION, PRIVACY_CONSENT_VERSION, "")
         except sqlite3.IntegrityError:
             with self._connect() as connection:
                 device_taken = device_hash is not None and connection.execute(
@@ -282,7 +300,9 @@ class AuthStore:
         if row["is_banned"]:
             return None, "banned"
         return User(row["id"], row["login"], row["email"], row["role"],
-                    row["telegram_username"]), "ok"
+                    row["telegram_username"], row["terms_version"] or "",
+                    row["privacy_consent_version"] or "",
+                    row["avatar_consent_version"] or ""), "ok"
 
     def create_session(self, user_id: int) -> str:
         token = secrets.token_urlsafe(32)
@@ -315,7 +335,8 @@ class AuthStore:
         token_hash = sha256(token.encode()).digest()
         with self._connect() as connection:
             row = connection.execute(
-                """SELECT users.id, users.login, users.email, users.role, users.telegram_username
+                """SELECT users.id, users.login, users.email, users.role, users.telegram_username,
+                          users.terms_version,users.privacy_consent_version,users.avatar_consent_version
                    FROM sessions JOIN users ON users.id = sessions.user_id
                    WHERE sessions.token_hash = ? AND sessions.expires_at > ?
                      AND users.is_banned = 0""",
@@ -332,7 +353,9 @@ class AuthStore:
                     (now, row["id"], now - 300),
                 )
         return User(row["id"], row["login"], row["email"], row["role"],
-                    row["telegram_username"]) if row else None
+                    row["telegram_username"], row["terms_version"] or "",
+                    row["privacy_consent_version"] or "",
+                    row["avatar_consent_version"] or "") if row else None
 
     def update_billing_contact(self, user_id, telegram_username) -> User:
         """Store the buyer contact required before starting a payment."""
@@ -346,7 +369,8 @@ class AuthStore:
             if cursor.rowcount != 1:
                 raise ValueError("Пользователь не найден.")
             row = connection.execute(
-                "SELECT id,login,email,role,telegram_username FROM users WHERE id=?",
+                """SELECT id,login,email,role,telegram_username,terms_version,
+                          privacy_consent_version,avatar_consent_version FROM users WHERE id=?""",
                 (int(user_id),),
             ).fetchone()
             connection.execute(
@@ -355,7 +379,42 @@ class AuthStore:
                 (int(user_id), now),
             )
         return User(row["id"], row["login"], row["email"], row["role"],
-                    row["telegram_username"])
+                    row["telegram_username"], row["terms_version"] or "",
+                    row["privacy_consent_version"] or "",
+                    row["avatar_consent_version"] or "")
+
+    def record_consent(self, user_id, kind, accepted) -> User:
+        """Record separate, versioned consent without bundling it into another document."""
+        if accepted is not True:
+            raise ValueError("Согласие не подтверждено.")
+        now = int(time.time())
+        with self._connect() as connection:
+            if kind == "legal":
+                connection.execute(
+                    """UPDATE users SET terms_accepted_at=?,terms_version=?,parent_confirmed=1,
+                              privacy_consent_at=?,privacy_consent_version=? WHERE id=?""",
+                    (now, TERMS_VERSION, now, PRIVACY_CONSENT_VERSION, int(user_id)),
+                )
+                event = "legal_consent_updated"
+            elif kind == "avatar":
+                connection.execute(
+                    "UPDATE users SET avatar_consent_at=?,avatar_consent_version=? WHERE id=?",
+                    (now, AVATAR_CONSENT_VERSION, int(user_id)),
+                )
+                event = "avatar_consent_recorded"
+            else:
+                raise ValueError("Неизвестный вид согласия.")
+            connection.execute(
+                "INSERT INTO account_events(user_id,event,created_at,details) VALUES (?,?,?,'{}')",
+                (int(user_id), event, now),
+            )
+            row = connection.execute("SELECT * FROM users WHERE id=?", (int(user_id),)).fetchone()
+        if not row:
+            raise ValueError("Пользователь не найден.")
+        return User(row["id"], row["login"], row["email"], row["role"],
+                    row["telegram_username"], row["terms_version"] or "",
+                    row["privacy_consent_version"] or "",
+                    row["avatar_consent_version"] or "")
 
     def record_checkout_identity(self, user_id, plan) -> None:
         """Verify and audit buyer identity before a payment is created."""

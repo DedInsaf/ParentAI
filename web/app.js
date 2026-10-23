@@ -355,7 +355,11 @@ function detectVideo(now) {
 }
 
 async function scan() {
-  if(!$('avatarConsent').checked){$('avatarConsent').focus();throw new Error('Разрешите Адым создать и сохранить аватар из снимков.');}
+  if(!currentUser?.avatar_consent_current&&!$('avatarConsent').checked){$('avatarConsent').focus();throw new Error('Разрешите Адым создать и сохранить аватар из снимков.');}
+  if(!currentUser?.avatar_consent_current){
+    const consent=await api('account/consent',JSON.stringify({kind:'avatar',accepted:true}),true,15000);
+    currentUser=consent.user;
+  }
   stopAudio();scanning=true;const epoch=++scanEpoch,abort=new AbortController();scannerAbort=abort;restoringAbort?.abort();
   $('scannerDialog').showModal();$('scannerCamera').appendChild(video.closest('.camera-frame'));controls();
   try {
@@ -543,6 +547,11 @@ function beginAudio(buffer,text,kind,cues=[]) {
 }
 
 async function record() {
+  if(!currentUser?.avatar_consent_current&&!$('voiceDataConsent').checked){$('voiceDataConsent').focus();throw new Error('Отдельно разрешите Адым создать и сохранить образцы вашего голоса.');}
+  if(!currentUser?.avatar_consent_current){
+    const consent=await api('account/consent',JSON.stringify({kind:'avatar',accepted:true}),true,15000);
+    currentUser=consent.user;
+  }
   recording = true; recordCancelled = false; recordingAbort = new AbortController(); controls(); clearError(); stopAudio(); $('reference').pause();
   let mic, node, source, recordContext;
   try {
@@ -1218,8 +1227,13 @@ function showApplication(user) {
   $('setupPage').hidden = false;
   document.body.classList.remove('auth-pending');
   startApplication();
+  if (!user.legal_current) {
+    requestAnimationFrame(() => {
+      if (!$('legalConsentDialog').open) $('legalConsentDialog').showModal();
+    });
+  }
   if (requestedPlan === 'paid' || requestedPlan === 'ultra') {
-    requestAnimationFrame(() => $('billingDialog').showModal());
+    requestAnimationFrame(() => { if (user.legal_current) $('billingDialog').showModal(); });
   }
 }
 
@@ -1244,7 +1258,8 @@ for (const [formId, path] of [['loginForm', 'login'], ['registerForm', 'register
     const values = Object.fromEntries(new FormData(form));
     if (formId === 'registerForm') {
       values.parent_confirmed = form.elements.parent_confirmed.checked;
-      values.legal_accepted = form.elements.legal_accepted.checked;
+      values.terms_accepted = form.elements.terms_accepted.checked;
+      values.privacy_accepted = form.elements.privacy_accepted.checked;
     }
     authBusy(form, true);
     try {
@@ -1256,6 +1271,18 @@ for (const [formId, path] of [['loginForm', 'login'], ['registerForm', 'register
     } finally { authBusy(form, false); }
   });
 }
+$('legalConsentDialog').addEventListener('cancel', event => event.preventDefault());
+$('legalConsentForm').addEventListener('submit', async event => {
+  event.preventDefault();
+  const form=event.currentTarget,button=form.querySelector('button[type="submit"]');
+  $('legalConsentError').hidden=true;button.disabled=true;button.textContent='Сохраняем…';
+  try{
+    const data=await api('account/consent',JSON.stringify({kind:'legal',accepted:true}),true,15000);
+    currentUser=data.user;$('legalConsentDialog').close();
+    if(requestedPlan==='paid'||requestedPlan==='ultra')$('billingDialog').showModal();
+  }catch(error){$('legalConsentError').textContent=error.message||String(error);$('legalConsentError').hidden=false;}
+  finally{button.disabled=false;button.textContent='Подтвердить и продолжить';}
+});
 $('billingContactForm').addEventListener('submit', async event => {
   event.preventDefault();
   const button = $('saveBillingContactBtn');

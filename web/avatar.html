@@ -41,13 +41,26 @@
       <label for="registerPassword">Пароль</label><input id="registerPassword" name="password" type="password" autocomplete="new-password" minlength="8" maxlength="128" required><small class="field-hint">Минимум 8 символов</small>
       <label for="registerPasswordConfirmation">Подтвердите пароль</label><input id="registerPasswordConfirmation" name="password_confirmation" type="password" autocomplete="new-password" minlength="8" maxlength="128" required>
       <label class="toggle-row"><input name="parent_confirmed" type="checkbox" required><span>Я совершеннолетний родитель или законный представитель ребёнка</span></label>
-      <label class="toggle-row"><input name="legal_accepted" type="checkbox" required><span>Принимаю <a href="https://adym.ru/terms.html" target="_blank" rel="noopener">пользовательское соглашение</a> и <a href="https://adym.ru/privacy.html" target="_blank" rel="noopener">политику конфиденциальности</a></span></label>
+      <label class="toggle-row"><input name="terms_accepted" type="checkbox" required><span>Принимаю <a href="https://adym.ru/terms.html" target="_blank" rel="noopener">пользовательское соглашение и условия тарифа</a></span></label>
+      <label class="toggle-row"><input name="privacy_accepted" type="checkbox" required><span>Отдельно даю <a href="https://adym.ru/consent.html" target="_blank" rel="noopener">согласие на обработку персональных данных</a></span></label>
       <button class="full auth-submit" type="submit">Создать аккаунт</button>
     </form>
     <p id="authError" class="auth-error" role="alert" hidden></p>
-    <nav class="auth-links" aria-label="Документы и поддержка"><a href="https://adym.ru/privacy.html" target="_blank" rel="noopener">Конфиденциальность</a><a href="https://adym.ru/terms.html" target="_blank" rel="noopener">Соглашение</a><a href="https://adym.ru/support.html" target="_blank" rel="noopener">Поддержка</a></nav>
+    <nav class="auth-links" aria-label="Документы и поддержка"><a href="https://adym.ru/privacy.html" target="_blank" rel="noopener">Конфиденциальность</a><a href="https://adym.ru/consent.html" target="_blank" rel="noopener">Согласие на данные</a><a href="https://adym.ru/terms.html" target="_blank" rel="noopener">Соглашение</a><a href="https://adym.ru/support.html" target="_blank" rel="noopener">Поддержка</a></nav>
   </section>
 </main>
+<dialog id="legalConsentDialog" class="legal-consent-dialog" aria-labelledby="legalConsentTitle">
+  <form id="legalConsentForm" method="dialog">
+    <span class="eyebrow">ОБНОВЛЕНИЕ ДОКУМЕНТОВ</span>
+    <h2 id="legalConsentTitle">Подтвердите условия отдельно</h2>
+    <p>Мы уточнили, как Адым обрабатывает данные родителя и учебные запросы. Продолжить может совершеннолетний родитель или законный представитель.</p>
+    <label class="toggle-row"><input name="parent_confirmed" type="checkbox" required><span>Я совершеннолетний родитель или законный представитель ребёнка</span></label>
+    <label class="toggle-row"><input name="terms_accepted" type="checkbox" required><span>Принимаю <a href="https://adym.ru/terms.html" target="_blank" rel="noopener">пользовательское соглашение</a></span></label>
+    <label class="toggle-row"><input name="privacy_accepted" type="checkbox" required><span>Отдельно даю <a href="https://adym.ru/consent.html" target="_blank" rel="noopener">согласие на обработку персональных данных</a></span></label>
+    <p id="legalConsentError" class="auth-error" role="alert" hidden></p>
+    <button class="full" type="submit">Подтвердить и продолжить</button>
+  </form>
+</dialog>
 <header class="app-header" hidden>
   <a class="brand" href="#" aria-label="Адым — начало"><img class="brand-logo" src="/adym-logo.png" width="54" height="54" alt="Логотип Адым"></a>
   <div class="header-context"><p id="connection" class="connection-status" role="status">Подключаемся…</p></div>
@@ -56,7 +69,7 @@
     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7.5A2.5 2.5 0 0 1 6.5 5h11A2.5 2.5 0 0 1 20 7.5v9a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 16.5v-9Z"/><path d="M4 9h16M16 14h1"/></svg>
     <span><small>Тариф</small><strong id="headerPlanName">Бесплатный</strong></span>
   </button>
-  <details class="account"><summary><span id="accountLogin"></span><span aria-hidden="true">⌄</span></summary><div class="account-menu"><button id="adminPanelBtn" type="button" class="admin-menu-button" hidden>Управление аккаунтами</button><a href="https://adym.ru/support.html" target="_blank" rel="noopener">Поддержка</a><a href="https://adym.ru/privacy.html" target="_blank" rel="noopener">Конфиденциальность</a><a href="https://adym.ru/terms.html" target="_blank" rel="noopener">Соглашение</a><button id="logoutBtn" type="button" class="quiet">Выйти</button><button id="deleteAccountBtn" type="button" class="danger-quiet">Удалить аккаунт</button></div></details>
+  <details class="account"><summary><span id="accountLogin"></span><span aria-hidden="true">⌄</span></summary><div class="account-menu"><button id="adminPanelBtn" type="button" class="admin-menu-button" hidden>Управление аккаунтами</button><a href="https://adym.ru/support.html" target="_blank" rel="noopener">Поддержка</a><a href="https://adym.ru/privacy.html" target="_blank" rel="noopener">Конфиденциальность</a><a href="https://adym.ru/consent.html" target="_blank" rel="noopener">Согласие на данные</a><a href="https://adym.ru/terms.html" target="_blank" rel="noopener">Соглашение</a><a href="mailto:support@adym.ru?subject=Отмена%20подписки">Отменить подписку</a><button id="logoutBtn" type="button" class="quiet">Выйти</button><button id="deleteAccountBtn" type="button" class="danger-quiet">Удалить аккаунт</button></div></details>
   <div id="lessonToolbar" class="lesson-toolbar" hidden><button id="pauseBtn" class="secondary" disabled>Сделать перерыв</button><button id="stopBtn" class="quiet" disabled>Закончить</button></div>
 </header>
 <dialog id="billingDialog" class="billing-dialog" aria-labelledby="subscriptionTitle">
@@ -139,7 +152,7 @@
     <div class="scan-steps"><div><span>1</span>Снимки лица</div><div><span>2</span>Создание модели</div><div><span>3</span>Проверка образа</div></div>
     <p class="tip">Снимки делаются автоматически. Подсказки звучат вслух: смотрите в объектив, слушайте и спокойно поворачивайте голову.</p>
     <label class="toggle-row"><input id="scanAudio" type="checkbox" checked><span>Подсказывать голосом<small>Подсказывать каждый поворот и момент снимка</small></span></label>
-    <label class="toggle-row avatar-consent"><input id="avatarConsent" type="checkbox"><span>Разрешаю создать и сохранить аватар<small>Видеопоток не записывается. Отобранные снимки и модель сохраняются в защищённом профиле семьи и удаляются вместе с аккаунтом.</small></span></label>
+    <label class="toggle-row avatar-consent"><input id="avatarConsent" type="checkbox"><span>Отдельно разрешаю создать и сохранить аватар и образцы голоса<small>Видеопоток не записывается. Отобранные снимки, модель и голос хранятся в защищённом профиле семьи; подробности — в <a href="https://adym.ru/consent.html#avatar" target="_blank" rel="noopener">согласии</a>.</small></span></label>
     <p id="cameraHint" class="helper" role="status">Готовый аватар автоматически сохранится в Адым.</p>
     <div id="scannerUnavailable" class="tip" role="status" hidden></div>
     <button id="scanBtn" class="next-step" disabled>Создать мой аватар</button>
@@ -151,6 +164,7 @@
     <span class="eyebrow">ЗНАКОМЫЙ ГОЛОС</span><h2>Давайте запишем ваш голос</h2><p>В тихой комнате, обычным спокойным голосом. После записи можно всё прослушать и повторить.</p>
     <label for="voiceMode">Как использовать запись?</label><select id="voiceMode"><option value="clone" selected>Создавать новые ответы моим голосом</option><option value="direct">Только воспроизводить мою точную запись</option></select>
     <p id="voiceModeHint" class="tip">Три записи с разной интонацией помогают Адым точнее сохранить тембр и манеру речи родителя.</p>
+    <label class="toggle-row avatar-consent"><input id="voiceDataConsent" type="checkbox"><span>Отдельно разрешаю создать и сохранить образцы моего голоса<small>Записи нужны только для голоса аватара и удаляются вместе с аккаунтом; подробности — в <a href="https://adym.ru/consent.html#avatar" target="_blank" rel="noopener">согласии</a>.</small></span></label>
     <div id="qwenWarning" class="qwen-warning" role="note" hidden><strong>Экспериментальный голос</strong><span>На текущем тестовом сервере новый ответ может готовиться 2–5 минут. В это время сайт может работать медленнее, а озвучка иногда не завершится. Текст подсказки появится раньше и останется доступен.</span></div>
     <div id="voiceTakes" class="voice-takes" aria-label="Образцы голоса">
       <button type="button" data-voice-take="1" aria-pressed="true"><span>1</span><strong>Спокойно объясняю</strong><small>Записать</small></button>

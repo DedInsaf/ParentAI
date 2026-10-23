@@ -18,7 +18,7 @@ test('public landing uses the channel logo without duplicating its wordmark', ()
 });
 
 test('every public page uses the new logo and current brand styles', () => {
-  for (const name of ['index.html', 'download.html', 'privacy.html', 'terms.html', 'support.html', 'checkout.html', 'checkout-ultra.html', '404.html']) {
+  for (const name of ['index.html', 'download.html', 'privacy.html', 'consent.html', 'terms.html', 'support.html', 'checkout.html', 'checkout-ultra.html', '404.html']) {
     const html = read(name);
     assert.match(html, /assets\/adym-logo\.png/);
     assert.doesNotMatch(html, /assets\/logo\.svg|assets\/favicon\.svg/);
@@ -68,12 +68,14 @@ test('purchase path requires an identified account before Platega', () => {
 });
 
 test('public site includes privacy, terms and deployment essentials', () => {
-  for (const name of ['privacy.html', 'terms.html', 'support.html', 'download.html', 'checkout.html', 'checkout-ultra.html', '404.html', 'robots.txt', 'sitemap.xml', '.htaccess']) {
+  for (const name of ['privacy.html', 'consent.html', 'terms.html', 'support.html', 'download.html', 'checkout.html', 'checkout-ultra.html', '404.html', 'robots.txt', 'sitemap.xml', '.htaccess']) {
     assert.ok(fs.existsSync(path.join(root, name)), `${name} is missing`);
   }
   assert.match(read('privacy.html'), /support@adym\.ru/i);
   assert.match(read('privacy.html'), /Platega/i);
   assert.match(read('privacy.html'), /Telegram username/i);
+  assert.match(read('consent.html'), /Нуртдинов Инсаф Наилевич/);
+  assert.match(read('consent.html'), /отдельное согласие на аватар и голос/i);
   assert.match(read('terms.html'), /Пользовательское соглашение/i);
   assert.match(read('terms.html'), /490 ₽ за 30 календарных дней/i);
   assert.match(read('terms.html'), /990 ₽ за 30 календарных дней/i);
@@ -82,6 +84,7 @@ test('public site includes privacy, terms and deployment essentials', () => {
   assert.match(read('privacy.html'), /app\.adym\.ru/i);
   assert.match(read('terms.html'), /app\.adym\.ru/i);
   assert.match(read('sitemap.xml'), /download\.html/);
+  assert.match(read('sitemap.xml'), /consent\.html/);
   assert.match(read('.htaccess'), /RewriteCond %\{HTTPS\} !=on/);
   assert.match(read('.htaccess'), /X-Forwarded-Proto.*!https/);
 });

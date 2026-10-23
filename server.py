@@ -455,14 +455,19 @@ class Handler(BaseHTTPRequestHandler):
                     raise ValueError('Некорректные данные регистрации.')
                 if not self.server.allow_auth_attempt(self.client_key(), 'register'):
                     return self.send(429, {'error': 'Слишком много попыток регистрации. Повторите позже.'})
-                if value.get('legal_accepted') is not True or value.get('parent_confirmed') is not True:
-                    raise ValueError('Регистрацию должен подтвердить совершеннолетний родитель, приняв документы.')
+                if (value.get('terms_accepted') is not True
+                        or value.get('privacy_accepted') is not True
+                        or value.get('parent_confirmed') is not True):
+                    raise ValueError(
+                        'Регистрацию должен подтвердить совершеннолетний родитель, '
+                        'отдельно приняв соглашение и согласие на обработку данных.')
                 if not isinstance(value.get('telegram_username'), str) or not value['telegram_username'].strip():
                     raise ValueError('Укажите Telegram username родителя для идентификации покупателя.')
                 device_token = self.device_token() or secrets.token_urlsafe(32)
                 user = self.server.auth.register(
                     value.get('login'), value.get('email'), value.get('password'),
-                    value.get('password_confirmation'), legal_accepted=True, parent_confirmed=True,
+                    value.get('password_confirmation'), legal_accepted=True, privacy_accepted=True,
+                    parent_confirmed=True,
                     device_token=device_token, telegram_username=value.get('telegram_username'))
                 session = self.server.auth.create_session(user.id)
                 return self.send(201, {'user': user.public()}, headers={'Set-Cookie': [
@@ -504,6 +509,16 @@ class Handler(BaseHTTPRequestHandler):
                 self.server.usage.delete_user_data(user.id)
                 self.server.auth.delete_user(user.id)
                 return self.send(200, {'ok': True}, headers={'Set-Cookie': self.clear_session_cookie()})
+            if path == '/api/account/consent':
+                value = json.loads(payload)
+                if not isinstance(value, dict):
+                    raise ValueError('Некорректное согласие.')
+                updated = self.server.auth.record_consent(
+                    user.id, value.get('kind'), value.get('accepted'))
+                return self.send(200, {'user': updated.public()})
+            if not user.public()['legal_current']:
+                return self.send(403, {
+                    'error': 'Подтвердите актуальные документы и согласие на обработку данных.'})
             if path == '/api/account/billing-contact':
                 value = json.loads(payload)
                 if not isinstance(value, dict):
@@ -596,6 +611,9 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(200, self.server.usage.control_study_session(
                     user.id, value.get('id'), action, user.role == 'admin'))
             runtime = self.server.profile_runtime(user.id)
+            if path in ('/api/avatar-model', '/api/avatar', '/api/reference'):
+                if not user.public()['avatar_consent_current']:
+                    raise ValueError('Сначала отдельно разрешите сохранение фотографий и голоса родителя.')
             if path == '/api/avatar-model':
                 return self.send(200, save_model(runtime, payload))
             if path == '/api/avatar':

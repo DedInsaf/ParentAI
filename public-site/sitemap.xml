@@ -2,6 +2,7 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url><loc>https://adym.ru/</loc><priority>1.0</priority></url>
   <url><loc>https://adym.ru/privacy.html</loc><priority>0.3</priority></url>
+  <url><loc>https://adym.ru/consent.html</loc><priority>0.3</priority></url>
   <url><loc>https://adym.ru/terms.html</loc><priority>0.3</priority></url>
   <url><loc>https://adym.ru/support.html</loc><priority>0.5</priority></url>
   <url><loc>https://adym.ru/download.html</loc><priority>0.7</priority></url>
