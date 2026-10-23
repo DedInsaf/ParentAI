@@ -8,6 +8,18 @@ from scripts.backup import backup
 
 
 class BackupTests(unittest.TestCase):
+    def test_age_limit_applies_even_when_fewer_than_keep_archives_exist(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            data, destination = root / 'data', root / 'backups'
+            data.mkdir()
+            destination.mkdir()
+            old = destination / 'adym-20200101T000000000000Z.tar.gz'
+            old.write_bytes(b'old private backup')
+            current = backup(data, destination, 14)
+            self.assertFalse(old.exists())
+            self.assertTrue(current.exists())
+
     def test_backup_contains_consistent_databases_and_private_profiles(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

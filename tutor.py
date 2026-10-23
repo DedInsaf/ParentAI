@@ -99,6 +99,7 @@ class Tutor:
         request = urllib.request.Request(ENDPOINT, data=body, method='POST', headers={
             'Authorization': f'Api-Key {self.api_key}',
             'Content-Type': 'application/json',
+            'x-data-logging-enabled': 'false',
         })
         try:
             with self.opener(request, timeout=timeout) as response:

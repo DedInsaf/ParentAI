@@ -49,6 +49,15 @@ def main() -> int:
             if parsed.scheme == "https" and "max-age=" not in response.headers.get("Strict-Transport-Security", ""):
                 raise ValueError("нет HSTS")
             checks.extend(("интерфейс", "защитные заголовки", "HTTPS" if parsed.scheme == "https" else "HTTP"))
+        for private_path in ('/parentai.env', '/.git/config', '/data/users.sqlite3',
+                             '/data/admin-export.sqlite3', '/audio/reference.wav'):
+            try:
+                with request(origin + private_path):
+                    raise ValueError(f"приватный путь доступен: {private_path}")
+            except urllib.error.HTTPError as exc:
+                if exc.code not in (401, 403, 404):
+                    raise ValueError(f"неожиданный ответ для {private_path}: {exc.code}") from None
+        checks.append("закрытые приватные файлы")
     except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, ValueError) as exc:
         print(f"ОШИБКА: {exc}", file=sys.stderr)
         return 1

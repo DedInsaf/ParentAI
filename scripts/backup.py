@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import argparse
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import shutil
 import sqlite3
@@ -38,8 +38,16 @@ def backup(data: Path, destination: Path, keep: int) -> Path:
             output.add(staging, arcname="data")
     archive.chmod(0o600)
     archives = sorted(destination.glob("adym-*.tar.gz"), reverse=True)
-    for old in archives[max(1, keep):]:
-        old.unlink()
+    cutoff = datetime.now(timezone.utc) - timedelta(days=14)
+    for index, old in enumerate(archives):
+        # Count alone does not enforce the published maximum age when the
+        # machine missed scheduled runs. Check the archive's creation stamp.
+        try:
+            created = datetime.strptime(old.name[5:-7], "%Y%m%dT%H%M%S%fZ").replace(tzinfo=timezone.utc)
+        except ValueError:
+            created = datetime.fromtimestamp(old.stat().st_mtime, timezone.utc)
+        if index >= max(1, keep) or created <= cutoff:
+            old.unlink()
     return archive
 
 

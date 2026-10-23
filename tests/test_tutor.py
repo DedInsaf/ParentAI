@@ -38,6 +38,7 @@ class TutorTests(unittest.TestCase):
         def open_request(request, timeout):
             seen['url'] = request.full_url
             seen['auth'] = request.headers['Authorization']
+            seen['data_logging'] = request.get_header('X-data-logging-enabled')
             seen['body'] = json.loads(request.data)
             seen['timeout'] = timeout
             return Response({'result': {'alternatives': [{'message': {'text': 'Начнём с условия.'}}],
@@ -47,6 +48,7 @@ class TutorTests(unittest.TestCase):
         self.assertEqual(result['answer'], 'Начнём с условия.')
         self.assertEqual(seen['url'], ENDPOINT)
         self.assertEqual(seen['auth'], 'Api-Key secret-value')
+        self.assertEqual(seen['data_logging'], 'false')
         self.assertEqual(seen['body']['modelUri'], 'gpt://folder-id/yandexgpt-5.1')
         self.assertEqual(seen['body']['completionOptions']['maxTokens'], '180')
         self.assertEqual(seen['timeout'], 55)
