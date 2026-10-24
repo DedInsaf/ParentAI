@@ -42,11 +42,12 @@
       <label for="registerPasswordConfirmation">Подтвердите пароль</label><input id="registerPasswordConfirmation" name="password_confirmation" type="password" autocomplete="new-password" minlength="8" maxlength="128" required>
       <label class="toggle-row"><input name="parent_confirmed" type="checkbox" required><span>Я совершеннолетний родитель или законный представитель ребёнка</span></label>
       <label class="toggle-row"><input name="terms_accepted" type="checkbox" required><span>Принимаю <a href="https://adym.ru/terms.html" target="_blank" rel="noopener">пользовательское соглашение и условия тарифа</a></span></label>
-      <label class="toggle-row"><input name="privacy_accepted" type="checkbox" required><span>Отдельно даю <a href="https://adym.ru/consent.html" target="_blank" rel="noopener">согласие на обработку персональных данных</a></span></label>
+      <label class="toggle-row"><input name="privacy_accepted" type="checkbox" required><span>Отдельно даю <a href="https://adym.ru/consent.html" target="_blank" rel="noopener">согласие на обработку моих данных и данных ребёнка, законным представителем которого я являюсь</a></span></label>
       <button class="full auth-submit" type="submit">Создать аккаунт</button>
     </form>
     <p id="authError" class="auth-error" role="alert" hidden></p>
     <nav class="auth-links" aria-label="Документы и поддержка"><a href="https://adym.ru/privacy.html" target="_blank" rel="noopener">Конфиденциальность</a><a href="https://adym.ru/consent.html" target="_blank" rel="noopener">Согласие на данные</a><a href="https://adym.ru/terms.html" target="_blank" rel="noopener">Соглашение</a><a href="https://adym.ru/support.html" target="_blank" rel="noopener">Поддержка</a></nav>
+    <p class="muted"><small>Исполнитель: Нуртдинов Инсаф Наилевич · плательщик НПД<br>ИНН 026490493620 · <a href="mailto:support@adym.ru">support@adym.ru</a></small></p>
   </section>
 </main>
 <dialog id="legalConsentDialog" class="legal-consent-dialog" aria-labelledby="legalConsentTitle">
@@ -56,7 +57,7 @@
     <p>Мы уточнили, как Адым обрабатывает данные родителя и учебные запросы. Продолжить может совершеннолетний родитель или законный представитель.</p>
     <label class="toggle-row"><input name="parent_confirmed" type="checkbox" required><span>Я совершеннолетний родитель или законный представитель ребёнка</span></label>
     <label class="toggle-row"><input name="terms_accepted" type="checkbox" required><span>Принимаю <a href="https://adym.ru/terms.html" target="_blank" rel="noopener">пользовательское соглашение</a></span></label>
-    <label class="toggle-row"><input name="privacy_accepted" type="checkbox" required><span>Отдельно даю <a href="https://adym.ru/consent.html" target="_blank" rel="noopener">согласие на обработку персональных данных</a></span></label>
+    <label class="toggle-row"><input name="privacy_accepted" type="checkbox" required><span>Отдельно даю <a href="https://adym.ru/consent.html" target="_blank" rel="noopener">согласие на обработку моих данных и данных ребёнка, законным представителем которого я являюсь</a></span></label>
     <p id="legalConsentError" class="auth-error" role="alert" hidden></p>
     <button class="full" type="submit">Подтвердить и продолжить</button>
   </form>

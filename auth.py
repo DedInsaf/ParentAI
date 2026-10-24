@@ -17,8 +17,8 @@ import unicodedata
 PASSWORD_ITERATIONS = 600_000
 # Remember a device, but do not leave a stolen session valid for years.
 SESSION_LIFETIME = 30 * 24 * 60 * 60
-TERMS_VERSION = "2026-10-23"
-PRIVACY_CONSENT_VERSION = "2026-10-23"
+TERMS_VERSION = "2026-10-24"
+PRIVACY_CONSENT_VERSION = "2026-10-24"
 AVATAR_CONSENT_VERSION = "2026-10-23"
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 TELEGRAM_RE = re.compile(r"^[A-Za-z0-9_]{5,32}$")
