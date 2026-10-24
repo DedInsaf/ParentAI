@@ -159,6 +159,48 @@ class SpeechTests(unittest.TestCase):
 
 
 class DialogueTests(unittest.TestCase):
+    def test_erasure_waits_for_a_worker_that_has_not_stopped(self):
+        import threading
+        from unittest.mock import Mock
+        with tempfile.TemporaryDirectory() as temp:
+            manager = Dialogues(Runtime(temp), None)
+            worker = Mock()
+            worker.is_alive.return_value = True
+            job = {'id':'busy-job', 'user_id':1, 'thread':worker,
+                   'request_id':'busy-request', 'cancel':threading.Event()}
+            manager.jobs[job['id']] = job
+            try:
+                with self.assertRaisesRegex(ValueError, 'Повторите удаление'):
+                    manager.cancel_user(1)
+                self.assertTrue(job['cancel'].is_set())
+                self.assertIn('busy-job', manager.jobs)
+                worker.is_alive.return_value = False
+                manager.cancel_user(1)
+                self.assertFalse(manager.jobs)
+            finally:
+                manager.close()
+
+    def test_expired_temporary_data_is_cleaned_without_a_new_question(self):
+        import threading
+        with tempfile.TemporaryDirectory() as temp:
+            manager = Dialogues(Runtime(temp), None)
+            try:
+                bank = Path(manager.storage.name) / 'old-job'
+                bank.mkdir()
+                (bank / 'reference.wav').write_bytes(b'private')
+                manager.jobs['old-job'] = {'id':'old-job', 'created':time.monotonic()-1900,
+                    'state':'done', 'thread':threading.Thread(), 'user_id':1,
+                    'request_id':'old-request', 'session':'old-session', 'cancel':threading.Event()}
+                manager.requests[(1, 'old-request')] = 'old-job'
+                manager.sessions['old-session'] = {'updated':time.monotonic()-1900, 'user_id':1}
+                manager.cleanup_expired()
+                self.assertFalse(bank.exists())
+                self.assertFalse(manager.jobs)
+                self.assertFalse(manager.requests)
+                self.assertFalse(manager.sessions)
+            finally:
+                manager.close()
+
     def test_parent_voice_is_the_product_default(self):
         self.assertEqual(DEFAULT_REPLY_VOICE,'parent')
         self.assertEqual(Dialogues.start.__defaults__[1],'parent')

@@ -96,9 +96,15 @@ class AuthStoreTests(unittest.TestCase):
         token = self.store.create_session(user.id)
         self.assertFalse(self.store.verify_password(user.id, 'wrong-pass'))
         self.assertTrue(self.store.verify_password(user.id, 'strong-pass'))
+        with self.store._connect() as connection:
+            connection.execute("INSERT INTO admin_audit(admin_user_id,target_user_id,target_login,action,details,created_at) VALUES (?,?,?,?,?,?)",
+                               (99, user.id, user.login, 'ban', '{"reason":"personal data"}', 1))
         self.store.delete_user(user.id)
         self.assertIsNone(self.store.user_for_session(token))
         self.assertIsNone(self.store.authenticate('delete-user', 'strong-pass'))
+        with self.store._connect() as connection:
+            self.assertEqual(tuple(connection.execute('SELECT target_login,details FROM admin_audit').fetchone()),
+                             ('[deleted]', '{}'))
 
     def test_admin_can_ban_search_revoke_sessions_and_audit_actions(self):
         admin = self.store.register('admin-user', 'admin@example.com', 'strong-pass', 'strong-pass', role='admin')

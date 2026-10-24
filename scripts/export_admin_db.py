@@ -12,9 +12,28 @@ import os
 import sqlite3
 import tempfile
 import time
+import fcntl
+from contextlib import contextmanager
+
+
+@contextmanager
+def export_lock(data_dir: Path):
+    """Serialize export and account erasure across HTTP and timer processes."""
+    with (data_dir / '.admin-export.lock').open('a') as lock:
+        os.chmod(lock.name, 0o600)
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock, fcntl.LOCK_UN)
 
 
 def export_database(data_dir: Path, output: Path) -> None:
+    with export_lock(data_dir):
+        _export_database(data_dir, output)
+
+
+def _export_database(data_dir: Path, output: Path) -> None:
     users = (data_dir / "users.sqlite3").resolve()
     usage = (data_dir / "usage.sqlite3").resolve()
     if not users.exists() or not usage.exists():

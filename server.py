@@ -61,6 +61,7 @@ class AppServer(ThreadingHTTPServer):
         self.speech_cache = {}
         self.speech_recent = defaultdict(deque)
         self.payment_locks = defaultdict(threading.Lock)
+        self.account_locks = defaultdict(threading.RLock)
         self.auth_lock = threading.RLock()
         self.auth_attempts = defaultdict(deque)
         self.token = secrets.token_urlsafe(32)
@@ -87,6 +88,8 @@ class AppServer(ThreadingHTTPServer):
         if user_id < 1:
             raise ValueError('Некорректный профиль пользователя.')
         with self.profile_lock:
+            if not self.auth.user_for_admin(user_id):
+                raise ValueError('Аккаунт удалён.')
             runtime = self.profile_runtimes.get(user_id)
             if runtime is None:
                 # One shared engine means one Qwen model and one queue for the
@@ -101,17 +104,21 @@ class AppServer(ThreadingHTTPServer):
         self.unload_profile(user_id)
         target = (self.runtime.data / 'profiles' / str(user_id)).resolve()
         profiles = (self.runtime.data / 'profiles').resolve()
-        if target.parent == profiles:
-            shutil.rmtree(target, ignore_errors=True)
+        if target.parent != profiles:
+            raise ValueError('Не удалось безопасно определить каталог профиля.')
+        self.runtime.voice_engine.release(idle_only=True)
+        if target.exists():
+            shutil.rmtree(target)
 
     def unload_profile(self, user_id):
         """Stop per-user workers and caches without deleting the saved profile."""
         user_id = int(user_id)
         with self.profile_lock:
-            runtime = self.profile_runtimes.pop(user_id, None)
-        if runtime:
-            runtime.cancel_generation()
-            runtime.close()
+            runtime = self.profile_runtimes.get(user_id)
+            if runtime:
+                runtime.cancel_generation()
+                runtime.close()
+                self.profile_runtimes.pop(user_id, None)
         with self.speech_lock:
             for key in [key for key in self.speech_cache if key[0] == user_id]:
                 del self.speech_cache[key]
@@ -329,6 +336,13 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(400, {'error': str(exc)})
 
     def do_GET(self):
+        user = self.current_user()
+        if user:
+            with self.server.account_locks[user.id]:
+                return self._do_GET()
+        return self._do_GET()
+
+    def _do_GET(self):
         if not self.allowed():
             return self.send(403, {'error': 'Invalid host'})
         path = urlsplit(self.path).path
@@ -431,6 +445,15 @@ class Handler(BaseHTTPRequestHandler):
         self.send_file(target, cache=cache)
 
     def do_POST(self):
+        # A deletion must not race another request holding a valid session and
+        # recreate references, transcripts or usage rows after erasure.
+        user = self.current_user()
+        if user:
+            with self.server.account_locks[user.id]:
+                return self._do_POST()
+        return self._do_POST()
+
+    def _do_POST(self):
         path = urlsplit(self.path).path
         if path == '/api/webhooks/platega':
             return self.platega_webhook()
@@ -506,8 +529,20 @@ class Handler(BaseHTTPRequestHandler):
                     raise ValueError('Сначала отмените подписку через поддержку, затем удалите аккаунт.')
                 self.server.dialogues.cancel_user(user.id)
                 self.server.delete_profile(user.id)
-                self.server.usage.delete_user_data(user.id)
-                self.server.auth.delete_user(user.id)
+                from scripts.export_admin_db import export_database, export_lock
+                export = self.server.runtime.data / 'admin-export.sqlite3'
+                with export_lock(self.server.runtime.data):
+                    had_export = export.exists()
+                    # Invalidate old snapshot before erasing live data. The
+                    # timer cannot publish a pre-deletion export afterward.
+                    export.unlink(missing_ok=True)
+                    self.server.usage.delete_user_data(user.id)
+                    self.server.auth.delete_user(user.id)
+                if had_export:
+                    try:
+                        export_database(self.server.runtime.data, export)
+                    except Exception:
+                        LOGGER.exception('Could not rebuild administrative export after account erasure')
                 return self.send(200, {'ok': True}, headers={'Set-Cookie': self.clear_session_cookie()})
             if path == '/api/account/consent':
                 value = json.loads(payload)

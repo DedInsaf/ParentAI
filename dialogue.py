@@ -188,6 +188,27 @@ class Dialogues:
         self.recent = defaultdict(deque)
         self.storage = tempfile.TemporaryDirectory(prefix='parentai-dialog-')
         self.closed = threading.Event()
+        self.cleaner = threading.Thread(target=self._clean_loop, name='dialogue-cleanup', daemon=True)
+        self.cleaner.start()
+
+    def _clean_loop(self):
+        while not self.closed.wait(60):
+            self.cleanup_expired()
+
+    def cleanup_expired(self):
+        now = time.monotonic()
+        with self.lock:
+            for key, job in list(self.jobs.items()):
+                if (now - job['created'] > 1800 and job['state'] in ('done', 'error', 'cancelled')
+                        and not job['thread'].is_alive()):
+                    shutil.rmtree(Path(self.storage.name) / key, ignore_errors=True)
+                    self.requests.pop((job['user_id'], job['request_id']), None)
+                    del self.jobs[key]
+            active = {job['session'] for job in self.jobs.values()
+                      if job['state'] in ('thinking', 'speaking')}
+            for key, item in list(self.sessions.items()):
+                if now - item['updated'] > 1800 and key not in active:
+                    del self.sessions[key]
 
     def _rate_limit(self, user_id, now):
         if not user_id:
@@ -231,14 +252,7 @@ class Dialogues:
                         'study_session': job.get('study_session'), 'duplicate': True}
             now = time.monotonic()
             self._rate_limit(user_id, now)
-            for key, job in list(self.jobs.items()):
-                if now - job['created'] > 1800 and job['state'] in ('done', 'error', 'cancelled'):
-                    shutil.rmtree(Path(self.storage.name) / key, ignore_errors=True)
-                    self.requests.pop((job['user_id'], job['request_id']), None)
-                    del self.jobs[key]
-            for key, item in list(self.sessions.items()):
-                if now - item['updated'] > 1800:
-                    del self.sessions[key]
+            self.cleanup_expired()
             if any(j['user_id'] == user_id and j['state'] in ('thinking', 'speaking') for j in self.jobs.values()):
                 raise ValueError('Сначала дождись ответа или отмени запрос.')
             if len(self.jobs) >= 100:
@@ -445,8 +459,8 @@ class Dialogues:
 
     def _run(self, job, question, level, attempt):
         acquired = False
-        runtime = self.runtime_for(job['user_id'])
         try:
+            runtime = self.runtime_for(job['user_id'])
             answer = self._answer(job, question, level)
             if job['cancel'].is_set() or self.closed.is_set():
                 raise InterruptedError()
@@ -504,9 +518,16 @@ class Dialogues:
             if acquired:
                 with runtime.lock:
                     runtime.reply_busy = False
+            # Reference copies are needed only during synthesis, not while the
+            # finished answer waits to be played back.
+            for name in ('reference.wav', 'reference-2.wav', 'reference-3.wav'):
+                (Path(self.storage.name) / job['id'] / name).unlink(missing_ok=True)
+            if job['cancel'].is_set() or self.closed.is_set():
+                shutil.rmtree(Path(self.storage.name) / job['id'], ignore_errors=True)
 
     def close(self):
         self.closed.set()
+        self.cleaner.join(timeout=2)
         with self.lock:
             jobs = list(self.jobs.values())
             for job in jobs:
@@ -523,6 +544,8 @@ class Dialogues:
                 job['cancel'].set()
         for job in jobs:
             job['thread'].join(timeout=6)
+        if any(job['thread'].is_alive() for job in jobs):
+            raise ValueError('Завершаю текущий ответ. Повторите удаление через минуту.')
         with self.lock:
             for job in jobs:
                 self.jobs.pop(job['id'], None)

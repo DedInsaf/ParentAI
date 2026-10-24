@@ -348,5 +348,7 @@ class Runtime:
         self.cancel_generation()
         if self.worker:
             self.worker.join(timeout=8)
+            if self.worker.is_alive():
+                raise ValueError('Создание голоса ещё останавливается. Повторите действие через минуту.')
         if self._owns_voice_engine:
             self.voice_engine.close()

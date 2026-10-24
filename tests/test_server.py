@@ -250,10 +250,14 @@ class ServerTests(unittest.TestCase):
         self.assertIn('Telegram',json.loads(body)['error'])
 
     def test_account_deletion_requires_password_and_removes_private_data(self):
+        import sqlite3
+        from scripts.export_admin_db import export_database
         headers={'Origin':self.s.origin,'X-App-Token':self.s.token,'Content-Type':'application/json'}
         self.assertEqual(self.request('/api/avatar-model',glb(),headers)[0],200)
         profile=self.s.profile_runtime(1).data
         self.assertTrue(profile.is_dir())
+        export = self.r.data / 'admin-export.sqlite3'
+        export_database(self.r.data, export)
         wrong=json.dumps({'password':'wrong-password','confirmation':'УДАЛИТЬ'}).encode()
         self.assertEqual(self.request('/api/auth/delete',wrong,headers)[0],400)
         value=json.dumps({'password':'password-123','confirmation':'УДАЛИТЬ'}).encode()
@@ -262,6 +266,10 @@ class ServerTests(unittest.TestCase):
         self.assertFalse(profile.exists())
         self.assertIn('Max-Age=0',response_headers['Set-Cookie'])
         self.assertIsNone(self.s.auth.authenticate('test-user','password-123'))
+        with sqlite3.connect(export) as db:
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM accounts').fetchone()[0], 0)
+        with self.assertRaisesRegex(ValueError, 'удалён'):
+            self.s.profile_runtime(1)
         self.assertEqual(self.request('/api/status',headers={'X-App-Token':self.s.token})[0],401)
 
     def test_public_registration_does_not_require_invite_code(self):

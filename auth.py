@@ -97,6 +97,7 @@ class AuthStore:
         connection = sqlite3.connect(self.path, timeout=10)
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys = ON")
+        connection.execute("PRAGMA secure_delete = ON")
         return connection
 
     def _initialize(self):
@@ -196,6 +197,9 @@ class AuthStore:
             session_columns = {row[1] for row in connection.execute("PRAGMA table_info(sessions)")}
             if "last_seen_at" not in session_columns:
                 connection.execute("ALTER TABLE sessions ADD COLUMN last_seen_at INTEGER")
+            connection.execute(
+                """UPDATE admin_audit SET target_login='[deleted]',details='{}'
+                   WHERE target_user_id NOT IN (SELECT id FROM users)""")
 
     def register(self, login, email, password, password_confirmation, role="parent",
                  legal_accepted=True, privacy_accepted=True, parent_confirmed=True, device_token=None,
@@ -583,6 +587,11 @@ class AuthStore:
 
     def delete_user(self, user_id):
         with self._connect() as connection:
+            # Audit rows have no FK: do not retain the deleted family's login
+            # or admin-entered personal details in historical moderation data.
+            connection.execute(
+                "UPDATE admin_audit SET target_login='[deleted]',details='{}' WHERE target_user_id=?",
+                (int(user_id),))
             cursor = connection.execute("DELETE FROM users WHERE id=?", (int(user_id),))
         if cursor.rowcount != 1:
             raise ValueError("Аккаунт уже удалён.")
