@@ -11,6 +11,8 @@ from usage import estimate_tokens
 ENDPOINT = 'https://ai.api.cloud.yandex.net/foundationModels/v1/completion'
 LEVELS = {'начальная школа', 'средняя школа', 'старшая школа'}
 LOCAL_ENV_KEYS = {
+    'ADYM_SMTP_HOST', 'ADYM_SMTP_PORT', 'ADYM_SMTP_USER',
+    'ADYM_SMTP_PASSWORD', 'ADYM_SMTP_FROM',
     'YANDEX_API_KEY', 'YANDEX_FOLDER_ID', 'YANDEX_SPEECHKIT_API_KEY',
     'YANDEX_TTS_API_KEY', 'PLATEGA_MERCHANT_ID', 'PLATEGA_SECRET',
     'PARENTAI_BIND', 'PARENTAI_PUBLIC_ORIGIN',

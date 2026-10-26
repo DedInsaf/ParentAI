@@ -108,6 +108,15 @@ class RecoveryHTTPTests(unittest.TestCase):
 
 
 class MailerTests(unittest.TestCase):
+    def test_mail_settings_load_from_private_environment_file(self):
+        from tutor import load_local_env
+        from mailer import AccountMailer
+        with tempfile.TemporaryDirectory() as folder, patch.dict('os.environ',{},clear=True):
+            config=Path(folder)/'parentai.env'
+            config.write_text('ADYM_SMTP_HOST=smtp.example.com\nADYM_SMTP_USER=support@example.com\nADYM_SMTP_PASSWORD=test-secret\n')
+            load_local_env(config)
+            self.assertTrue(AccountMailer().configured)
+
     def test_tls_and_message(self):
         from mailer import AccountMailer
         with patch.dict('os.environ',{'ADYM_SMTP_HOST':'smtp.example.com','ADYM_SMTP_USER':'support@example.com',
