@@ -585,7 +585,7 @@ class AuthStore:
             connection.execute('UPDATE password_resets SET invalidated=1 WHERE token_hash=?',
                                (sha256(token.encode()).digest(),))
 
-    def reset_password(self, token, new_password, confirmation):
+    def reset_password(self, token, new_password, confirmation, *, device_token=None):
         _validate_password(new_password)
         if new_password != confirmation:
             raise ValueError('Пароли не совпадают.')
@@ -593,12 +593,23 @@ class AuthStore:
             raise ValueError('Ссылка недействительна или устарела. Запросите новое письмо.')
         with self._connect() as connection:
             connection.execute('BEGIN IMMEDIATE')
-            row = connection.execute('''SELECT r.user_id FROM password_resets r JOIN users u ON u.id=r.user_id
+            row = connection.execute('''SELECT r.user_id,u.email_verification_required,u.email_verified_at
+                FROM password_resets r JOIN users u ON u.id=r.user_id
                 WHERE r.token_hash=? AND r.invalidated=0 AND r.expires_at>? AND u.is_banned=0''',
                 (sha256(token.encode()).digest(), int(time.time()))).fetchone()
             if not row:
                 raise ValueError('Ссылка недействительна или устарела. Запросите новое письмо.')
             user_id = row['user_id']
+            if row['email_verification_required'] and not row['email_verified_at'] and device_token is not None:
+                # Recovery may be the mailbox owner's first activation. Claim their device,
+                # not the device of someone who might have supplied a foreign email.
+                if not isinstance(device_token,str) or not 20<=len(device_token)<=200:
+                    raise ValueError('Не удалось определить устройство. Обновите страницу.')
+                device_hash=sha256(device_token.encode()).digest()
+                if connection.execute('SELECT 1 FROM device_registrations WHERE device_hash=?',(device_hash,)).fetchone():
+                    raise ValueError('На этом устройстве уже создан аккаунт. Войдите в него или обратитесь в поддержку.')
+                connection.execute('INSERT INTO device_registrations(device_hash,user_id,registered_at) VALUES (?,?,?)',
+                                   (device_hash,user_id,int(time.time())))
             salt = os.urandom(16)
             digest = pbkdf2_hmac('sha256', new_password.encode(), salt, PASSWORD_ITERATIONS)
             connection.execute('UPDATE users SET password_salt=?,password_hash=?,password_iterations=? WHERE id=?',

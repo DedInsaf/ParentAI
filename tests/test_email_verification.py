@@ -57,6 +57,18 @@ class VerificationStoreTests(unittest.TestCase):
         self.store.verify_email(first,'password-123')
         with self.assertRaisesRegex(ValueError,'уже создан аккаунт'):self.store.verify_email(second,'password-123')
 
+    def test_recovery_activation_claims_owner_device_and_cannot_bypass_device_limit(self):
+        self.store.register('existing','existing@example.com','password-123','password-123',
+                            device_token='already-registered-browser-device')
+        _,token=self.store.request_password_reset(self.user.email)
+        with self.assertRaisesRegex(ValueError,'уже создан аккаунт'):
+            self.store.reset_password(token,'owner-password','owner-password',
+                                      device_token='already-registered-browser-device')
+        self.store.reset_password(token,'owner-password','owner-password',device_token='mailbox-owner-browser-device')
+        with self.assertRaisesRegex(ValueError,'уже создан аккаунт'):
+            self.store.register('other','other@example.com','password-123','password-123',
+                                device_token='mailbox-owner-browser-device',require_email_verification=True)
+
     def test_existing_accounts_keep_access_without_false_verified_status(self):
         existing=self.store.register('existing','existing@example.com','password-123','password-123')
         self.assertEqual(AuthStore(self.store.path).authenticate('existing','password-123'),existing)

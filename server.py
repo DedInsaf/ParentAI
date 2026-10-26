@@ -541,8 +541,11 @@ class Handler(BaseHTTPRequestHandler):
                 if not isinstance(value, dict):
                     raise ValueError('Некорректные данные восстановления пароля.')
                 if path.endswith('/reset-password'):
-                    self.server.auth.reset_password(value.get('token'), value.get('new_password'), value.get('confirmation'))
-                    return self.send(200, {'ok': True}, headers={'Set-Cookie': self.clear_session_cookie()})
+                    device_token=self.device_token() or secrets.token_urlsafe(32)
+                    self.server.auth.reset_password(value.get('token'), value.get('new_password'), value.get('confirmation'),
+                                                    device_token=device_token)
+                    return self.send(200, {'ok': True}, headers={'Set-Cookie':[
+                        self.clear_session_cookie(),self.device_cookie(device_token)]})
                 from auth import _validate_email
                 email, _ = _validate_email(value.get('email'))
                 if not self.server.mailer.configured:
