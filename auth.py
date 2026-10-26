@@ -17,6 +17,9 @@ import unicodedata
 PASSWORD_ITERATIONS = 600_000
 # Remember a device, but do not leave a stolen session valid for years.
 SESSION_LIFETIME = 30 * 24 * 60 * 60
+MAX_SESSION_LIFETIME = 90 * 24 * 60 * 60
+LOGIN_FAILURE_WINDOW = 300
+MAX_LOGIN_FAILURES = 10
 TERMS_VERSION = "2026-10-24"
 PRIVACY_CONSENT_VERSION = "2026-10-24"
 AVATAR_CONSENT_VERSION = "2026-10-23"
@@ -130,6 +133,11 @@ class AuthStore:
                     created_at INTEGER NOT NULL
                 );
                 CREATE INDEX IF NOT EXISTS sessions_expires_at ON sessions(expires_at);
+                CREATE TABLE IF NOT EXISTS login_failures (
+                    user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+                    attempts INTEGER NOT NULL,
+                    window_started_at INTEGER NOT NULL
+                );
                 CREATE TABLE IF NOT EXISTS admin_audit (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     admin_user_id INTEGER NOT NULL,
@@ -286,12 +294,20 @@ class AuthStore:
     def authenticate_with_status(self, identifier, password):
         if not isinstance(identifier, str) or not isinstance(password, str):
             return None, "invalid"
+        if len(identifier) > 254:
+            return None, "invalid"
         normalized = _normalized(identifier)
         if not normalized or len(password) > 128:
             return None, "invalid"
         field = "email_normalized" if "@" in normalized else "login_normalized"
         with self._connect() as connection:
             row = connection.execute(f"SELECT * FROM users WHERE {field} = ?", (normalized,)).fetchone()
+            failure = connection.execute(
+                "SELECT attempts,window_started_at FROM login_failures WHERE user_id=?",
+                (row['id'],)).fetchone() if row else None
+        now = int(time.time())
+        if failure and failure['window_started_at'] > now-LOGIN_FAILURE_WINDOW and failure['attempts'] >= MAX_LOGIN_FAILURES:
+            return None, "throttled"
         if row is None:
             # Keep the expensive path for unknown accounts too, reducing identifier probing signals.
             pbkdf2_hmac("sha256", password.encode("utf-8"), b"\0" * 16, PASSWORD_ITERATIONS)
@@ -300,9 +316,21 @@ class AuthStore:
             "sha256", password.encode("utf-8"), row["password_salt"], row["password_iterations"]
         )
         if not hmac.compare_digest(candidate, row["password_hash"]):
+            with self._connect() as connection:
+                connection.execute(
+                    """INSERT INTO login_failures(user_id,attempts,window_started_at) VALUES (?,1,?)
+                       ON CONFLICT(user_id) DO UPDATE SET
+                       attempts=CASE WHEN window_started_at<=? THEN 1 ELSE attempts+1 END,
+                       window_started_at=CASE WHEN window_started_at<=? THEN excluded.window_started_at ELSE window_started_at END""",
+                    (row['id'], now, now-LOGIN_FAILURE_WINDOW, now-LOGIN_FAILURE_WINDOW))
+                connection.execute(
+                    "INSERT INTO account_events(user_id,event,created_at,details) VALUES (?,'login_failed',?,'{}')",
+                    (row['id'], now))
             return None, "invalid"
         if row["is_banned"]:
             return None, "banned"
+        with self._connect() as connection:
+            connection.execute("DELETE FROM login_failures WHERE user_id=?", (row['id'],))
         return User(row["id"], row["login"], row["email"], row["role"],
                     row["telegram_username"], row["terms_version"] or "",
                     row["privacy_consent_version"] or "",
@@ -318,6 +346,9 @@ class AuthStore:
             if not active:
                 raise ValueError("Аккаунт заблокирован или удалён.")
             connection.execute("DELETE FROM sessions WHERE expires_at <= ?", (now,))
+            connection.execute("""DELETE FROM sessions WHERE user_id=? AND token_hash NOT IN
+                (SELECT token_hash FROM sessions WHERE user_id=? ORDER BY created_at DESC,rowid DESC LIMIT 4)""",
+                (user_id,user_id))
             connection.execute(
                 "INSERT INTO sessions(token_hash,user_id,expires_at,created_at,last_seen_at) VALUES (?,?,?,?,?)",
                 (sha256(token.encode()).digest(), user_id, now + SESSION_LIFETIME, now, now),
@@ -343,8 +374,9 @@ class AuthStore:
                           users.terms_version,users.privacy_consent_version,users.avatar_consent_version
                    FROM sessions JOIN users ON users.id = sessions.user_id
                    WHERE sessions.token_hash = ? AND sessions.expires_at > ?
+                     AND sessions.created_at > ?
                      AND users.is_banned = 0""",
-                (token_hash, now),
+                (token_hash, now, now-MAX_SESSION_LIFETIME),
             ).fetchone()
             if row and renew:
                 connection.execute(
@@ -444,6 +476,28 @@ class AuthStore:
             cursor = connection.execute(f"UPDATE users SET role=? WHERE {field}=?", (role, normalized))
         if cursor.rowcount != 1:
             raise ValueError("Пользователь не найден.")
+
+    def change_password(self, user_id, current_password, new_password, confirmation):
+        _validate_password(new_password)
+        if new_password != confirmation:
+            raise ValueError('Пароли не совпадают.')
+        if not isinstance(current_password,str) or not 1 <= len(current_password) <= 128:
+            raise ValueError('Неверный текущий пароль.')
+        with self._connect() as connection:
+            connection.execute('BEGIN IMMEDIATE')
+            row=connection.execute('SELECT * FROM users WHERE id=? AND is_banned=0', (int(user_id),)).fetchone()
+            if not row or not hmac.compare_digest(
+                    pbkdf2_hmac('sha256',current_password.encode(),row['password_salt'],row['password_iterations']),
+                    row['password_hash']):
+                raise ValueError('Неверный текущий пароль.')
+            salt=os.urandom(16)
+            digest=pbkdf2_hmac('sha256',new_password.encode(),salt,PASSWORD_ITERATIONS)
+            connection.execute('UPDATE users SET password_salt=?,password_hash=?,password_iterations=? WHERE id=?',
+                               (salt,digest,PASSWORD_ITERATIONS,int(user_id)))
+            connection.execute('DELETE FROM sessions WHERE user_id=?',(int(user_id),))
+            connection.execute('DELETE FROM login_failures WHERE user_id=?',(int(user_id),))
+            connection.execute("INSERT INTO account_events(user_id,event,created_at,details) VALUES (?,'password_changed',?,'{}')",
+                               (int(user_id),int(time.time())))
 
     def verify_password(self, user_id, password) -> bool:
         if not isinstance(password, str) or not password or len(password) > 128:

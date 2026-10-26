@@ -12,6 +12,7 @@ import shutil
 import threading
 import time
 import uuid
+import ipaddress
 from collections import defaultdict, deque
 from urllib.parse import urlsplit, parse_qs
 from runtime import ROOT, Runtime
@@ -293,9 +294,13 @@ class Handler(BaseHTTPRequestHandler):
     def client_key(self):
         address = self.client_address[0]
         if address in ('127.0.0.1', '::1'):
-            forwarded = self.headers.get('X-Forwarded-For', '').split(',', 1)[0].strip()
-            if forwarded:
-                address = forwarded
+            # Caddy overwrites X-Real-IP. The first X-Forwarded-For entry can
+            # originate from the visitor and must not bypass login limits.
+            forwarded = self.headers.get('X-Real-IP', '').strip()
+            try:
+                address = str(ipaddress.ip_address(forwarded))
+            except ValueError:
+                pass
         return address
 
     def session_cookie(self, token):
@@ -466,6 +471,8 @@ class Handler(BaseHTTPRequestHandler):
             except (TypeError, ValueError):
                 return self.send(400, {'error': 'Некорректный размер запроса.'})
             limit = MAX_MODEL_BYTES if path == '/api/avatar-model' else 10_000_000
+            if path.startswith(('/api/auth/', '/api/account/')):
+                limit = 16_000
             if not 0 <= size <= limit:
                 return self.send(413, {'error': 'Модель слишком большая' if path == '/api/avatar-model' else 'Запись слишком большая'})
             self.connection.settimeout(70)
@@ -503,6 +510,8 @@ class Handler(BaseHTTPRequestHandler):
                     return self.send(429, {'error': 'Слишком много попыток входа. Повторите через несколько минут.'})
                 user, login_status = self.server.auth.authenticate_with_status(
                     value.get('identifier'), value.get('password'))
+                if login_status == 'throttled':
+                    return self.send(429, {'error': 'Слишком много попыток входа. Повторите через пять минут.'})
                 if login_status == 'banned':
                     return self.send(403, {'error': 'Аккаунт заблокирован. Обратитесь в поддержку Адым.'})
                 if not user:
@@ -518,6 +527,16 @@ class Handler(BaseHTTPRequestHandler):
             if path == '/api/auth/logout':
                 self.server.auth.delete_session(self.session_token())
                 return self.send(200, {'ok': True}, headers={'Set-Cookie': self.clear_session_cookie()})
+            if path == '/api/account/password':
+                if not self.server.allow_auth_attempt(('password',user.id),'login'):
+                    return self.send(429, {'error':'Слишком много попыток. Повторите через пять минут.'})
+                value=json.loads(payload)
+                if not isinstance(value,dict):
+                    raise ValueError('Некорректные данные смены пароля.')
+                self.server.auth.change_password(user.id,value.get('current_password'),
+                                                value.get('new_password'),value.get('confirmation'))
+                session=self.server.auth.create_session(user.id)
+                return self.send(200, {'ok':True}, headers={'Set-Cookie':self.session_cookie(session)})
             if path == '/api/auth/delete':
                 value = json.loads(payload)
                 if not isinstance(value, dict) or value.get('confirmation') != 'УДАЛИТЬ':

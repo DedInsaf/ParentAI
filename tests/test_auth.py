@@ -7,6 +7,39 @@ from auth import AuthStore, SESSION_LIFETIME
 
 
 class AuthStoreTests(unittest.TestCase):
+    def test_account_throttle_survives_restart_and_covers_login_and_email(self):
+        from auth import MAX_LOGIN_FAILURES, LOGIN_FAILURE_WINDOW
+        user=self.store.register('limited-user','limited@example.com','strong-pass','strong-pass')
+        with patch('auth.time.time',return_value=1000):
+            for attempt in range(MAX_LOGIN_FAILURES):
+                identifier=user.login if attempt%2 else user.email
+                self.assertEqual(self.store.authenticate_with_status(identifier,'wrong-pass')[1],'invalid')
+            restarted=AuthStore(self.store.path)
+            self.assertEqual(restarted.authenticate_with_status(user.login,'strong-pass')[1],'throttled')
+        with patch('auth.time.time',return_value=1001+LOGIN_FAILURE_WINDOW):
+            self.assertEqual(restarted.authenticate(user.email,'strong-pass'),user)
+
+    def test_password_change_verifies_old_password_and_revokes_all_sessions(self):
+        user=self.store.register('secure-user','secure@example.com','strong-pass','strong-pass')
+        token=self.store.create_session(user.id)
+        with self.assertRaisesRegex(ValueError,'текущий пароль'):
+            self.store.change_password(user.id,'wrong-pass','new-strong-pass','new-strong-pass')
+        self.assertIsNotNone(self.store.user_for_session(token))
+        self.store.change_password(user.id,'strong-pass','new-strong-pass','new-strong-pass')
+        self.assertIsNone(self.store.user_for_session(token))
+        self.assertIsNone(self.store.authenticate(user.login,'strong-pass'))
+        self.assertEqual(self.store.authenticate(user.login,'new-strong-pass'),user)
+
+    def test_sessions_are_bounded_and_cannot_be_renewed_forever(self):
+        from auth import MAX_SESSION_LIFETIME
+        user=self.store.register('session-user','session@example.com','strong-pass','strong-pass')
+        tokens=[self.store.create_session(user.id) for _ in range(6)]
+        self.assertIsNone(self.store.user_for_session(tokens[0]))
+        self.assertIsNotNone(self.store.user_for_session(tokens[-1]))
+        with self.store._connect() as connection:
+            connection.execute('UPDATE sessions SET created_at=?',(int(__import__('time').time())-MAX_SESSION_LIFETIME-1,))
+        self.assertIsNone(self.store.user_for_session(tokens[-1],renew=True))
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)

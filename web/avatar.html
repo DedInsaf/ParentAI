@@ -70,7 +70,7 @@
     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7.5A2.5 2.5 0 0 1 6.5 5h11A2.5 2.5 0 0 1 20 7.5v9a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 16.5v-9Z"/><path d="M4 9h16M16 14h1"/></svg>
     <span><small>Тариф</small><strong id="headerPlanName">Бесплатный</strong></span>
   </button>
-  <details class="account"><summary><span id="accountLogin"></span><span aria-hidden="true">⌄</span></summary><div class="account-menu"><button id="adminPanelBtn" type="button" class="admin-menu-button" hidden>Управление аккаунтами</button><a href="https://adym.ru/support.html" target="_blank" rel="noopener">Поддержка</a><a href="https://adym.ru/privacy.html" target="_blank" rel="noopener">Конфиденциальность</a><a href="https://adym.ru/consent.html" target="_blank" rel="noopener">Согласие на данные</a><a href="https://adym.ru/terms.html" target="_blank" rel="noopener">Соглашение</a><a href="mailto:support@adym.ru?subject=Отмена%20подписки">Отменить подписку</a><button id="logoutBtn" type="button" class="quiet">Выйти</button><button id="deleteAccountBtn" type="button" class="danger-quiet">Удалить аккаунт</button></div></details>
+  <details class="account"><summary><span id="accountLogin"></span><span aria-hidden="true">⌄</span></summary><div class="account-menu"><button id="adminPanelBtn" type="button" class="admin-menu-button" hidden>Управление аккаунтами</button><a href="https://adym.ru/support.html" target="_blank" rel="noopener">Поддержка</a><a href="https://adym.ru/privacy.html" target="_blank" rel="noopener">Конфиденциальность</a><a href="https://adym.ru/consent.html" target="_blank" rel="noopener">Согласие на данные</a><a href="https://adym.ru/terms.html" target="_blank" rel="noopener">Соглашение</a><a href="mailto:support@adym.ru?subject=Отмена%20подписки">Отменить подписку</a><button id="logoutBtn" type="button" class="quiet">Выйти</button><button id="changePasswordBtn" type="button" class="quiet">Изменить пароль</button><button id="deleteAccountBtn" type="button" class="danger-quiet">Удалить аккаунт</button></div></details>
   <div id="lessonToolbar" class="lesson-toolbar" hidden><button id="pauseBtn" class="secondary" disabled>Сделать перерыв</button><button id="stopBtn" class="quiet" disabled>Закончить</button></div>
 </header>
 <dialog id="billingDialog" class="billing-dialog" aria-labelledby="subscriptionTitle">
@@ -231,5 +231,17 @@
     <section class="card child-camera"><div class="section-title"><h2>Ты в кадре</h2><span class="privacy-chip small">Только здесь</span></div><div id="lessonCameraSlot"></div><p id="monitorStatus" role="status">Готово к занятию</p><button id="retryCameraBtn" type="button" class="secondary" hidden>Включить камеру</button><p class="helper">Смотри в тетрадь, думай, пробуй. Я подожду.</p></section>
   </aside>
 </main>
+<dialog id="changePasswordDialog" class="legal-consent-dialog" aria-labelledby="changePasswordTitle">
+  <form id="changePasswordForm">
+    <h2 id="changePasswordTitle">Изменить пароль</h2>
+    <p>После смены пароля остальные сеансы будут завершены.</p>
+    <label for="currentPassword">Текущий пароль</label><input id="currentPassword" name="current_password" type="password" autocomplete="current-password" maxlength="128" required>
+    <label for="newPassword">Новый пароль</label><input id="newPassword" name="new_password" type="password" autocomplete="new-password" minlength="8" maxlength="128" required>
+    <label for="newPasswordConfirmation">Повторите новый пароль</label><input id="newPasswordConfirmation" name="confirmation" type="password" autocomplete="new-password" minlength="8" maxlength="128" required>
+    <p id="changePasswordMessage" role="status" hidden></p>
+    <div class="buttons"><button type="submit">Сохранить пароль</button><button id="closePasswordDialog" type="button" class="secondary">Закрыть</button></div>
+  </form>
+</dialog>
+<script type="module" src="account-security.mjs"></script>
 <script type="module" src="app.js?v=20261019-1"></script>
 </body></html>
