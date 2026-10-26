@@ -23,6 +23,7 @@ from avatar_model import MAX_MODEL_BYTES, model_path, save_model, scanner_status
 from auth import AuthStore, SESSION_LIFETIME
 from usage import LimitExceeded, UsageStore, estimate_tokens
 from payments import PlategaClient
+from mailer import AccountMailer
 import os
 
 
@@ -53,6 +54,8 @@ class AppServer(ThreadingHTTPServer):
             self.speech_fallbacks = [yandex_speech] if speechkit_key else []
         self.fast_voice=SpeechSynthesizer(os.getenv('YANDEX_TTS_API_KEY') or os.getenv('YANDEX_SPEECHKIT_API_KEY') or os.getenv('YANDEX_API_KEY'))
         self.auth = AuthStore(runtime.data / 'users.sqlite3')
+        self.mailer = AccountMailer()
+        self.mail_slots = threading.BoundedSemaphore(3)
         self.usage = UsageStore(runtime.data / 'usage.sqlite3')
         self.usage.recover_interrupted_events()
         self.platega = PlategaClient(os.getenv('PLATEGA_MERCHANT_ID'), os.getenv('PLATEGA_SECRET'))
@@ -150,6 +153,21 @@ class AppServer(ThreadingHTTPServer):
                 return False
             bucket.append(now)
             return True
+
+    def deliver_password_reset(self, email):
+        try:
+            delivery = self.auth.request_password_reset(email)
+            if delivery:
+                recipient, token = delivery
+                try:
+                    self.mailer.send_reset(recipient, self.origin + '/#reset=' + token)
+                except Exception:
+                    self.auth.invalidate_password_reset(token)
+                    LOGGER.error('Password recovery email delivery failed')
+        except Exception:
+            LOGGER.error('Password recovery request failed')
+        finally:
+            self.mail_slots.release()
 
     def recognize(self, user_id, payload, request_id, unlimited=False):
         request_id = request_id if isinstance(request_id, str) and 8 <= len(request_id) <= 100 else uuid.uuid4().hex
@@ -479,6 +497,23 @@ class Handler(BaseHTTPRequestHandler):
             payload = self.rfile.read(size)
             if len(payload) != size:
                 raise ValueError('Передача данных прервалась. Повторите попытку.')
+            if path in ('/api/auth/forgot-password', '/api/auth/reset-password'):
+                if not self.server.allow_auth_attempt(self.client_key(), 'recovery'):
+                    return self.send(429, {'error': 'Слишком много попыток. Повторите через пять минут.'})
+                value = json.loads(payload)
+                if not isinstance(value, dict):
+                    raise ValueError('Некорректные данные восстановления пароля.')
+                if path.endswith('/reset-password'):
+                    self.server.auth.reset_password(value.get('token'), value.get('new_password'), value.get('confirmation'))
+                    return self.send(200, {'ok': True}, headers={'Set-Cookie': self.clear_session_cookie()})
+                from auth import _validate_email
+                email, _ = _validate_email(value.get('email'))
+                if not self.server.mailer.configured:
+                    return self.send(503, {'error': 'Отправка писем временно недоступна. Обратитесь в support@adym.ru.'})
+                if not self.server.mail_slots.acquire(blocking=False):
+                    return self.send(503, {'error': 'Сервис занят. Повторите попытку через минуту.'})
+                threading.Thread(target=self.server.deliver_password_reset, args=(email,), daemon=True).start()
+                return self.send(200, {'ok': True, 'message': 'Если эта почта зарегистрирована, письмо со ссылкой придёт в течение нескольких минут. Проверьте также папку «Спам». Повторный запрос доступен через минуту.'})
             if path == '/api/auth/register':
                 value = json.loads(payload)
                 if not isinstance(value, dict):

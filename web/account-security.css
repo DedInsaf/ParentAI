@@ -1,0 +1,3 @@
+#passwordRecoveryDialog input,#changePasswordDialog input{display:block;width:100%;box-sizing:border-box;min-height:46px;padding:12px 14px;margin:6px 0 14px;border:1px solid var(--line);border-radius:12px;background:white;color:var(--ink);font:inherit}
+#passwordRecoveryDialog input:focus,#changePasswordDialog input:focus{outline:2px solid var(--green);outline-offset:2px}
+#passwordRecoveryDialog h2{margin:0}#passwordRecoveryDialog{max-height:calc(100dvh - 28px);overflow:auto}

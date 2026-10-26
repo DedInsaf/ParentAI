@@ -5,6 +5,7 @@
 <meta name="theme-color" content="#faf7f2"><title>Адым · Шаг к самостоятельной учёбе</title>
 <link rel="icon" href="/adym-logo.png" type="image/png">
 <link rel="stylesheet" href="style.css?v=20261019-1">
+<link rel="stylesheet" href="account-security.css">
 <script type="importmap">{"imports":{"three":"/vendor/three.module.js"}}</script>
 </head>
 <body class="auth-pending">
@@ -32,6 +33,7 @@
       <label for="loginIdentifier">Логин или почта</label><input id="loginIdentifier" name="identifier" type="text" autocomplete="username" maxlength="254" required autofocus>
       <label for="loginPassword">Пароль</label><input id="loginPassword" name="password" type="password" autocomplete="current-password" maxlength="128" required>
       <button class="full auth-submit" type="submit">Войти в аккаунт</button>
+      <button id="forgotPasswordBtn" class="secondary full" type="button">Забыли пароль?</button>
     </form>
     <form id="registerForm" hidden>
       <h2>Создать аккаунт</h2><p class="muted">Регистрацию оформляет совершеннолетний родитель.</p>
@@ -242,6 +244,20 @@
     <div class="buttons"><button type="submit">Сохранить пароль</button><button id="closePasswordDialog" type="button" class="secondary">Закрыть</button></div>
   </form>
 </dialog>
+<dialog id="passwordRecoveryDialog" class="legal-consent-dialog" aria-labelledby="passwordRecoveryTitle">
+  <form id="passwordRecoveryForm">
+    <h2 id="passwordRecoveryTitle">Восстановить пароль</h2>
+    <p id="passwordRecoveryHint">Укажите почту, с которой вы зарегистрировались. Мы отправим ссылку для смены пароля.</p>
+    <div id="recoveryEmailFields"><label for="recoveryEmail">Ваша почта</label><input id="recoveryEmail" name="email" type="email" autocomplete="email" maxlength="254" required></div>
+    <div id="recoveryPasswordFields" hidden>
+      <label for="recoveryPassword">Новый пароль</label><input id="recoveryPassword" name="new_password" type="password" autocomplete="new-password" minlength="8" maxlength="128" disabled required>
+      <label for="recoveryConfirmation">Повторите пароль</label><input id="recoveryConfirmation" name="confirmation" type="password" autocomplete="new-password" minlength="8" maxlength="128" disabled required>
+    </div>
+    <p id="passwordRecoveryMessage" role="status" hidden></p>
+    <div class="buttons"><button id="passwordRecoverySubmit" type="submit">Отправить ссылку</button><button id="closeRecoveryDialog" class="secondary" type="button">Закрыть</button></div>
+  </form>
+</dialog>
+<script type="module" src="password-recovery.mjs"></script>
 <script type="module" src="account-security.mjs"></script>
 <script type="module" src="app.js?v=20261019-1"></script>
 </body></html>

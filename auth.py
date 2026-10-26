@@ -133,6 +133,14 @@ class AuthStore:
                     created_at INTEGER NOT NULL
                 );
                 CREATE INDEX IF NOT EXISTS sessions_expires_at ON sessions(expires_at);
+                CREATE TABLE IF NOT EXISTS password_resets (
+                    token_hash BLOB PRIMARY KEY,
+                    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    created_at INTEGER NOT NULL,
+                    expires_at INTEGER NOT NULL,
+                    invalidated INTEGER NOT NULL DEFAULT 0
+                );
+                CREATE INDEX IF NOT EXISTS password_resets_user ON password_resets(user_id, created_at);
                 CREATE TABLE IF NOT EXISTS login_failures (
                     user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
                     attempts INTEGER NOT NULL,
@@ -477,6 +485,54 @@ class AuthStore:
         if cursor.rowcount != 1:
             raise ValueError("Пользователь не найден.")
 
+    def request_password_reset(self, email):
+        _, normalized = _validate_email(email)
+        now = int(time.time())
+        with self._connect() as connection:
+            connection.execute('BEGIN IMMEDIATE')
+            connection.execute('DELETE FROM password_resets WHERE created_at < ?', (now-86400,))
+            user = connection.execute('SELECT id,email FROM users WHERE email_normalized=? AND is_banned=0',
+                                      (normalized,)).fetchone()
+            if not user:
+                return None
+            recent = connection.execute('SELECT created_at FROM password_resets WHERE user_id=? AND created_at>?',
+                                        (user['id'], now-3600)).fetchall()
+            if len(recent) >= 5 or any(row['created_at'] > now-60 for row in recent):
+                return None
+            token = secrets.token_urlsafe(32)
+            connection.execute('UPDATE password_resets SET invalidated=1 WHERE user_id=?', (user['id'],))
+            connection.execute('INSERT INTO password_resets VALUES (?,?,?,?,0)',
+                               (sha256(token.encode()).digest(), user['id'], now, now+1800))
+            return user['email'], token
+
+    def invalidate_password_reset(self, token):
+        with self._connect() as connection:
+            connection.execute('UPDATE password_resets SET invalidated=1 WHERE token_hash=?',
+                               (sha256(token.encode()).digest(),))
+
+    def reset_password(self, token, new_password, confirmation):
+        _validate_password(new_password)
+        if new_password != confirmation:
+            raise ValueError('Пароли не совпадают.')
+        if not isinstance(token, str) or not 40 <= len(token) <= 100:
+            raise ValueError('Ссылка недействительна или устарела. Запросите новое письмо.')
+        with self._connect() as connection:
+            connection.execute('BEGIN IMMEDIATE')
+            row = connection.execute('''SELECT r.user_id FROM password_resets r JOIN users u ON u.id=r.user_id
+                WHERE r.token_hash=? AND r.invalidated=0 AND r.expires_at>? AND u.is_banned=0''',
+                (sha256(token.encode()).digest(), int(time.time()))).fetchone()
+            if not row:
+                raise ValueError('Ссылка недействительна или устарела. Запросите новое письмо.')
+            user_id = row['user_id']
+            salt = os.urandom(16)
+            digest = pbkdf2_hmac('sha256', new_password.encode(), salt, PASSWORD_ITERATIONS)
+            connection.execute('UPDATE users SET password_salt=?,password_hash=?,password_iterations=? WHERE id=?',
+                               (salt, digest, PASSWORD_ITERATIONS, user_id))
+            for table in ('sessions', 'login_failures', 'password_resets'):
+                connection.execute(f'DELETE FROM {table} WHERE user_id=?', (user_id,))
+            connection.execute("INSERT INTO account_events(user_id,event,created_at,details) VALUES (?,'password_reset',?,'{}')",
+                               (user_id, int(time.time())))
+
     def change_password(self, user_id, current_password, new_password, confirmation):
         _validate_password(new_password)
         if new_password != confirmation:
@@ -496,6 +552,7 @@ class AuthStore:
                                (salt,digest,PASSWORD_ITERATIONS,int(user_id)))
             connection.execute('DELETE FROM sessions WHERE user_id=?',(int(user_id),))
             connection.execute('DELETE FROM login_failures WHERE user_id=?',(int(user_id),))
+            connection.execute('DELETE FROM password_resets WHERE user_id=?',(int(user_id),))
             connection.execute("INSERT INTO account_events(user_id,event,created_at,details) VALUES (?,'password_changed',?,'{}')",
                                (int(user_id),int(time.time())))
 
