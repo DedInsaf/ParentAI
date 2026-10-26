@@ -17,7 +17,7 @@ test('camera is enabled by default with an immediate local preview on every plan
 });
 
 test('resume reconnects camera before restarting the metered lesson clock', () => {
-  const resume = script.slice(script.indexOf('async function pause()'), script.indexOf('function stop('));
+  const resume = script.slice(script.indexOf('function pause('), script.indexOf('function stop('));
   assert.ok(resume.indexOf('await enableCamera()') < resume.indexOf("action:'resume'"));
   assert.match(resume, /lessonElapsed=Number\(session\.elapsed_seconds\|\|0\)\*1000/);
 });
@@ -37,7 +37,7 @@ test('face detection failure does not switch off a working lesson camera', () =>
 
 test('lesson pauses safely on connection loss, tab hiding and page reload', () => {
   assert.match(script, /finally \{ if \(authenticated\) setTimeout\(pollLoop, 2000\); \}/);
-  assert.match(script, /pause\(\)\.catch\(\(\)=>\{\}\)/);
+  assert.match(script, /pause\(true\)\.catch\(\(\)=>\{\}\)/);
   assert.match(script, /keepalive:true/);
   assert.match(script, /action:'pause',id:studySessionId/);
   assert.match(script, /pausePending&&running&&paused&&studySessionId/);

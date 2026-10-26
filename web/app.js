@@ -19,6 +19,7 @@ let status = {}, stream, detector, avatarTopology, THREE, renderer, scene, camer
 let audioContext, analyser, audioSource, pcm, playing = false, recording = false, scanning = false;
 let browserUtterance = null, browserSpeechStarted = 0;
 let running = false, paused = false, pausePending = false, lastFrame = -1, lastDetect = 0, lastResult = null, lastSeenFrame = 0;
+let lessonTransition = null, resumeCancelled = false;
 let lastMediaTimestamp = -1;
 let avatarDependenciesPromise,dependenciesPromise, detectError = false, connecting = false, playbackId = 0, audioKind = '';
 const presence = new Presence();
@@ -85,7 +86,7 @@ async function api(path, body, retry = true, timeout = 15000, signal, operationI
   } finally { clearTimeout(timer);signal?.removeEventListener("abort",abort); }
 }
 function controls() {
-  const transition = pendingActions.has('startBtn') || pendingActions.has('pauseBtn');
+  const transition = !!lessonTransition || pendingActions.has('startBtn') || pendingActions.has('pauseBtn');
   const directVoice = $('voiceMode').value === 'direct';
   const recordedTakes = status.reference_mode === 'clone' ? (status.reference_takes || []) : [];
   const selectedTakeRecorded = recordedTakes.includes(voiceTake);
@@ -113,8 +114,8 @@ function controls() {
   $('startBtn').disabled = !online || transition || !mesh || !(status.phrases?.length) || running || scanning || recording || voiceBusy();
   $('pauseBtn').disabled = !running || transition || (paused && (!online || pausePending));
   $('stopBtn').disabled = !running;
-  $('retryCameraBtn').hidden = !running || paused || cameraLive();
-  $('retryCameraBtn').disabled = !running || paused || pendingActions.has('retryCameraBtn');
+  $('retryCameraBtn').hidden = !running || cameraLive();
+  $('retryCameraBtn').disabled = !running || transition || pendingActions.has('retryCameraBtn');
   $('lessonVoiceBtn').disabled = !running || paused || tutorBusy || questionRecording || !(status.phrases?.length);
   $('stopSpeechBtn').disabled = !playing;
   $('askBtn').disabled = tutorBusy || !!taskSwitchPending || questionRecording || listenerPending || !online || !status.tutor?.enabled;
@@ -146,10 +147,9 @@ function controls() {
 async function poll() {
   try {
     status = await api('status');
-    if(pausePending&&running&&paused&&studySessionId){
-      const session=await api('study-session',JSON.stringify({action:'pause',id:studySessionId}));
-      lessonElapsed=Number(session.elapsed_seconds||0)*1000;lessonLimitSeconds=session.limit_seconds;
-      pausePending=false;$('monitorStatus').textContent='Перерыв · связь восстановлена, таймер остановлен';
+    if(pausePending&&running&&paused&&studySessionId&&!lessonTransition){
+      await pause(true);
+      if(running&&paused)$('monitorStatus').textContent='Перерыв · связь восстановлена, таймер остановлен';
     }
     online = true;
     $('connection').textContent = '';
@@ -185,7 +185,7 @@ async function poll() {
     }
   } catch {
     online = false; $('connection').hidden = false; $('connection').textContent = 'Нет связи · переподключаемся…';
-    if (running && !paused) { try { await pause(); } catch {} }
+    if (running && (!paused||lessonTransition)) { try { await pause(true); } catch {} }
   } finally { controls(); }
 }
 function renderParentSummary(value) {
@@ -294,6 +294,16 @@ function initScene() {
   scene = new THREE.Scene();
   camera = new THREE.OrthographicCamera(-1, 1, 1, -1, .01, 100);
   renderer = new THREE.WebGLRenderer({antialias: true, alpha: true});
+  renderer.domElement.addEventListener('webglcontextlost',event=>{
+    event.preventDefault();
+    if(running)pause(true).catch(fail);
+    fail(new Error('Отображение аватара прервано. После восстановления нажмите «Продолжить занятие».'));
+  });
+  renderer.domElement.addEventListener('webglcontextrestored',()=>{
+    renderTime=0;fit();
+    if(running&&paused)$('monitorStatus').textContent='Аватар восстановлен · можно продолжить занятие';
+    controls();
+  });
   renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   scene.add(new THREE.AmbientLight(0xffffff, 1.05));
@@ -311,10 +321,10 @@ function fit() {
   camera.updateProjectionMatrix();
 }
 async function enableCamera() {
-  if (cameraLive()) {
+  if (cameraLive() && !stream.getVideoTracks().some(track=>track.muted)) {
     if (video.srcObject !== stream) video.srcObject = stream;
     await withTimeout(video.play(),10000);
-    lastSeenFrame=performance.now();detectError=false;controls();return;
+    lastFrame=-1;lastResult=null;lastSeenFrame=performance.now();detectError=false;controls();return;
   }
   stopCamera(); const epoch=cameraEpoch;cameraAbort=new AbortController();
   let candidate;
@@ -623,31 +633,53 @@ async function start() {
   startHandsFree().catch(fail);
   try { await playVoice('lesson'); } catch(e) { fail(e); }
 }
-async function pause() {
-  stopAudio(); cancelTutor();stopHandsFree();
-  if (!paused) {
-    const localElapsed=lessonElapsed+performance.now()-lessonStarted;
-    try {
-      const session=await api('study-session',JSON.stringify({action:'pause',id:studySessionId}));
-      lessonElapsed=Number(session.elapsed_seconds||0)*1000;lessonLimitSeconds=session.limit_seconds;pausePending=false;
-    } catch(error) {
-      lessonElapsed=localElapsed;
-      paused = true;pausePending=true; lessonPresenceEnabled=false;document.body.classList.add('on-break');stopCamera();setListenerState('off','Перерыв. Камера и микрофон выключены.'); $('pauseBtn').textContent = 'Продолжить занятие'; $('monitorStatus').textContent = 'Перерыв · ждём восстановление связи';
-      controls();
-      throw error;
-    }
-    paused = true; lessonPresenceEnabled=false;document.body.classList.add('on-break');stopCamera();setListenerState('off','Перерыв. Камера и микрофон выключены.'); $('pauseBtn').textContent = 'Продолжить занятие'; $('monitorStatus').textContent = 'Перерыв · камера выключена';
-  } else {
-    // Reconnect the camera before resuming the server clock. If permission or
-    // the device fails, the paid lesson time remains paused.
-    if (lessonCameraEnabled) await enableCamera();
-    let session;
-    try { session=await api('study-session',JSON.stringify({action:'resume',id:studySessionId})); }
-    catch(error){if(lessonCameraEnabled)stopCamera();throw error;}
-    lessonElapsed=Number(session.elapsed_seconds||0)*1000;lessonLimitSeconds=session.limit_seconds;
-    presence.reset(); paused = false;document.body.classList.remove('on-break'); lessonStarted = performance.now(); $('pauseBtn').textContent = 'Сделать перерыв';if(lessonCameraEnabled)startLessonPresence();startHandsFree().catch(fail);
+function pause(forcePause=false) {
+  if(!running||!studySessionId)return Promise.resolve();
+  if(forcePause){resumeCancelled=true;stopCamera();}
+  if(lessonTransition){
+    // A hidden tab/camera failure must never toggle an in-flight resume back
+    // into another resume. Finish it, then reconcile the server to paused.
+    return forcePause?lessonTransition.catch(()=>{}).then(()=>pause(true)):lessonTransition;
   }
-  controls();
+  const sessionId=studySessionId;
+  const resuming=paused&&!forcePause;
+  resumeCancelled=false;
+  // Keep the audio unlock inside the button gesture, before network awaits.
+  const audioReady=resuming?context().resume():Promise.resolve();
+  lessonTransition=(async()=>{
+    stopAudio();cancelTutor();stopHandsFree();
+    if(!resuming){
+      if(!paused)lessonElapsed+=performance.now()-lessonStarted;
+      paused=true;pausePending=true;lessonPresenceEnabled=false;
+      document.body.classList.add('on-break');stopCamera();
+      setListenerState('off','Перерыв. Камера и микрофон выключены.');
+      $('pauseBtn').textContent='Продолжить занятие';
+      $('monitorStatus').textContent='Перерыв · камера выключена';controls();
+      const session=await api('study-session',JSON.stringify({action:'pause',id:sessionId}));
+      if(!running||studySessionId!==sessionId)return;
+      lessonElapsed=Number(session.elapsed_seconds||0)*1000;lessonLimitSeconds=session.limit_seconds;pausePending=false;
+      return;
+    }
+    const interrupted=()=>resumeCancelled||document.hidden||!running||studySessionId!==sessionId;
+    try{
+      await audioReady;
+      if(pausePending){
+        await api('study-session',JSON.stringify({action:'pause',id:sessionId}));
+        pausePending=false;
+      }
+      if(interrupted())return;
+      if(lessonCameraEnabled)await enableCamera();
+      if(interrupted()){stopCamera();return;}
+      const session=await api('study-session',JSON.stringify({action:'resume',id:sessionId}));
+      if(interrupted()){stopCamera();return;}
+      lessonElapsed=Number(session.elapsed_seconds||0)*1000;lessonLimitSeconds=session.limit_seconds;
+      pausePending=false;detectError=false;presence.reset();paused=false;
+      document.body.classList.remove('on-break');lessonStarted=performance.now();
+      $('pauseBtn').textContent='Сделать перерыв';
+      if(lessonCameraEnabled)startLessonPresence();startHandsFree().catch(fail);
+    }catch(error){stopCamera();throw error;}
+  })().finally(()=>{lessonTransition=null;controls();});
+  return lessonTransition;
 }
 function stop(message='Занятие завершено · камера выключена',notifyServer=true) { const session=studySessionId;studySessionId=null;if(session&&notifyServer)api('study-session',JSON.stringify({action:'stop',id:session})).catch(()=>{});stopHandsFree();api('voice-release',new Uint8Array()).catch(()=>{});running = false; paused = false;pausePending=false;dialogId=null;taskFinished=false;lessonCameraEnabled=false;lessonPresenceEnabled=false;document.body.classList.remove('on-break'); stopAudio(); stopCamera(); cancelTutor(); presence.reset(); $('pauseBtn').textContent = 'Сделать перерыв'; $('monitorStatus').textContent = message; showSetup(); controls(); }
 function startLessonPresence() {
@@ -662,7 +694,8 @@ function startLessonPresence() {
   });
 }
 async function reconnectLessonCamera() {
-  if (!running || paused) return;
+  if (!running) return;
+  if(paused)return pause();
   lessonCameraEnabled=true;$('readyCamera').checked=true;
   $('monitorStatus').textContent='Подключаем камеру…';controls();
   try {
@@ -705,7 +738,20 @@ function tick(now) {
           presence.acknowledgeReminder(current.reminder,now/1000);reminder(current.reminder);
         }
       }
-    } catch (e) { if (!detectError) { detectError = true; pause(); fail(e); } }
+    } catch (e) {
+      lessonPresenceEnabled=false;
+      try{detector?.close();}catch{}
+      detector=null;dependenciesPromise=null;lastMediaTimestamp=-1;
+      if(!cameraLive()||video.readyState<2||now-lastSeenFrame>3000){
+        detectError=true;pause(true).catch(fail);fail(e);
+      }else{
+        // A MediaPipe/WebGL failure is not a lost camera. Discard the broken
+        // detector so the next reconnect can create it again; keep the avatar
+        // and lesson running instead of entering an unrecoverable pause loop.
+        detectError=true;
+        $('monitorStatus').textContent='Камера включена · проверка лица временно недоступна';
+      }
+    }
   }
   if (mesh && !document.hidden && now - renderTime >= 33) {
     renderTime = now;
@@ -1046,7 +1092,7 @@ $('clearHelpBtn').addEventListener('click', async () => { const previous=dialogI
 $('switchTaskBtn').addEventListener('click',()=>{const pending=taskSwitchPending;if(!pending)return;hideTaskSwitch();$('tutorMessages').replaceChildren();answerQuestion(pending.question,'new',true);});
 $('continueTaskBtn').addEventListener('click',()=>{const pending=taskSwitchPending;if(!pending)return;hideTaskSwitch();answerQuestion(pending.question,'continue',false);});
 window.addEventListener('popstate', () => { if (running) stop(); });
-document.addEventListener('visibilitychange', () => { if (document.hidden) { recordCancelled = true; recordingAbort?.abort(); stopTracks(recordingStream);if(scanning)cancelScan();window.speechSynthesis?.cancel();stopHandsFree();stopCamera(); } if (document.hidden && running && !paused) { pause().catch(()=>{}); $('monitorStatus').textContent = 'Перерыв · окно скрыто'; } });
+document.addEventListener('visibilitychange', () => { if (document.hidden) { recordCancelled = true; recordingAbort?.abort(); stopTracks(recordingStream);if(scanning)cancelScan();window.speechSynthesis?.cancel();stopHandsFree();stopCamera(); } if (document.hidden && running) { pause(true).catch(()=>{}); $('monitorStatus').textContent = 'Перерыв · окно скрыто'; } });
 window.addEventListener('beforeunload', () => {
   if(running&&!paused&&studySessionId)fetch('/api/study-session',{method:'POST',keepalive:true,headers:{'X-App-Token':token,'Content-Type':'application/json'},body:JSON.stringify({action:'pause',id:studySessionId})}).catch(()=>{});
   stopHandsFree();stopTracks(questionStream);stopTracks(recordingStream);stopAudio(); stopCamera(); scannerAbort?.abort();restoringAbort?.abort();modelAvatar?.dispose();detector?.close(); audioContext?.close();
