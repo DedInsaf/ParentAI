@@ -5,7 +5,7 @@ import threading
 import unittest
 import urllib.request
 import urllib.error
-from unittest.mock import patch
+from unittest.mock import patch, Mock
 from http.cookies import SimpleCookie
 from auth import SESSION_LIFETIME
 from runtime import Runtime
@@ -22,6 +22,7 @@ class ServerTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.r = Runtime(self.temp.name)
         self.s = AppServer(self.r)
+        self.s.mailer = Mock(configured=True)
         self.s.tutor = Tutor()
         user = self.s.auth.register('test-user', 'test@example.com', 'password-123', 'password-123',
                                     telegram_username='@test_parent')
@@ -143,7 +144,8 @@ class ServerTests(unittest.TestCase):
                             'parent_confirmed':True}).encode()
         code,body=self.request('/api/auth/register',payload,headers,authenticated=False)
         self.assertEqual(code,201)
-        self.assertFalse(json.loads(body)['user']['is_admin'])
+        self.assertTrue(json.loads(body)['verification_required'])
+        self.assertEqual(self.s.auth.user_for_admin(2)['role'],'parent')
         self.s.auth.set_role('test-user','admin')
         code,body=self.request('/api/parent/summary',headers={'X-App-Token':self.s.token})
         self.assertEqual(code,200)
@@ -289,8 +291,10 @@ class ServerTests(unittest.TestCase):
                                              authenticated=False,include_headers=True)
         self.assertEqual(code,201)
         cookies=response_headers.get_all('Set-Cookie')
-        self.assertEqual(len(cookies),2)
+        self.assertEqual(len(cookies),1)
         device=next(SimpleCookie(value)['adym_device'].value for value in cookies if 'adym_device=' in value)
+        link=self.s.mailer.send_verification.call_args.args[1]
+        self.s.auth.verify_email(link.split('#verify=',1)[1],'password-123')
         second={**first,'login':'device-two','email':'device-two@example.com'}
         blocked={**headers,'Cookie':'adym_device='+device}
         code,body=self.request('/api/auth/register',json.dumps(second).encode(),blocked,authenticated=False)

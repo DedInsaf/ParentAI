@@ -141,6 +141,14 @@ class AuthStore:
                     invalidated INTEGER NOT NULL DEFAULT 0
                 );
                 CREATE INDEX IF NOT EXISTS password_resets_user ON password_resets(user_id, created_at);
+                CREATE TABLE IF NOT EXISTS email_verifications (
+                    token_hash BLOB PRIMARY KEY,
+                    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    created_at INTEGER NOT NULL,
+                    expires_at INTEGER NOT NULL,
+                    invalidated INTEGER NOT NULL DEFAULT 0
+                );
+                CREATE INDEX IF NOT EXISTS email_verifications_user ON email_verifications(user_id,created_at);
                 CREATE TABLE IF NOT EXISTS login_failures (
                     user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
                     attempts INTEGER NOT NULL,
@@ -176,6 +184,13 @@ class AuthStore:
             )
 
             columns = {row[1] for row in connection.execute("PRAGMA table_info(users)")}
+            # Existing accounts retain access; do not label their emails as verified.
+            if 'email_verification_required' not in columns:
+                connection.execute('ALTER TABLE users ADD COLUMN email_verification_required INTEGER NOT NULL DEFAULT 0')
+            if 'email_verified_at' not in columns:
+                connection.execute('ALTER TABLE users ADD COLUMN email_verified_at INTEGER')
+            if 'pending_device_hash' not in columns:
+                connection.execute('ALTER TABLE users ADD COLUMN pending_device_hash BLOB')
             if "role" not in columns:
                 connection.execute("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'parent'")
             if "terms_accepted_at" not in columns:
@@ -219,7 +234,7 @@ class AuthStore:
 
     def register(self, login, email, password, password_confirmation, role="parent",
                  legal_accepted=True, privacy_accepted=True, parent_confirmed=True, device_token=None,
-                 telegram_username=None) -> User:
+                 telegram_username=None, require_email_verification=False) -> User:
         if role not in ("parent", "admin"):
             raise ValueError("Неизвестная роль пользователя.")
         display_login, normalized_login = _validate_login(login)
@@ -262,7 +277,10 @@ class AuthStore:
                     "INSERT INTO account_events(user_id,event,created_at) VALUES (?, 'registered', ?)",
                     (user_id, int(time.time())),
                 )
-                if device_hash is not None:
+                if require_email_verification:
+                    connection.execute('UPDATE users SET email_verification_required=1,pending_device_hash=? WHERE id=?',
+                                       (device_hash, user_id))
+                elif device_hash is not None:
                     connection.execute(
                         "INSERT INTO device_registrations(device_hash,user_id,registered_at) VALUES (?,?,?)",
                         (device_hash, user_id, int(time.time())),
@@ -337,6 +355,8 @@ class AuthStore:
             return None, "invalid"
         if row["is_banned"]:
             return None, "banned"
+        if row['email_verification_required'] and not row['email_verified_at']:
+            return None, 'unverified'
         with self._connect() as connection:
             connection.execute("DELETE FROM login_failures WHERE user_id=?", (row['id'],))
         return User(row["id"], row["login"], row["email"], row["role"],
@@ -349,10 +369,11 @@ class AuthStore:
         now = int(time.time())
         with self._connect() as connection:
             active = connection.execute(
-                "SELECT 1 FROM users WHERE id=? AND is_banned=0", (int(user_id),)
+                """SELECT 1 FROM users WHERE id=? AND is_banned=0
+                   AND (email_verification_required=0 OR email_verified_at IS NOT NULL)""", (int(user_id),)
             ).fetchone()
             if not active:
-                raise ValueError("Аккаунт заблокирован или удалён.")
+                raise ValueError("Подтвердите почту. Также проверьте, что аккаунт не заблокирован или удалён.")
             connection.execute("DELETE FROM sessions WHERE expires_at <= ?", (now,))
             connection.execute("""DELETE FROM sessions WHERE user_id=? AND token_hash NOT IN
                 (SELECT token_hash FROM sessions WHERE user_id=? ORDER BY created_at DESC,rowid DESC LIMIT 4)""",
@@ -383,7 +404,8 @@ class AuthStore:
                    FROM sessions JOIN users ON users.id = sessions.user_id
                    WHERE sessions.token_hash = ? AND sessions.expires_at > ?
                      AND sessions.created_at > ?
-                     AND users.is_banned = 0""",
+                     AND users.is_banned = 0
+                     AND (users.email_verification_required=0 OR users.email_verified_at IS NOT NULL)""",
                 (token_hash, now, now-MAX_SESSION_LIFETIME),
             ).fetchone()
             if row and renew:
@@ -485,6 +507,59 @@ class AuthStore:
         if cursor.rowcount != 1:
             raise ValueError("Пользователь не найден.")
 
+    def request_email_verification(self, email):
+        _, normalized = _validate_email(email)
+        now = int(time.time())
+        with self._connect() as connection:
+            connection.execute('BEGIN IMMEDIATE')
+            connection.execute('DELETE FROM email_verifications WHERE created_at<?', (now-86400,))
+            user = connection.execute('''SELECT id,email FROM users WHERE email_normalized=? AND is_banned=0
+                AND email_verification_required=1 AND email_verified_at IS NULL''', (normalized,)).fetchone()
+            if not user:
+                return None
+            recent = connection.execute('SELECT created_at FROM email_verifications WHERE user_id=? AND created_at>?',
+                                        (user['id'],now-3600)).fetchall()
+            if len(recent)>=5 or any(row['created_at']>now-60 for row in recent):
+                return None
+            token = secrets.token_urlsafe(32)
+            connection.execute('UPDATE email_verifications SET invalidated=1 WHERE user_id=?', (user['id'],))
+            connection.execute('INSERT INTO email_verifications VALUES (?,?,?,?,0)',
+                               (sha256(token.encode()).digest(),user['id'],now,now+86400))
+            return user['email'], token
+
+    def invalidate_email_verification(self, token):
+        with self._connect() as connection:
+            connection.execute('UPDATE email_verifications SET invalidated=1 WHERE token_hash=?',
+                               (sha256(token.encode()).digest(),))
+
+    def verify_email(self, token, password):
+        if not isinstance(token,str) or not 40<=len(token)<=100:
+            raise ValueError('Ссылка недействительна или устарела. Запросите новое письмо.')
+        if not isinstance(password,str) or not 8<=len(password)<=128:
+            raise ValueError('Введите пароль, который вы указали при регистрации.')
+        with self._connect() as connection:
+            connection.execute('BEGIN IMMEDIATE')
+            row = connection.execute('''SELECT u.* FROM email_verifications v JOIN users u ON u.id=v.user_id
+                WHERE v.token_hash=? AND v.invalidated=0 AND v.expires_at>? AND u.is_banned=0
+                AND u.email_verification_required=1 AND u.email_verified_at IS NULL''',
+                (sha256(token.encode()).digest(),int(time.time()))).fetchone()
+            if not row:
+                raise ValueError('Ссылка недействительна или устарела. Запросите новое письмо.')
+            if not hmac.compare_digest(pbkdf2_hmac('sha256',password.encode(),row['password_salt'],
+                                                 row['password_iterations']),row['password_hash']):
+                raise ValueError('Неверный пароль регистрации. Если забыли его, воспользуйтесь восстановлением пароля.')
+            device_hash=row['pending_device_hash']
+            if device_hash:
+                if connection.execute('SELECT 1 FROM device_registrations WHERE device_hash=?', (device_hash,)).fetchone():
+                    raise ValueError('На устройстве регистрации уже создан аккаунт. Обратитесь в поддержку.')
+                connection.execute('INSERT INTO device_registrations(device_hash,user_id,registered_at) VALUES (?,?,?)',
+                                   (device_hash,row['id'],int(time.time())))
+            connection.execute('UPDATE users SET email_verified_at=?,pending_device_hash=NULL WHERE id=?',
+                               (int(time.time()),row['id']))
+            connection.execute('DELETE FROM email_verifications WHERE user_id=?', (row['id'],))
+            connection.execute("INSERT INTO account_events(user_id,event,created_at,details) VALUES (?,'email_verified',?,'{}')",
+                               (row['id'],int(time.time())))
+
     def request_password_reset(self, email):
         _, normalized = _validate_email(email)
         now = int(time.time())
@@ -528,6 +603,10 @@ class AuthStore:
             digest = pbkdf2_hmac('sha256', new_password.encode(), salt, PASSWORD_ITERATIONS)
             connection.execute('UPDATE users SET password_salt=?,password_hash=?,password_iterations=? WHERE id=?',
                                (salt, digest, PASSWORD_ITERATIONS, user_id))
+            # A reset proves mailbox ownership and replaces any password chosen by someone else.
+            connection.execute('UPDATE users SET email_verified_at=?,pending_device_hash=NULL WHERE id=?',
+                               (int(time.time()),user_id))
+            connection.execute('DELETE FROM email_verifications WHERE user_id=?', (user_id,))
             for table in ('sessions', 'login_failures', 'password_resets'):
                 connection.execute(f'DELETE FROM {table} WHERE user_id=?', (user_id,))
             connection.execute("INSERT INTO account_events(user_id,event,created_at,details) VALUES (?,'password_reset',?,'{}')",

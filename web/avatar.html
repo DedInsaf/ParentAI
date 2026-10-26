@@ -34,18 +34,19 @@
       <label for="loginPassword">Пароль</label><input id="loginPassword" name="password" type="password" autocomplete="current-password" maxlength="128" required>
       <button class="full auth-submit" type="submit">Войти в аккаунт</button>
       <button id="forgotPasswordBtn" class="secondary full" type="button">Забыли пароль?</button>
+      <button id="resendVerificationBtn" class="quiet full" type="button">Не пришло письмо подтверждения?</button>
     </form>
     <form id="registerForm" hidden>
       <h2>Создать аккаунт</h2><p class="muted">Регистрацию оформляет совершеннолетний родитель.</p>
       <label for="registerLogin">Логин</label><input id="registerLogin" name="login" type="text" autocomplete="username" minlength="3" maxlength="32" pattern="[A-Za-zА-Яа-яЁё0-9][A-Za-zА-Яа-яЁё0-9._-]{2,31}" title="От 3 до 32 символов: буквы, цифры, точка, дефис и подчёркивание" required>
-      <label for="registerEmail">Почта</label><input id="registerEmail" name="email" type="email" autocomplete="email" maxlength="254" required>
+      <label for="registerEmail">Почта</label><input id="registerEmail" name="email" type="email" autocomplete="email" maxlength="254" required><small class="field-hint">Отправим ссылку для подтверждения. До подтверждения вход в приложение закрыт.</small>
       <label for="registerTelegram">Telegram username</label><input id="registerTelegram" name="telegram_username" type="text" autocomplete="off" minlength="5" maxlength="33" pattern="@?[A-Za-z0-9_]{5,32}" placeholder="@username" title="От 5 до 32 латинских букв, цифр или подчёркиваний" required><small class="field-hint">Нужен для идентификации покупателя и связи по вопросам оплаты</small>
       <label for="registerPassword">Пароль</label><input id="registerPassword" name="password" type="password" autocomplete="new-password" minlength="8" maxlength="128" required><small class="field-hint">Минимум 8 символов</small>
       <label for="registerPasswordConfirmation">Подтвердите пароль</label><input id="registerPasswordConfirmation" name="password_confirmation" type="password" autocomplete="new-password" minlength="8" maxlength="128" required>
       <label class="toggle-row"><input name="parent_confirmed" type="checkbox" required><span>Я совершеннолетний родитель или законный представитель ребёнка</span></label>
       <label class="toggle-row"><input name="terms_accepted" type="checkbox" required><span>Принимаю <a href="https://adym.ru/terms.html" target="_blank" rel="noopener">пользовательское соглашение и условия тарифа</a></span></label>
       <label class="toggle-row"><input name="privacy_accepted" type="checkbox" required><span>Отдельно даю <a href="https://adym.ru/consent.html" target="_blank" rel="noopener">согласие на обработку моих данных и данных ребёнка, законным представителем которого я являюсь</a></span></label>
-      <button class="full auth-submit" type="submit">Создать аккаунт</button>
+      <button class="full auth-submit" type="submit">Зарегистрироваться и подтвердить почту</button>
     </form>
     <p id="authError" class="auth-error" role="alert" hidden></p>
     <nav class="auth-links" aria-label="Документы и поддержка"><a href="https://adym.ru/privacy.html" target="_blank" rel="noopener">Конфиденциальность</a><a href="https://adym.ru/consent.html" target="_blank" rel="noopener">Согласие на данные</a><a href="https://adym.ru/terms.html" target="_blank" rel="noopener">Соглашение</a><a href="https://adym.ru/support.html" target="_blank" rel="noopener">Поддержка</a></nav>
@@ -257,6 +258,18 @@
     <div class="buttons"><button id="passwordRecoverySubmit" type="submit">Отправить ссылку</button><button id="closeRecoveryDialog" class="secondary" type="button">Закрыть</button></div>
   </form>
 </dialog>
+<dialog id="emailVerificationDialog" class="legal-consent-dialog" aria-labelledby="emailVerificationTitle">
+  <form id="emailVerificationForm">
+    <h2 id="emailVerificationTitle">Подтвердите почту</h2>
+    <p id="emailVerificationHint">Откройте ссылку из письма. Если письма нет, проверьте «Спам» или запросите новое.</p>
+    <div id="verificationEmailFields"><label for="verificationEmail">Ваша почта</label><input id="verificationEmail" name="email" type="email" autocomplete="email" maxlength="254" required></div>
+    <div id="verificationPasswordFields" hidden><label for="verificationPassword">Пароль регистрации</label><input id="verificationPassword" name="password" type="password" autocomplete="current-password" minlength="8" maxlength="128" required disabled></div>
+    <p id="emailVerificationMessage" role="status" hidden></p>
+    <div class="buttons"><button id="emailVerificationSubmit" type="submit">Отправить письмо повторно</button><button id="closeVerificationDialog" class="secondary" type="button">Закрыть</button></div>
+    <button id="verificationForgotPassword" type="button" class="quiet" hidden>Не помню пароль регистрации</button>
+  </form>
+</dialog>
+<script type="module" src="email-verification.mjs"></script>
 <script type="module" src="password-recovery.mjs"></script>
 <script type="module" src="account-security.mjs"></script>
 <script type="module" src="app.js?v=20261019-1"></script>

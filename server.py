@@ -154,6 +154,26 @@ class AppServer(ThreadingHTTPServer):
             bucket.append(now)
             return True
 
+    def send_email_verification(self, email):
+        delivery = self.auth.request_email_verification(email)
+        if not delivery:
+            return
+        recipient, token = delivery
+        try:
+            self.mailer.send_verification(recipient,self.origin+'/#verify='+token)
+        except Exception:
+            self.auth.invalidate_email_verification(token)
+            LOGGER.error('Email verification delivery failed')
+            raise ValueError('Не удалось отправить письмо. Повторите отправку через минуту или напишите в support@adym.ru.')
+
+    def deliver_email_verification(self, email):
+        try:
+            self.send_email_verification(email)
+        except Exception:
+            LOGGER.error('Email verification request failed')
+        finally:
+            self.mail_slots.release()
+
     def deliver_password_reset(self, email):
         try:
             delivery = self.auth.request_password_reset(email)
@@ -497,6 +517,23 @@ class Handler(BaseHTTPRequestHandler):
             payload = self.rfile.read(size)
             if len(payload) != size:
                 raise ValueError('Передача данных прервалась. Повторите попытку.')
+            if path in ('/api/auth/verify-email', '/api/auth/resend-verification'):
+                if not self.server.allow_auth_attempt(self.client_key(), 'verification'):
+                    return self.send(429, {'error':'Слишком много попыток. Повторите через пять минут.'})
+                value=json.loads(payload)
+                if not isinstance(value,dict):
+                    raise ValueError('Некорректные данные подтверждения почты.')
+                if path.endswith('/verify-email'):
+                    self.server.auth.verify_email(value.get('token'),value.get('password'))
+                    return self.send(200, {'ok':True})
+                from auth import _validate_email
+                email,_=_validate_email(value.get('email'))
+                if not self.server.mailer.configured:
+                    return self.send(503, {'error':'Отправка писем временно недоступна. Обратитесь в support@adym.ru.'})
+                if not self.server.mail_slots.acquire(blocking=False):
+                    return self.send(503, {'error':'Сервис занят. Повторите через минуту.'})
+                threading.Thread(target=self.server.deliver_email_verification,args=(email,),daemon=True).start()
+                return self.send(200, {'ok':True,'message':'Если эта почта ожидает подтверждения, письмо придёт в течение нескольких минут. Проверьте папку «Спам». Повторный запрос доступен через минуту.'})
             if path in ('/api/auth/forgot-password', '/api/auth/reset-password'):
                 if not self.server.allow_auth_attempt(self.client_key(), 'recovery'):
                     return self.send(429, {'error': 'Слишком много попыток. Повторите через пять минут.'})
@@ -528,15 +565,27 @@ class Handler(BaseHTTPRequestHandler):
                         'отдельно приняв соглашение и согласие на обработку данных.')
                 if not isinstance(value.get('telegram_username'), str) or not value['telegram_username'].strip():
                     raise ValueError('Укажите Telegram username родителя для идентификации покупателя.')
+                if not self.server.mailer.configured:
+                    return self.send(503, {'error':'Регистрация временно недоступна: не работает отправка писем. Повторите позже.'})
+                if not self.server.mail_slots.acquire(blocking=False):
+                    return self.send(503, {'error':'Сервис занят. Повторите регистрацию через минуту.'})
                 device_token = self.device_token() or secrets.token_urlsafe(32)
-                user = self.server.auth.register(
-                    value.get('login'), value.get('email'), value.get('password'),
-                    value.get('password_confirmation'), legal_accepted=True, privacy_accepted=True,
-                    parent_confirmed=True,
-                    device_token=device_token, telegram_username=value.get('telegram_username'))
-                session = self.server.auth.create_session(user.id)
-                return self.send(201, {'user': user.public()}, headers={'Set-Cookie': [
-                    self.session_cookie(session), self.device_cookie(device_token)]})
+                try:
+                    user = self.server.auth.register(
+                        value.get('login'), value.get('email'), value.get('password'),
+                        value.get('password_confirmation'), legal_accepted=True, privacy_accepted=True,
+                        parent_confirmed=True,require_email_verification=True,
+                        device_token=device_token, telegram_username=value.get('telegram_username'))
+                    try:
+                        self.server.send_email_verification(user.email)
+                    except ValueError as error:
+                        return self.send(503, {'error':str(error),'verification_required':True,'email':user.email},
+                                         headers={'Set-Cookie':self.device_cookie(device_token)})
+                finally:
+                    self.server.mail_slots.release()
+                return self.send(201, {'verification_required':True,'email':user.email,
+                                      'message':'Письмо отправлено. Откройте ссылку в письме и подтвердите регистрацию.'},
+                                 headers={'Set-Cookie':self.device_cookie(device_token)})
             if path == '/api/auth/login':
                 value = json.loads(payload)
                 if not isinstance(value, dict):
@@ -549,6 +598,9 @@ class Handler(BaseHTTPRequestHandler):
                     return self.send(429, {'error': 'Слишком много попыток входа. Повторите через пять минут.'})
                 if login_status == 'banned':
                     return self.send(403, {'error': 'Аккаунт заблокирован. Обратитесь в поддержку Адым.'})
+                if login_status == 'unverified':
+                    return self.send(403, {'error':'Сначала подтвердите почту по ссылке из письма. Если письмо не пришло, запросите его повторно.',
+                                          'verification_required':True})
                 if not user:
                     return self.send(401, {'error': 'Неверный логин, почта или пароль.'})
                 session = self.server.auth.create_session(user.id)

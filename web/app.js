@@ -1169,7 +1169,12 @@ async function authRequest(path, values) {
     body: JSON.stringify(values),
   });
   const data = await response.json();
-  if (!response.ok) throw new Error(data.error || `Ошибка ${response.status}`);
+  if (!response.ok) {
+    const error=new Error(data.error || `Ошибка ${response.status}`);
+    error.verificationRequired=data.verification_required;
+    error.email=data.email;
+    throw error;
+  }
   return data;
 }
 
@@ -1310,8 +1315,19 @@ for (const [formId, path] of [['loginForm', 'login'], ['registerForm', 'register
     authBusy(form, true);
     try {
       const data = await authRequest(path, values);
+      if (data.verification_required) {
+        form.reset();authMode('login');
+        window.dispatchEvent(new CustomEvent('adym:email-verification-required',{
+          detail:{email:data.email,message:data.message}}));
+        return;
+      }
       showApplication(data.user);
     } catch (error) {
+      if (error.verificationRequired) {
+        window.dispatchEvent(new CustomEvent('adym:email-verification-required',{
+          detail:{email:error.email || (String(values.identifier||'').includes('@')?values.identifier:values.email),
+                  message:error.message}}));
+      }
       $('authError').textContent = error.message || String(error);
       $('authError').hidden = false;
     } finally { authBusy(form, false); }

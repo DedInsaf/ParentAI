@@ -57,7 +57,7 @@ def _export_database(data_dir: Path, output: Path) -> None:
                 CREATE TABLE accounts AS
                 SELECT id,login,email,telegram_username,role,created_at,terms_accepted_at,terms_version,
                        parent_confirmed,is_banned,banned_at,ban_reason,last_login_at,
-                       login_count,last_seen_at,last_logout_at
+                       login_count,last_seen_at,last_logout_at,email_verified_at,email_verification_required
                   FROM auth.users;
                 CREATE UNIQUE INDEX accounts_id ON accounts(id);
                 CREATE UNIQUE INDEX accounts_login ON accounts(login);
