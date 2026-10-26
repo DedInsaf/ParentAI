@@ -6,7 +6,10 @@ import test_server
 
 
 class AccountSecurityTests(unittest.TestCase):
-    setUp=test_server.ServerTests.setUp
+    def setUp(self):
+        test_server.ServerTests.setUp(self)
+        # Keep these tests on their temporary server even with production env loaded.
+        self.s.origin=self.s.listen_origin
     tearDown=test_server.ServerTests.tearDown
     request=test_server.ServerTests.request
     def test_password_change_rotates_cookie_and_invalidates_old_login(self):
