@@ -170,6 +170,8 @@ async function poll() {
     if(!cloneEnabled&&$('replyVoice').value==='parent'){
       $('replyVoice').value='yandex';
       $('replyVoiceHint').textContent='Адым озвучивает новые подсказки обычным голосом, а напоминания может произносить записью родителя.';
+    }else if($('replyVoice').value==='yandex'){
+      $('replyVoiceHint').textContent='Новые подсказки озвучиваются голосом Адым. Напоминания могут звучать сохранённой записью родителя.';
     }else if(qwen){
       $('replyVoiceHint').textContent='Qwen сохраняет голос родителя, но на тестовом сервере ответ может готовиться 2–5 минут. Голос Адым отвечает значительно быстрее.';
     }else if(cloneEnabled){
@@ -883,6 +885,7 @@ async function answerQuestion(question,switchAction=null,renderQuestion=true) {
   if(taskFinished){$('tutorMessages').replaceChildren();taskFinished=false;taskSolved=false;$('assignment').placeholder='Например: не понимаю, как решить 2x + 3 = 11';}
   if(renderQuestion)chatMessage('user',question);stopAudio();tutorBusy=true;controls();clearError();
   let displayed=false,received=0;const completions=[];
+  const replyVoice=$('replyVoice').value;
   const getAudio=async(key,chunk,cues,text)=>{
     const url='/api/dialog-audio/'+key+(chunk===null?'':'?chunk='+chunk);
     const res=await fetch(url,{headers:{'X-App-Token':token}});
@@ -894,7 +897,7 @@ async function answerQuestion(question,switchAction=null,renderQuestion=true) {
   try {
     await context().resume();$('tutorStatus').textContent='Думаю, как помочь…';
     const started=await api('dialog',JSON.stringify({question,level:$('schoolLevel').value,session:dialogId,
-      study_session:studySessionId,voice:$('replyVoice').value,request_id:requestId(),switch_action:switchAction}));
+      study_session:studySessionId,voice:replyVoice,request_id:requestId(),switch_action:switchAction}));
     if(started.switch_required){showTaskSwitch(question);$('tutorStatus').textContent='Это новое задание или продолжение предыдущего?';return;}
     if(epoch!==helpEpoch){await api('dialog-cancel',JSON.stringify({id:started.id}));return;}
     dialogId=started.session;currentJob=started.id;
@@ -916,7 +919,7 @@ async function answerQuestion(question,switchAction=null,renderQuestion=true) {
       }
       if(result.state==='error')throw new Error(result.warning);
       if(result.state==='cancelled')break;
-      $('tutorStatus').textContent=result.state==='speaking'?(status.voice_provider==='qwen'?'Qwen создаёт голос родителя · обычно 2–5 минут…':'Озвучиваю подсказку…'):'Думаю, как помочь…';
+      $('tutorStatus').textContent=result.state==='speaking'?(replyVoice==='parent'&&status.voice_provider==='qwen'?'Qwen создаёт голос родителя · обычно 2–5 минут…':'Озвучиваю подсказку…'):'Думаю, как помочь…';
       if(performance.now()>deadline)throw new Error('Ответ занял слишком много времени.');
       await sleep(180);
     }
