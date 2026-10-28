@@ -100,6 +100,26 @@ class VerificationHTTPTests(unittest.TestCase):
             'password_confirmation':'password-123','telegram_username':'@mail_parent',
             'parent_confirmed':True,'privacy_accepted':True,'terms_accepted':True})
 
+    def test_selected_plan_survives_email_confirmation_and_resending(self):
+        for plan in ('paid','ultra'):
+            email=plan+'@example.com'
+            code,_,_=self.post('register',{'login':'plan-'+plan,'email':email,'password':'password-123',
+                'password_confirmation':'password-123','telegram_username':'@mail_parent','plan':plan,
+                'parent_confirmed':True,'privacy_accepted':True,'terms_accepted':True})
+            self.assertEqual(code,201)
+            link=self.s.mailer.send_verification.call_args.args[1]
+            self.assertTrue(link.startswith(self.s.origin+'/?plan='+plan+'#verify='))
+            with self.s.auth._connect() as db:
+                db.execute('UPDATE email_verifications SET created_at=created_at-120 WHERE user_id=(SELECT id FROM users WHERE email=?)',(email,))
+            self.s.send_email_verification(email)
+            replacement=self.s.mailer.send_verification.call_args.args[1]
+            self.assertTrue(replacement.startswith(self.s.origin+'/?plan='+plan+'#verify='))
+            self.assertNotEqual(link,replacement)
+        self.s.auth.register('invalid-plan','invalid@example.com','password-123','password-123',
+                             require_email_verification=True,requested_plan='https://example.com')
+        self.s.send_email_verification('invalid@example.com')
+        self.assertTrue(self.s.mailer.send_verification.call_args.args[1].startswith(self.s.origin+'/#verify='))
+
     def test_registration_email_confirm_login_no_session_before_confirmation(self):
         code,body,headers=self.register()
         self.assertEqual(code,201);self.assertTrue(body['verification_required']);self.assertNotIn('user',body)

@@ -6,6 +6,10 @@ RewriteCond %{HTTPS} !=on
 RewriteCond %{HTTP:X-Forwarded-Proto} !https [NC]
 RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [R=301,L]
 
+# Keep older shared Ultra checkout links on the correct price and tariff.
+RewriteCond %{QUERY_STRING} (^|&)plan=ultra(&|$) [NC]
+RewriteRule ^checkout\.html$ /checkout-ultra.html [R=302,L]
+
 AddDefaultCharset UTF-8
 Options -Indexes
 

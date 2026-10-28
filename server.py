@@ -159,8 +159,10 @@ class AppServer(ThreadingHTTPServer):
         if not delivery:
             return
         recipient, token = delivery
+        plan=self.auth.registration_plan(recipient)
+        query='?plan='+plan if plan else ''
         try:
-            self.mailer.send_verification(recipient,self.origin+'/#verify='+token)
+            self.mailer.send_verification(recipient,self.origin+'/'+query+'#verify='+token)
         except Exception:
             self.auth.invalidate_email_verification(token)
             LOGGER.error('Email verification delivery failed')
@@ -578,6 +580,7 @@ class Handler(BaseHTTPRequestHandler):
                         value.get('login'), value.get('email'), value.get('password'),
                         value.get('password_confirmation'), legal_accepted=True, privacy_accepted=True,
                         parent_confirmed=True,require_email_verification=True,
+                        requested_plan=value.get('plan'),
                         device_token=device_token, telegram_username=value.get('telegram_username'))
                     try:
                         self.server.send_email_verification(user.email)

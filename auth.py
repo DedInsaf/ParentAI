@@ -191,6 +191,8 @@ class AuthStore:
                 connection.execute('ALTER TABLE users ADD COLUMN email_verified_at INTEGER')
             if 'pending_device_hash' not in columns:
                 connection.execute('ALTER TABLE users ADD COLUMN pending_device_hash BLOB')
+            if 'registration_plan' not in columns:
+                connection.execute("ALTER TABLE users ADD COLUMN registration_plan TEXT NOT NULL DEFAULT ''")
             if "role" not in columns:
                 connection.execute("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'parent'")
             if "terms_accepted_at" not in columns:
@@ -234,7 +236,7 @@ class AuthStore:
 
     def register(self, login, email, password, password_confirmation, role="parent",
                  legal_accepted=True, privacy_accepted=True, parent_confirmed=True, device_token=None,
-                 telegram_username=None, require_email_verification=False) -> User:
+                 telegram_username=None, require_email_verification=False, requested_plan=None) -> User:
         if role not in ("parent", "admin"):
             raise ValueError("Неизвестная роль пользователя.")
         display_login, normalized_login = _validate_login(login)
@@ -278,8 +280,9 @@ class AuthStore:
                     (user_id, int(time.time())),
                 )
                 if require_email_verification:
-                    connection.execute('UPDATE users SET email_verification_required=1,pending_device_hash=? WHERE id=?',
-                                       (device_hash, user_id))
+                    plan=requested_plan if requested_plan in ('paid','ultra') else ''
+                    connection.execute('UPDATE users SET email_verification_required=1,pending_device_hash=?,registration_plan=? WHERE id=?',
+                                       (device_hash,plan,user_id))
                 elif device_hash is not None:
                     connection.execute(
                         "INSERT INTO device_registrations(device_hash,user_id,registered_at) VALUES (?,?,?)",
@@ -506,6 +509,12 @@ class AuthStore:
             cursor = connection.execute(f"UPDATE users SET role=? WHERE {field}=?", (role, normalized))
         if cursor.rowcount != 1:
             raise ValueError("Пользователь не найден.")
+
+    def registration_plan(self, email):
+        _,normalized=_validate_email(email)
+        with self._connect() as connection:
+            row=connection.execute('SELECT registration_plan FROM users WHERE email_normalized=?',(normalized,)).fetchone()
+        return row['registration_plan'] if row and row['registration_plan'] in ('paid','ultra') else ''
 
     def request_email_verification(self, email):
         _, normalized = _validate_email(email)

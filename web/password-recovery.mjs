@@ -48,9 +48,11 @@ form.addEventListener('submit',async event=>{
     if(!response.ok)throw new Error(result.error||'Не удалось восстановить пароль.');
     if(token){
       token='';form.reset();passwordFields.hidden=true;submit.hidden=true;
+      document.getElementById('passwordRecoveryTitle').textContent='Пароль изменён';
+      document.getElementById('passwordRecoveryHint').textContent='Доступ восстановлен. Используйте новый пароль для входа.';
       message.textContent='Пароль изменён. Войдите в аккаунт с новым паролем.';
       close.textContent='Перейти ко входу';
-      close.onclick=()=>location.assign('/');
+      close.onclick=()=>location.assign('/'+location.search);
     }else message.textContent=result.message;
   }catch(error){message.textContent=error.name==='TimeoutError'
     ?'Ответ задерживается. Если вы сохраняли пароль, попробуйте войти с новым. Иначе повторите запрос позже.'

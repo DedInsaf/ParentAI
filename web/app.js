@@ -7,6 +7,7 @@ import {LocalAvatar} from './local-avatar.mjs';
 import {fitStablePortraitAnchors,portraitAccessoryIssue} from './portrait-fit.mjs';
 import {portraitCutout} from './portrait-texture.mjs';
 import {packPortraitAnalysis,unpackPortraitAnalysis} from './avatar-persistence.mjs';
+import {requestAuth} from './auth-client.mjs';
 const $ = id => document.getElementById(id);
 const video = $('camera');
 const fail = e => { $('error').hidden = false; $('error').textContent = e.message || String(e); };
@@ -24,6 +25,7 @@ let lastMediaTimestamp = -1;
 let avatarDependenciesPromise,dependenciesPromise, detectError = false, connecting = false, playbackId = 0, audioKind = '';
 const presence = new Presence();
 const pendingActions = new Set();
+let billingNotice='';
 let online = false, recordCancelled = false, recordingStream, recordingAbort, referenceRejected = false, previewUrl, renderTime = 0;
 let referenceLoaded = false, voiceModeTouched = false, voiceTake = 1;
 let lessonStarted = 0, lessonElapsed = 0, tutorBusy = false, lessonCameraEnabled = false, lessonPresenceEnabled = false;
@@ -230,8 +232,8 @@ function renderSubscription(summary, billing) {
   const waiting = ['pending','subscription_activated'].includes(summary.payment?.status);
   const hasPaidPlan = current === 'paid' || current === 'ultra';
   const buyerIdentified = !!currentUser?.email && !!currentUser?.telegram_username;
-  button.disabled = summary.plan.unlimited || hasPaidPlan || waiting || !billing.provider?.enabled || !buyerIdentified;
-  ultraButton.disabled = summary.plan.unlimited || hasPaidPlan || waiting || !billing.provider?.enabled || !buyerIdentified;
+  button.disabled = summary.plan.unlimited || hasPaidPlan || waiting || !buyerIdentified;
+  ultraButton.disabled = summary.plan.unlimited || hasPaidPlan || waiting || !buyerIdentified;
   button.textContent = summary.plan.unlimited ? 'У вас доступ без ограничений' : current === 'paid' ?
     'Подписка активна' : hasPaidPlan ? 'Смена тарифа — через поддержку' : waiting ? 'Ожидаем подтверждение Platega' :
     `Оформить за ${paid.monthly_price_rubles ?? 490} ₽/месяц`;
@@ -252,6 +254,7 @@ function renderSubscription(summary, billing) {
   } else {
     $('billingMessage').textContent = 'Оплата проходит на защищённой странице Platega через СБП. Списание повторяется раз в месяц; отменить подписку можно по ссылке из письма Platega.';
   }
+  if(billingNotice)$('billingMessage').textContent=billingNotice;
 }
 async function pollLoop() {
   if (!authenticated) return;
@@ -1163,19 +1166,7 @@ function authBusy(form, busy) {
 }
 
 async function authRequest(path, values) {
-  const response = await fetch('/api/auth/' + path, {
-    method: 'POST',
-    headers: {'X-App-Token': token, 'Content-Type': 'application/json'},
-    body: JSON.stringify(values),
-  });
-  const data = await response.json();
-  if (!response.ok) {
-    const error=new Error(data.error || `Ошибка ${response.status}`);
-    error.verificationRequired=data.verification_required;
-    error.email=data.email;
-    throw error;
-  }
-  return data;
+  return requestAuth(path,values);
 }
 
 const ADMIN_PLAN_TITLES={free:'Бесплатный',paid:'Адым Плюс',ultra:'Адым Ультра'};
@@ -1294,6 +1285,7 @@ $('authPaidBtn').addEventListener('click', () => authMode('register'));
 $('billingBtn').addEventListener('click', () => $('billingDialog').showModal());
 $('closeBillingBtn').addEventListener('click', () => {$('billingDialog').close(); $('billingBtn').focus();});
 $('billingDialog').addEventListener('click', event => {if (event.target === $('billingDialog')) $('billingDialog').close();});
+$('billingDialog').addEventListener('close',()=>{billingNotice='';});
 document.querySelector('.auth-brand').addEventListener('click', event => event.preventDefault());
 for (const [formId, path] of [['loginForm', 'login'], ['registerForm', 'register']]) {
   $(formId).addEventListener('submit', async event => {
@@ -1311,6 +1303,7 @@ for (const [formId, path] of [['loginForm', 'login'], ['registerForm', 'register
       values.parent_confirmed = form.elements.parent_confirmed.checked;
       values.terms_accepted = form.elements.terms_accepted.checked;
       values.privacy_accepted = form.elements.privacy_accepted.checked;
+      values.plan=requestedPlan;
     }
     authBusy(form, true);
     try {
@@ -1417,9 +1410,15 @@ $('deleteAccountForm').addEventListener('submit', async event => {
 });
 async function buyPlan(plan, buttonId) {
   clearError();
+  billingNotice='';
   if (!currentUser?.telegram_username) {
     $('billingContactMessage').textContent = 'Сначала укажите и сохраните Telegram username родителя.';
     $('billingTelegram').focus();
+    return;
+  }
+  if(!status.billing?.provider?.enabled){
+    billingNotice='Покупка подписки временно недоступна. Пока можно пользоваться бесплатным тарифом. Списаний не будет.';
+    $('billingMessage').textContent=billingNotice;
     return;
   }
   pendingActions.add(buttonId); controls();
@@ -1429,7 +1428,8 @@ async function buyPlan(plan, buttonId) {
     if (target.protocol !== 'https:' || target.hostname !== 'pay.platega.io') throw new Error('Получена небезопасная ссылка оплаты.');
     location.assign(target.href);
   } catch (error) {
-    fail(error);
+    billingNotice=error.message||'Не удалось оформить подписку. Повторите попытку позже.';
+    $('billingMessage').textContent=billingNotice;
   } finally {
     pendingActions.delete(buttonId); controls();
   }

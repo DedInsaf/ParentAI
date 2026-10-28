@@ -24,7 +24,7 @@ function openVerification({email='',message:text='',verificationToken=''}={}){
 }
 document.getElementById('resendVerificationBtn').addEventListener('click',()=>openVerification());
 window.addEventListener('adym:email-verification-required',event=>openVerification(event.detail));
-close.addEventListener('click',()=>{dialog.close();if(done)location.assign('/');});
+close.addEventListener('click',()=>{dialog.close();if(done)location.assign('/'+location.search);});
 dialog.addEventListener('cancel',event=>{if(busy)event.preventDefault();});
 dialog.addEventListener('close',()=>{form.reset();token='';});
 forgot.addEventListener('click',()=>{dialog.close();document.getElementById('forgotPasswordBtn').click();});
@@ -51,6 +51,8 @@ form.addEventListener('submit',async event=>{
     if(!response.ok)throw new Error(result.error||'Не удалось подтвердить почту.');
     if(token){
       done=true;token='';form.reset();passwordFields.hidden=true;forgot.hidden=true;submit.hidden=true;
+      document.getElementById('emailVerificationTitle').textContent='Почта подтверждена';
+      document.getElementById('emailVerificationHint').textContent='Регистрация завершена. Войдите, чтобы продолжить.';
       message.textContent='Почта подтверждена. Теперь можно войти с логином и паролем регистрации.';
       close.textContent='Перейти ко входу';
     }else message.textContent=result.message;
