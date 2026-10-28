@@ -60,7 +60,7 @@ class MediaRequestTests(unittest.TestCase):
         self.server.speech = Decoder('Спасибо. ' * 77, 'test-loop')
         self.server.speech_fallbacks = [Decoder('Сколько будет два плюс два?', 'test-fallback')]
         result = self.server.recognize(self.user.id, recording(), 'media-loop-request')
-        self.assertEqual(result['text'], 'Сколько будет два плюс два?')
+        self.assertEqual(result['text'], 'Сколько будет 2 + 2?')
         self.assertEqual(result['speech_provider'], 'test-fallback')
 
     def test_status_and_pause_resume_do_not_wait_for_speech_recognition(self):

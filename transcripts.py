@@ -1,5 +1,6 @@
 """Reject empty and degenerate speech-decoder output before tutoring."""
 import re
+from arithmetic_transcript import normalize_arithmetic
 
 
 def validated_transcript(text):
@@ -19,4 +20,4 @@ def validated_transcript(text):
                 previous = block
                 if run >= max(12, width * 4) and run >= len(words) * .65:
                     raise ValueError('Не разобрал вопрос: в записи получились повторы. Повтори его или напиши текстом.')
-    return text
+    return normalize_arithmetic(text)

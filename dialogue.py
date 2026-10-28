@@ -84,8 +84,11 @@ def _spoken_number(value):
     words = re.findall(r'[a-zа-я]+', value.casefold().replace('ё', 'е'))
     if not words:
         return None
-    sign = -1 if words[0] == 'минус' else 1
-    if sign < 0:
+    written_minus = bool(re.match(r'^\s*[-−]', value))
+    if written_minus and words[0] in ('минус', 'плюс'):
+        return None
+    sign = -1 if written_minus or words[0] == 'минус' else 1
+    if words[0] == 'минус':
         words = words[1:]
     whole_markers = {'целая', 'целых', 'целое', 'целые'}
     marker = next((i for i, word in enumerate(words) if word in whole_markers), None)
@@ -104,6 +107,10 @@ def _spoken_number(value):
 
 def _numeric_answer(value):
     compact = re.sub(r'\s+', '', value).replace(',', '.').replace('−', '-')
+    grouped = re.fullmatch(r'([+-]?)\(([^()]+)\)', compact)
+    if grouped:
+        number = _numeric_answer(grouped.group(2))
+        return (-number if grouped.group(1) == '-' else number) if number is not None else None
     try:
         if re.fullmatch(r'[+-]?\d+(?:\.\d+)?', compact):
             return Fraction(Decimal(compact))
@@ -125,8 +132,8 @@ def _answer_variants(value):
     prefix = re.compile(
         r'^(?:(?:я\s+думаю|мне\s+кажется)\s*,?\s*(?:что\s+)?|'
         r'(?:у\s+меня\s+)?(?:ответ|получил(?:ось|ся|а)?|получается|вышло|выходит|итог|будет|это)'
-        r'\s*(?:[:=—-]\s*)?)', re.I)
-    marker = re.compile(r'\b(?:ответ|получил(?:ось|ся|а)?|получается|вышло|итог|равно|равна|равен)\b\s*(?:[:=—-]\s*)?(.+)$', re.I)
+        r'\s*(?:[:=—]\s*)?)', re.I)
+    marker = re.compile(r'\b(?:ответ|получил(?:ось|ся|а)?|получается|вышло|итог|равно|равна|равен)\b\s*(?:[:=—]\s*)?(.+)$', re.I)
     while pending:
         candidate = pending.pop().strip(' \t\r\n.!?;:')
         if not candidate or candidate in candidates:

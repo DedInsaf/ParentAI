@@ -3,6 +3,14 @@ from dialogue import _answers_match, _looks_like_new_task
 
 
 class LessonAnswerTests(unittest.TestCase):
+    def test_minus_in_a_numeric_answer_is_not_removed_as_a_separator(self):
+        for offered in ['Ответ -5', 'Ответ: -5', 'Ответ - 5', 'Равно -5', 'x равно -5',
+                        'Ответ - пять', 'x равно - пять']:
+            with self.subTest(offered=offered):
+                self.assertTrue(_answers_match(offered, ['-5']))
+                self.assertFalse(_answers_match(offered, ['5']))
+        self.assertTrue(_answers_match('Ответ — 5', ['5']))
+
     def test_spoken_numbers_follow_grammar_instead_of_summing_any_words(self):
         for offered, accepted in [('один два', '3'), ('двадцать тридцать', '50'),
                                   ('сто сто', '200'), ('один ноль', '1')]:
