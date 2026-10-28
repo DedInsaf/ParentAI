@@ -51,18 +51,32 @@ _DENOMINATORS = {
     'тысячная': 1000, 'тысячных': 1000,
 }
 _UNIT_ALIASES = {
+    r'\bметр(?:а|ов|ы)?\b': 'м',
     r'\bсантиметр(?:а|ов|ы)?\b': 'см', r'\bмиллиметр(?:а|ов|ы)?\b': 'мм',
     r'\bкилометр(?:а|ов|ы)?\b': 'км', r'\bкилограмм(?:а|ов|ы)?\b': 'кг',
     r'\bграмм(?:а|ов|ы)?\b': 'г', r'\bлитр(?:а|ов|ы)?\b': 'л',
     r'\bсекунд(?:а|ы|у|ам|ами)?\b': 'с', r'\bминут(?:а|ы|у|ам|ами)?\b': 'мин',
     r'\bпроцент(?:а|ов|ы)?\b': '%',
+    r'\bрубл(?:ь|я|ей|и)\b': 'руб',
+    r'\bкопе(?:йка|йки|ек|йку)\b': 'коп',
 }
 
 
 def _integer_words(words):
     if not words or any(word not in _NUMBER_WORDS for word in words):
         return None
-    return sum(_NUMBER_WORDS[word] for word in words)
+    values = [_NUMBER_WORDS[word] for word in words]
+    if len(values) == 1:
+        return values[0]
+    total = 0
+    if values[0] >= 100:
+        total = values.pop(0)
+    if len(values) == 1 and 0 < values[0] < 100:
+        return total + values[0]
+    if (len(values) == 2 and 20 <= values[0] <= 90 and values[0] % 10 == 0
+            and 1 <= values[1] <= 9):
+        return total + sum(values)
+    return None
 
 
 def _spoken_number(value):
@@ -127,10 +141,10 @@ def _answer_variants(value):
         if '=' in candidate:
             pending.append(candidate.rsplit('=', 1)[1])
     variants = {_normalized_answer(candidate) for candidate in candidates}
-    units = {'см', 'мм', 'км', 'кг', 'г', 'л', 'с', 'мин', '%'}
+    units = {'м', 'см', 'мм', 'км', 'кг', 'г', 'л', 'с', 'мин', '%', 'руб', 'коп'}
     unit_pattern = '|'.join(map(re.escape, sorted(units, key=len, reverse=True)))
     for candidate in candidates:
-        unit_match = re.fullmatch(r'(.+?)\s*(' + unit_pattern + r')', candidate)
+        unit_match = re.fullmatch(r'(.+?)(?:\s+|(?<=\d))(' + unit_pattern + r')', candidate)
         number_text = unit_match.group(1) if unit_match else candidate
         number = _numeric_answer(number_text)
         if number is not None:
@@ -161,7 +175,8 @@ def _looks_like_new_task(value, session):
     task_word = re.search(
         r'\b(?:реши|решить|вычисли|найди|сколько|докажи|определи|сравни|упрости|'
         r'задача|задание|пример|уравнение)\b', text)
-    has_content = bool(re.search(r'\d', text)) or len(text.split()) >= 10
+    has_content = (bool(re.search(r'\d', text)) or len(text.split()) >= 10
+                   or any(word in _NUMBER_WORDS for word in re.findall(r'[а-я]+', text)))
     return bool(task_word and has_content)
 
 
@@ -289,7 +304,7 @@ class Dialogues:
             key = uuid.uuid4().hex
             job = dict(id=key, session=session, state='thinking', created=now, user_id=user_id,
                        request_id=request_id, cancel=threading.Event(), voice=voice, answer='', warning='',
-                       limit_warning='', cues=[], chunks=[], unlimited=bool(unlimited), finished=False,
+                       limit_warning='', cues=[], chunks=[], unlimited=bool(unlimited), finished=False, solved=False,
                        study_session=study_session)
             self.jobs[key] = job
             self.requests[(user_id, request_id)] = key
@@ -309,7 +324,7 @@ class Dialogues:
         with self.lock:
             job = self._owned(key, user_id)
             return {k: job[k] for k in ('id', 'session', 'state', 'answer', 'warning',
-                                         'limit_warning', 'cues', 'chunks', 'finished')}
+                                         'limit_warning', 'cues', 'chunks', 'finished', 'solved')}
 
     def cancel(self, key, user_id=None):
         with self.lock:
@@ -428,6 +443,7 @@ class Dialogues:
             {'role': 'user', 'text': question}, {'role': 'assistant', 'text': answer}])[-6:]
         session['updated'] = time.monotonic()
         job['finished'] = finished
+        job['solved'] = bool(finished and independent)
         return answer[:1200]
 
     def _synthesize_yandex(self, job, answer, bank):

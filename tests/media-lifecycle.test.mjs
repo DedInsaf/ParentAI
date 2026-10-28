@@ -3,6 +3,7 @@ import {readFileSync} from 'node:fs';
 import vm from 'node:vm';
 import test from 'node:test';
 import {withTimeout,Presence} from '../web/core.mjs';
+import {isDirectedSpeech} from '../web/listening.mjs';
 const source=readFileSync(new URL('../web/app.js',import.meta.url),'utf8');
 const section=(start,end)=>source.slice(source.indexOf(start),source.indexOf(end));
 const deferred=()=>{let resolve,reject;const promise=new Promise((a,b)=>{resolve=a;reject=b;});return {promise,resolve,reject};};
@@ -30,7 +31,7 @@ test('a late automatic question cannot restart a paused or stopped avatar',async
 function micHarness(extra={}){
   const elements=new Map(),s={listenEpoch:0,listener:null,listenerPending:false,childSpeakingUntil:0,
     running:true,paused:false,helpEpoch:0,playing:false,tutorBusy:false,questionRecording:false,
-    taskSwitchPending:null,echoUntil:0,followupUntil:0,status:{speech:{enabled:true}},
+    taskSwitchPending:null,dialogId:null,echoUntil:0,followupUntil:0,status:{speech:{enabled:true}},
     document:{hidden:false},performance:{now:()=>10000},AbortController,withTimeout,
     $:id=>{if(!elements.has(id))elements.set(id,{checked:true,style:{}});return elements.get(id);},
     stopTracks:stream=>stream?.getTracks().forEach(t=>t.stop()),setListenerState(){},controls(){},fail(){},
@@ -68,6 +69,17 @@ test('cancelled recognition releases lock; its late completion cannot unlock a n
   assert.equal(answers,0);assert.equal(s.listenerPending,true);
   fresh.resolve({text:'новый вопрос'});await second;
   assert.equal(answers,1);assert.equal(s.listenerPending,false);
+});
+
+test('short spoken answers remain valid after thinking for more than a minute',async()=>{
+  const answered=[];let heard='5';
+  const s=micHarness({dialogId:'active-task',isDirectedSpeech,performance:{now:()=>180000},
+    api:async()=>({text:heard}),answerQuestion:async text=>answered.push(text)});
+  await s.recognizeHandsFree(new Uint8Array(),s.listenEpoch);
+  heard='А';await s.recognizeHandsFree(new Uint8Array(),s.listenEpoch);
+  assert.deepEqual(answered,['5','А']);
+  s.dialogId=null;heard='5';await s.recognizeHandsFree(new Uint8Array(),s.listenEpoch);
+  assert.deepEqual(answered,['5','А']);
 });
 
 test('cancelled browser reminder settles without browser end event and can be spoken again',async()=>{

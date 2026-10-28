@@ -26,7 +26,7 @@ test('old public brand is absent from the current interface', () => {
 });
 
 test('a completed task closes the old hint dialogue', () => {
-  assert.match(script, /if\(result\.finished\)\{dialogId=null;taskFinished=true;followupUntil=0;/);
+  assert.match(script, /if\(result\.finished\)\{dialogId=null;taskFinished=true;/);
   assert.match(script, /Правильно! Введи или скажи новое задание/);
   assert.match(script, /Введи условие нового задания/);
   assert.match(script, /if\(taskFinished\)\{\$\('tutorMessages'\)\.replaceChildren\(\)/);
