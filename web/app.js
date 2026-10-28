@@ -120,7 +120,7 @@ function controls() {
   $('retryCameraBtn').disabled = !running || transition || pendingActions.has('retryCameraBtn');
   $('lessonVoiceBtn').disabled = !running || paused || tutorBusy || questionRecording || !(status.phrases?.length);
   $('stopSpeechBtn').disabled = !playing;
-  $('askBtn').disabled = tutorBusy || !!taskSwitchPending || questionRecording || listenerPending || !online || !status.tutor?.enabled;
+  $('askBtn').disabled = !running || paused || transition || tutorBusy || !!taskSwitchPending || questionRecording || listenerPending || !online || !status.tutor?.enabled;
   $('voiceQuestionBtn').disabled = !running || paused || !online || tutorBusy || !!taskSwitchPending || listenerPending || !status.speech?.enabled;
   $('handsFree').disabled=!status.speech?.enabled && !listener;
   $('voiceQuestionBtn').textContent = questionRecording ? 'Закончить вопрос' : 'Записать вопрос';
@@ -868,11 +868,12 @@ function cancelTutor() {
 async function askTutor(event) {
   event.preventDefault();
   const question = $('assignment').value.trim();
-  if (!question || tutorBusy || questionRecording || listenerPending) return;
+  if (!question || !running || paused || lessonTransition || tutorBusy || questionRecording || listenerPending) return;
   $('assignment').value = '';
   await answerQuestion(question);
 }
 async function answerQuestion(question,switchAction=null,renderQuestion=true) {
+  if(!running||paused||lessonTransition)return;
   if(taskSwitchPending&&!switchAction)return;
   const epoch=++helpEpoch;
   if(taskFinished){$('tutorMessages').replaceChildren();taskFinished=false;$('assignment').placeholder='Например: не понимаю, как решить 2x + 3 = 11';}
@@ -1023,7 +1024,7 @@ async function voiceQuestion() {
   const epoch=++helpEpoch; tutorBusy=true;controls();
   try {
     $('tutorStatus').textContent='Распознаю твой вопрос…';
-    const result=await api('speech',wav,true,120000);
+    const result=await api('speech',wav,true,120000,questionAbort.signal);
     if(result.limit_warning)$('tutorStatus').textContent=result.limit_warning;
     if(epoch!==helpEpoch) return;
     tutorBusy=false;

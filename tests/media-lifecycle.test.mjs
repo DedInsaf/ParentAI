@@ -8,6 +8,25 @@ const section=(start,end)=>source.slice(source.indexOf(start),source.indexOf(end
 const deferred=()=>{let resolve,reject;const promise=new Promise((a,b)=>{resolve=a;reject=b;});return {promise,resolve,reject};};
 const turn=()=>new Promise(resolve=>setImmediate(resolve));
 
+test('submitting on a break preserves the draft and resumes only after the lesson does',async()=>{
+  let requests=0;const field={value:'Как решить пример?'};
+  const s={running:true,paused:true,lessonTransition:null,tutorBusy:false,questionRecording:false,
+    listenerPending:false,$:()=>field,answerQuestion:async()=>requests++};
+  vm.createContext(s);vm.runInContext(section('async function askTutor(', 'async function answerQuestion('),s);
+  const event={preventDefault(){}};
+  await s.askTutor(event);assert.equal(requests,0);assert.equal(field.value,'Как решить пример?');
+  s.paused=false;s.lessonTransition=Promise.resolve();await s.askTutor(event);assert.equal(requests,0);
+  s.lessonTransition=null;await s.askTutor(event);assert.equal(requests,1);assert.equal(field.value,'');
+});
+
+test('a late automatic question cannot restart a paused or stopped avatar',async()=>{
+  for(const state of [{running:true,paused:true},{running:false,paused:false},{running:true,paused:false,lessonTransition:{}}]){
+    const s={lessonTransition:null,...state};vm.createContext(s);
+    vm.runInContext(section('async function answerQuestion(', 'function setListenerState('),s);
+    await s.answerQuestion('Отложенный вопрос'); // No chat, audio or server access is allowed here.
+  }
+});
+
 function micHarness(extra={}){
   const elements=new Map(),s={listenEpoch:0,listener:null,listenerPending:false,childSpeakingUntil:0,
     running:true,paused:false,helpEpoch:0,playing:false,tutorBusy:false,questionRecording:false,

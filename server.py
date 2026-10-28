@@ -21,6 +21,7 @@ from speech import LocalSpeechRecognizer, SpeechRecognizer, SpeechSynthesizer, a
 from dialogue import Dialogues
 from avatar_model import MAX_MODEL_BYTES, model_path, save_model, scanner_status
 from auth import AuthStore, SESSION_LIFETIME
+from account_requests import AccountRequests
 from usage import LimitExceeded, UsageStore, estimate_tokens
 from payments import PlategaClient
 from mailer import AccountMailer
@@ -65,7 +66,7 @@ class AppServer(ThreadingHTTPServer):
         self.speech_cache = {}
         self.speech_recent = defaultdict(deque)
         self.payment_locks = defaultdict(threading.Lock)
-        self.account_locks = defaultdict(threading.RLock)
+        self.account_locks = defaultdict(AccountRequests)
         self.auth_lock = threading.RLock()
         self.auth_attempts = defaultdict(deque)
         self.token = secrets.token_urlsafe(32)
@@ -383,7 +384,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         user = self.current_user()
         if user:
-            with self.server.account_locks[user.id]:
+            with self.server.account_locks[user.id].shared():
                 return self._do_GET()
         return self._do_GET()
 
@@ -494,7 +495,9 @@ class Handler(BaseHTTPRequestHandler):
         # recreate references, transcripts or usage rows after erasure.
         user = self.current_user()
         if user:
-            with self.server.account_locks[user.id]:
+            gate = self.server.account_locks[user.id]
+            barrier = gate.exclusive if urlsplit(self.path).path == '/api/auth/delete' else gate.shared
+            with barrier():
                 return self._do_POST()
         return self._do_POST()
 
