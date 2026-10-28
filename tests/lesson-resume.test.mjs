@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import vm from 'node:vm';
 import test from 'node:test';
+import {requestUserCamera,withTimeout} from '../web/core.mjs';
 
 const source=readFileSync(new URL('../web/app.js',import.meta.url),'utf8');
 const pauseSource=source.slice(source.indexOf('function pause('),source.indexOf('function stop('));
@@ -61,6 +62,27 @@ test('repeated pause and resume cycles restore camera, audio and presence',async
   assert.equal(h.calls.filter(c=>c==='presence:start').length,10);
 });
 
+test('ten cycles release actual camera tracks and bind a fresh playable stream on resume',async()=>{
+  const h=harness({paused:true}),streams=[];
+  Object.assign(h.state,{cameraEpoch:0,cameraAbort:null,stream:null,lastFrame:-1,lastResult:null,
+    lastSeenFrame:0,AbortController,withTimeout,requestUserCamera,
+    video:{srcObject:null,readyState:4,videoWidth:640,play:async()=>{}},
+    stopTracks:value=>value?.getTracks().forEach(t=>t.stop()),mediaError:e=>e,
+    navigator:{mediaDevices:{async getUserMedia(){
+      const track={readyState:'live',muted:false,stop(){this.readyState='ended';}};
+      const stream={getTracks:()=>[track],getVideoTracks:()=>[track]};streams.push(stream);return stream;
+    }}}});
+  h.state.cameraLive=()=>!!h.state.stream?.getVideoTracks().some(t=>t.readyState==='live');
+  vm.runInContext(source.slice(source.indexOf('async function enableCamera()'),source.indexOf('function landmarks(')),h.state);
+  for(let cycle=0;cycle<10;cycle++){
+    await h.pause();assert.equal(h.state.cameraLive(),true);
+    assert.equal(h.state.video.srcObject,streams[cycle]);
+    await h.pause(true);assert.equal(h.state.video.srcObject,null);
+    assert.equal(streams[cycle].getTracks()[0].readyState,'ended');
+  }
+  assert.equal(streams.length,10);
+});
+
 test('automatic pause during camera reconnection never resumes a hidden lesson',async()=>{
   const camera=deferred(),h=harness({paused:true,enableCamera:()=>camera.promise});
   const resume=h.pause();await Promise.resolve();
@@ -88,6 +110,36 @@ test('a stopped lesson cannot be revived by a late resume response',async()=>{
   h.state.running=false;h.state.studySessionId=null;
   response.resolve({elapsed_seconds:3,limit_seconds:1200});await pending;
   assert.ok(!h.calls.includes('presence:start'));assert.ok(!h.calls.includes('mic:start'));
+});
+
+test('lost resume response keeps devices stopped and reconciles server pause before retry',async()=>{
+  const h=harness({paused:true});let failed=false;
+  h.state.api=async(path,body)=>{const {action}=JSON.parse(body);h.calls.push(action);
+    if(action==='resume'&&!failed){failed=true;throw new Error('connection lost after resume');}
+    return {elapsed_seconds:4,limit_seconds:1200};};
+  await assert.rejects(h.pause(),/connection lost/);
+  assert.equal(h.state.paused,true);assert.equal(h.state.pausePending,true);
+  assert.equal(h.state.cameraLive(),false);assert.ok(!h.calls.includes('mic:start'));
+  await h.pause();
+  assert.deepEqual(h.calls.filter(c=>['pause','resume'].includes(c)),['resume','pause','resume']);
+  assert.equal(h.state.paused,false);assert.equal(h.state.pausePending,false);
+});
+
+test('hiding the tab during lesson start pauses before activating mic or avatar speech',async()=>{
+  const response=deferred(),h=harness({running:false,paused:false,
+    status:{},hideTaskSwitch(){},showLesson(){},playVoice(){throw new Error('must not speak');}});
+  h.state.$('readyCamera').checked=true;
+  h.state.api=async(path,body)=>{
+    const {action}=JSON.parse(body);h.calls.push(action);
+    return action==='start'?response.promise:{elapsed_seconds:1,limit_seconds:1200};};
+  vm.runInContext(source.slice(source.indexOf('async function start()'),source.indexOf('function pause(')),h.state);
+  const starting=h.state.start();
+  while(!h.calls.includes('start'))await Promise.resolve();
+  h.state.document.hidden=true;
+  response.resolve({id:'lesson-2',elapsed_seconds:0,limit_seconds:1200});await starting;
+  assert.equal(h.state.paused,true);assert.equal(h.state.cameraLive(),false);
+  assert.deepEqual(h.calls.filter(c=>['start','pause'].includes(c)),['start','pause']);
+  assert.ok(!h.calls.includes('mic:start'));
 });
 
 test('face detector error keeps live camera and avatar loop running, discards detector',()=>{

@@ -18,7 +18,7 @@ let token, currentUser, authenticated = false, appStarted = false;
 const requestedPlan = new URLSearchParams(location.search).get('plan');
 let status = {}, stream, detector, avatarTopology, THREE, renderer, scene, camera, mesh, avatarGroup, modelAvatar;
 let audioContext, analyser, audioSource, pcm, playing = false, recording = false, scanning = false;
-let browserUtterance = null, browserSpeechStarted = 0;
+let browserUtterance = null, browserSpeechStarted = 0, browserSpeechFinish = null;
 let running = false, paused = false, pausePending = false, lastFrame = -1, lastDetect = 0, lastResult = null, lastSeenFrame = 0;
 let lessonTransition = null, resumeCancelled = false;
 let lastMediaTimestamp = -1;
@@ -511,7 +511,9 @@ function installModel(model) {
 function context() { return audioContext ||= new AudioContext(); }
 function stopAudio() {
   playbackId++;activeCues=[];
+  const finish=browserSpeechFinish;browserSpeechFinish=null;
   if(browserUtterance){browserUtterance=null;window.speechSynthesis?.cancel();}
+  finish?.();
   for(const source of audioSources) {try{source.stop();}catch{} source.disconnect();}
   audioSources.clear();audioSource=null;analyser?.disconnect();analyser=null;
   playing=false;audioKind='';audioNext=0;echoUntil=performance.now()+1000;controls();
@@ -534,10 +536,11 @@ async function speakBrowserPrompt(text,kind) {
     const utterance=new SpeechSynthesisUtterance(text);utterance.lang='ru-RU';utterance.rate=.92;
     const local=window.speechSynthesis.getVoices().find(voice=>voice.lang.startsWith('ru')&&voice.localService);
     if(local)utterance.voice=local;
-    const finish=()=>{if(browserUtterance===utterance){browserUtterance=null;playing=false;audioKind='';echoUntil=performance.now()+1000;controls();}resolve();};
+    const finish=()=>{if(browserUtterance===utterance){browserUtterance=null;browserSpeechFinish=null;playing=false;audioKind='';echoUntil=performance.now()+1000;controls();}resolve();};
+    browserSpeechFinish=finish;
     utterance.onend=finish;utterance.onerror=finish;browserUtterance=utterance;browserSpeechStarted=performance.now();
     playing=true;audioKind=kind;$('phraseText').textContent=text;$('lessonSpeech').textContent=text;controls();
-    try{window.speechSynthesis.speak(utterance);}catch{browserUtterance=null;playing=false;audioKind='';resolve(playVoice(kind));}
+    try{window.speechSynthesis.speak(utterance);}catch{browserUtterance=null;browserSpeechFinish=null;playing=false;audioKind='';resolve(playVoice(kind));}
   });
 }
 function beginAudio(buffer,text,kind,cues=[]) {
@@ -630,6 +633,8 @@ async function start() {
   catch(error){stopCamera();throw error;}
   studySessionId=study.id;lessonLimitSeconds=study.limit_seconds;lessonLimitHandled=false;pausePending=false;dialogId=null;taskFinished=false;hideTaskSwitch();
   stopAudio(); running = true; paused = false; presence.reset(); lessonElapsed = Number(study.elapsed_seconds||0)*1000; lessonStarted = performance.now(); showLesson();
+  // The tab may have been hidden while the server was starting the lesson.
+  if(document.hidden||(lessonCameraEnabled&&!cameraLive())){await pause(true);return;}
   if(lessonCameraEnabled) startLessonPresence();
   else $('monitorStatus').textContent='Камера выключена родителем';
   controls();
@@ -673,6 +678,9 @@ function pause(forcePause=false) {
       if(interrupted())return;
       if(lessonCameraEnabled)await enableCamera();
       if(interrupted()){stopCamera();return;}
+      // A lost response can still mean the server resumed. Reconcile to a
+      // pause on the next successful poll before offering another resume.
+      pausePending=true;
       const session=await api('study-session',JSON.stringify({action:'resume',id:sessionId}));
       if(interrupted()){stopCamera();return;}
       lessonElapsed=Number(session.elapsed_seconds||0)*1000;lessonLimitSeconds=session.limit_seconds;
@@ -920,7 +928,7 @@ function setListenerState(state,message) {
   if(state==='error'||(state==='off'&&!$('handsFree').checked))$('micIntro').hidden=true;
 }
 function stopHandsFree(){
-  listenEpoch++;
+  listenEpoch++;listenerPending=false;
   if(listener){listener.sttAbort?.abort();listener.abort.abort();listener.source?.disconnect();listener.high?.disconnect();listener.low?.disconnect();listener.node?.disconnect();stopTracks(listener.mic);listener=null;}
   childSpeakingUntil=0;setListenerState('off',paused?'Перерыв. Микрофон и камера выключены.':'Включи «Без кнопки» или напиши вопрос.');
 }
@@ -932,6 +940,7 @@ async function startHandsFree(){
   const epoch=listenEpoch,entry={abort:new AbortController()};listener=entry;
   try{
     const ctx=context();await ctx.resume();
+    if(epoch!==listenEpoch)return;
     entry.mic=await withTimeout(navigator.mediaDevices.getUserMedia({audio:{channelCount:1,echoCancellation:true,noiseSuppression:true,autoGainControl:true}}),20000,stopTracks,entry.abort.signal);
     if(epoch!==listenEpoch){stopTracks(entry.mic);return;}
     await ctx.audioWorklet.addModule('/listener-worklet.js');
@@ -972,7 +981,7 @@ async function recognizeHandsFree(wav,listenId){
     const failure=classifySpeechRecognitionError(e);
     if(failure.stop){$('handsFree').checked=false;stopHandsFree();setListenerState('error',failure.message);fail(new Error(failure.message));}
     else setListenerState('listening',failure.message);
-  }finally{listenerPending=false;controls();}
+  }finally{if(listenId===listenEpoch){listenerPending=false;controls();}}
 }
 async function voiceQuestion() {
   if(questionRecording) { questionStop=true; return; }
@@ -983,9 +992,11 @@ async function voiceQuestion() {
   let wav;
   try {
     ctx=new AudioContext(); await ctx.resume();
+    if(questionCancel)return;
     mic=await withTimeout(navigator.mediaDevices.getUserMedia({audio:{channelCount:1,echoCancellation:true,noiseSuppression:true}}),20000,stopTracks,questionAbort.signal);
     questionStream=mic;setListenerState('speech','Говори. Когда закончишь, нажми «Закончить вопрос».');
     await ctx.audioWorklet.addModule('/recorder.js');
+    if(questionCancel)return;
     source=ctx.createMediaStreamSource(mic); node=new AudioWorkletNode(ctx,'recorder');
     const chunks=[]; let count=0,detectedUtterance=null;const gate=new SpeechGate(ctx.sampleRate);
     node.port.onmessage=({data})=>{
