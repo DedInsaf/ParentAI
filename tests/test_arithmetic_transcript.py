@@ -5,6 +5,15 @@ from dialogue import _answers_match
 
 
 class ArithmeticTranscriptTests(unittest.TestCase):
+    def test_symbols_are_not_removed_to_make_a_different_numeric_answer(self):
+        for answer, wrong in [('2 × 3', '23'), ('12 ÷ 3', '123'), ('2 ± 3', '23'),
+                              ('50%', '50'), ('(2)(3)', '23'), ('2:3', '23'), ('2 > 3', '23')]:
+            with self.subTest(answer=answer):
+                self.assertFalse(_answers_match(answer, [wrong]))
+        self.assertTrue(_answers_match('2 × 3', ['2*3']))
+        self.assertTrue(_answers_match('12 ÷ 3', ['12/3']))
+        self.assertTrue(_answers_match('(5)', ['5']))
+
     def test_explicit_arithmetic_is_formatted_without_solving_or_correcting_it(self):
         cases = {
             'Сколько будет семь плюс пять?': 'Сколько будет 7 + 5?',

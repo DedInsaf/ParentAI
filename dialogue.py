@@ -30,8 +30,8 @@ DEFAULT_REPLY_VOICE = "parent"
 
 
 def _normalized_answer(value):
-    value = value.casefold().replace("ё", "е").replace("−", "-")
-    return re.sub(r"[^0-9a-zа-я+\-=/.,]", "", value).replace(",", ".")
+    value = value.casefold().replace("ё", "е").replace("−", "-").replace("×", "*").replace("÷", "/")
+    return re.sub(r"[^0-9a-zа-я+\-*/=±()%.,:^<>≤≥≠≈√²³]", "", value).replace(",", ".")
 
 
 _NUMBER_WORDS = {
