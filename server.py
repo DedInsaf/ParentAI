@@ -22,6 +22,7 @@ from dialogue import Dialogues
 from avatar_model import MAX_MODEL_BYTES, model_path, save_model, scanner_status
 from auth import AuthStore, SESSION_LIFETIME
 from account_requests import AccountRequests
+from transcripts import validated_transcript
 from usage import LimitExceeded, UsageStore, estimate_tokens
 from payments import PlategaClient
 from mailer import AccountMailer
@@ -226,7 +227,7 @@ class AppServer(ThreadingHTTPServer):
                     provider=speech_status.get('provider', ''),
                     model=speech_status.get('model', 'general-v1'), bypass_limits=unlimited)
                 try:
-                    text = engine.recognize(payload)
+                    text = validated_transcript(engine.recognize(payload))
                 except Exception as exc:
                     self.usage.fail(reservation['id'])
                     LOGGER.warning('Speech recognition failed for user %s via %s: %s',

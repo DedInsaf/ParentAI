@@ -178,7 +178,7 @@ async function poll() {
     if(!cloneEnabled&&$('voiceMode').value==='clone'){$('voiceMode').value='direct';updateVoiceMode();}
     renderParentSummary(status.usage);
     renderSubscription(status.usage, status.billing);
-    if (!tutorBusy && !questionRecording && !listenerPending) $('tutorStatus').textContent = status.tutor?.enabled?'Задай вопрос голосом или напиши его. Будем пробовать по шагам.':'Подсказки временно недоступны. Попробуй немного позже.';
+    if (!tutorBusy && !questionRecording && !listenerPending) $('tutorStatus').textContent = running&&paused?'Занятие на паузе. Нажми «Продолжить занятие», когда будешь готов.':status.tutor?.enabled?'Задай вопрос голосом или напиши его. Будем пробовать по шагам.':'Подсказки временно недоступны. Попробуй немного позже.';
     renderVoiceTakes();
     if (!recording) $('voiceHint').textContent = status.error || status.progress || (status.phrases.length ? 'Сохранённый голос готов. Можно начать занятие.' : 'Выберите способ записи голоса.');
     if (status.reference && !referenceLoaded && !recording) {
@@ -661,6 +661,7 @@ function pause(forcePause=false) {
       paused=true;pausePending=true;lessonPresenceEnabled=false;
       document.body.classList.add('on-break');stopCamera();
       setListenerState('off','Перерыв. Камера и микрофон выключены.');
+      $('tutorStatus').textContent='Занятие на паузе. Нажми «Продолжить занятие», когда будешь готов.';
       $('pauseBtn').textContent='Продолжить занятие';
       $('monitorStatus').textContent='Перерыв · камера выключена';controls();
       const session=await api('study-session',JSON.stringify({action:'pause',id:sessionId}));

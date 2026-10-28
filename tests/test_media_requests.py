@@ -9,6 +9,7 @@ import urllib.request
 from unittest.mock import patch
 from runtime import Runtime
 from server import AppServer
+from test_dialogue import recording
 
 
 class MediaRequestTests(unittest.TestCase):
@@ -17,7 +18,9 @@ class MediaRequestTests(unittest.TestCase):
         self.iterations.start()
         self.temp = tempfile.TemporaryDirectory()
         self.runtime = Runtime(self.temp.name)
-        self.server = AppServer(self.runtime, warm_speech=False)
+        self.server = AppServer(self.runtime, warm_speech=False, bind='127.0.0.1')
+        # A deployment's .env must never send isolated tests to the live site.
+        self.server.origin = self.server.listen_origin
         self.user = self.server.auth.register('media-user', 'media@example.com', 'password-123', 'password-123')
         self.session = self.server.auth.create_session(self.user.id)
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
@@ -45,6 +48,20 @@ class MediaRequestTests(unittest.TestCase):
                 raise ValueError('test timed out')
             return {'text': 'тестовый вопрос'}
         self.server.recognize = recognize
+
+    def test_decoder_loop_uses_fallback_without_forwarding_invented_question(self):
+        class Decoder:
+            def __init__(self, text, provider):
+                self.text, self.provider = text, provider
+            def public_status(self):
+                return {'enabled': True, 'local': True, 'provider': self.provider}
+            def recognize(self, payload):
+                return self.text
+        self.server.speech = Decoder('Спасибо. ' * 77, 'test-loop')
+        self.server.speech_fallbacks = [Decoder('Сколько будет два плюс два?', 'test-fallback')]
+        result = self.server.recognize(self.user.id, recording(), 'media-loop-request')
+        self.assertEqual(result['text'], 'Сколько будет два плюс два?')
+        self.assertEqual(result['speech_provider'], 'test-fallback')
 
     def test_status_and_pause_resume_do_not_wait_for_speech_recognition(self):
         entered, release = threading.Event(), threading.Event()
