@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hmac
 import json
+import re
 import urllib.error
 import urllib.request
 from urllib.parse import urlsplit
@@ -36,13 +37,17 @@ class PlategaClient:
                 and hmac.compare_digest(merchant_id, self.merchant_id)
                 and hmac.compare_digest(secret, self.secret))
 
-    def create_subscription(self, amount_rubles, plan_title="Адым Плюс"):
+    def create_subscription(self, amount_rubles, plan_title="Адым Плюс", *, buyer_email=None):
         if not self.enabled:
             raise ValueError("Оплата ещё не подключена. Добавьте данные магазина Platega.")
         amount = int(amount_rubles)
         if not 0 < amount <= 10_000:
             raise ValueError("Некорректная стоимость подписки.")
+        if (not isinstance(buyer_email, str) or len(buyer_email) > 254
+                or not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", buyer_email)):
+            raise ValueError("Для оплаты нужна действующая почта покупателя.")
         body = json.dumps({
+            "metadata": {"user_email": buyer_email},
             "paymentMethod": 6,
             "paymentDetails": {
                 "amount": amount,

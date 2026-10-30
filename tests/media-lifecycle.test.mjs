@@ -87,7 +87,7 @@ test('cancelled browser reminder settles without browser end event and can be sp
   const s={playbackId:0,activeCues:[],browserSpeechFinish:null,browserUtterance:null,
     audioSources:new Set(),analyser:null,playing:false,performance:{now:()=>1000},
     status:{phrases:[{}]},controls(){},$:()=>({}),SpeechSynthesisUtterance:class{},
-    window:{speechSynthesis:{getVoices:()=>[],speak(){spoken++;},cancel(){cancelled++;}}}};
+    window:{speechSynthesis:{getVoices:()=>[{lang:'ru-RU',localService:true}],speak(){spoken++;},cancel(){cancelled++;}}}};
   vm.createContext(s);
   vm.runInContext(section('function stopAudio()', 'async function playVoice(')+
     section('async function speakBrowserPrompt(', 'function beginAudio('),s);
@@ -99,4 +99,26 @@ test('cancelled browser reminder settles without browser end event and can be sp
     await pending;
   }
   assert.equal(spoken,10);assert.equal(cancelled,10);
+});
+
+
+test('cloud-only browser voices use saved audio without sending text to speech synthesis',async()=>{
+  let fallback=0;
+  const s={window:{speechSynthesis:{getVoices:()=>[{lang:'ru-RU',localService:false}],
+    speak(){assert.fail('A browser cloud voice must not receive text');}}},
+    playVoice:async kind=>{assert.equal(kind,'camera');fallback++;}};
+  vm.createContext(s);vm.runInContext(section('async function speakBrowserPrompt(', 'function beginAudio('),s);
+  await s.speakBrowserPrompt('Вернись к занятию','camera');assert.equal(fallback,1);
+});
+
+test('scanner instructions remain visible when no local browser voice is available',()=>{
+  const elements=new Map();const s={lastScanInstruction:'',lastScanInstructionAt:0,
+    $:id=>{if(!elements.has(id))elements.set(id,{checked:true});return elements.get(id);},
+    performance:{now:()=>5000},SpeechSynthesisUtterance:class{},
+    speechSynthesis:{getVoices:()=>[{lang:'ru-RU',localService:false}],cancel(){},
+      speak(){assert.fail('Scanner must not invoke cloud speech');}}};
+  s.window={speechSynthesis:s.speechSynthesis};vm.createContext(s);
+  vm.runInContext(section('function scanInstruction(', 'async function fitPortrait('),s);
+  s.scanInstruction('Посмотрите прямо',true);
+  assert.equal(elements.get('scannerMessage').textContent,'Посмотрите прямо');
 });

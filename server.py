@@ -746,7 +746,7 @@ class Handler(BaseHTTPRequestHandler):
                                                'status':'pending', 'duplicate':True})
                     catalog = self.server.usage.catalog()[plan]
                     amount = catalog['monthly_price_rubles']
-                    checkout = self.server.platega.create_subscription(amount, catalog['title'])
+                    checkout = self.server.platega.create_subscription(amount, catalog['title'], buyer_email=user.email)
                     self.server.usage.record_checkout(
                         user.id, checkout['provider_id'], checkout['redirect'], amount, plan)
                 return self.send(201, {'provider':'Platega', 'redirect':checkout['redirect'],

@@ -254,7 +254,7 @@ function renderSubscription(summary, billing) {
   } else if (summary.plan.unlimited) {
     $('billingMessage').textContent = 'Доступ администратора работает без тарифных ограничений.';
   } else {
-    $('billingMessage').textContent = 'Оплата проходит на защищённой странице Platega через СБП. Списание повторяется раз в месяц; отменить подписку можно по ссылке из письма Platega.';
+    $('billingMessage').textContent = 'Оплата проходит на защищённой странице Platega через СБП. Условия автопродления нужно отдельно подтвердить перед оплатой; отказаться от будущих списаний можно через поддержку Адым.';
   }
   if(billingNotice)$('billingMessage').textContent=billingNotice;
 }
@@ -441,7 +441,7 @@ async function scan() {
     if(epoch!==scanEpoch){model.dispose();return;}
     installModel(model);showPortraitCutout(portrait||front);cancelScan();
     $('faceStatus').textContent='3D-аватар создан';$('cameraHint').textContent='Аватар сохранён в вашем профиле. Проверьте лицо, волосы, шею и поворот.';
-    scanInstruction('Черновик аватара создан и сохранён. Фотографии никуда не отправлялись.',true);
+    scanInstruction('Аватар создан. Выбранные снимки и модель сохранены в защищённом профиле семьи.',true);
   } catch(error){if(epoch===scanEpoch){cancelScan();throw error;}}
 }
 function cancelScan() {
@@ -457,7 +457,9 @@ function scanInstruction(text,force=false) {
   const now=performance.now();if(!force&&(text===lastScanInstruction||now-lastScanInstructionAt<4500))return;
   lastScanInstruction=text;lastScanInstructionAt=now;speechSynthesis.cancel();
   const utterance=new SpeechSynthesisUtterance(text);utterance.lang='ru-RU';utterance.rate=.92;
-  const voice=speechSynthesis.getVoices().find(v=>v.lang.startsWith('ru')&&v.localService);if(voice)utterance.voice=voice;speechSynthesis.speak(utterance);
+  const voice=speechSynthesis.getVoices().find(v=>v.lang.startsWith('ru')&&v.localService);
+  if(!voice)return; // Keep instructions on screen; do not send them to a browser cloud voice.
+  utterance.voice=voice;speechSynthesis.speak(utterance);
 }
 async function fitPortrait(view,onProgress=()=>{},signal) {
   let worker,bitmap;
@@ -532,12 +534,12 @@ async function playVoice(kind='manual') {
   return beginAudio(buffer,item.text,kind);
 }
 async function speakBrowserPrompt(text,kind) {
-  if(!window.speechSynthesis)return playVoice(kind);
+  const local=window.speechSynthesis?.getVoices().find(voice=>voice.lang.startsWith('ru')&&voice.localService);
+  if(!local)return playVoice(kind);
   stopAudio();const id=playbackId;
   return new Promise(resolve=>{
     const utterance=new SpeechSynthesisUtterance(text);utterance.lang='ru-RU';utterance.rate=.92;
-    const local=window.speechSynthesis.getVoices().find(voice=>voice.lang.startsWith('ru')&&voice.localService);
-    if(local)utterance.voice=local;
+    utterance.voice=local;
     const finish=()=>{if(browserUtterance===utterance){browserUtterance=null;browserSpeechFinish=null;playing=false;audioKind='';echoUntil=performance.now()+1000;controls();}resolve();};
     browserSpeechFinish=finish;
     utterance.onend=finish;utterance.onerror=finish;browserUtterance=utterance;browserSpeechStarted=performance.now();

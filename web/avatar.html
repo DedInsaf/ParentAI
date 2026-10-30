@@ -73,7 +73,7 @@
     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7.5A2.5 2.5 0 0 1 6.5 5h11A2.5 2.5 0 0 1 20 7.5v9a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 16.5v-9Z"/><path d="M4 9h16M16 14h1"/></svg>
     <span><small>Тариф</small><strong id="headerPlanName">Бесплатный</strong></span>
   </button>
-  <details class="account"><summary><span id="accountLogin"></span><span aria-hidden="true">⌄</span></summary><div class="account-menu"><button id="adminPanelBtn" type="button" class="admin-menu-button" hidden>Управление аккаунтами</button><a href="https://adym.ru/support.html" target="_blank" rel="noopener">Поддержка</a><a href="https://adym.ru/privacy.html" target="_blank" rel="noopener">Конфиденциальность</a><a href="https://adym.ru/consent.html" target="_blank" rel="noopener">Согласие на данные</a><a href="https://adym.ru/terms.html" target="_blank" rel="noopener">Соглашение</a><a href="mailto:support@adym.ru?subject=Отмена%20подписки">Отменить подписку</a><button id="logoutBtn" type="button" class="quiet">Выйти</button><button id="changePasswordBtn" type="button" class="quiet">Изменить пароль</button><button id="deleteAccountBtn" type="button" class="danger-quiet">Удалить аккаунт</button></div></details>
+  <details class="account"><summary><span id="accountLogin"></span><span aria-hidden="true">⌄</span></summary><div class="account-menu"><button id="adminPanelBtn" type="button" class="admin-menu-button" hidden>Управление аккаунтами</button><a href="https://adym.ru/support.html" target="_blank" rel="noopener">Поддержка</a><a href="https://adym.ru/privacy.html" target="_blank" rel="noopener">Конфиденциальность</a><a href="https://adym.ru/consent.html" target="_blank" rel="noopener">Согласие на данные</a><a href="https://adym.ru/terms.html" target="_blank" rel="noopener">Соглашение</a><a href="mailto:support@adym.ru?subject=Отказ%20от%20автосписаний">Отказаться от автосписаний</a><button id="logoutBtn" type="button" class="quiet">Выйти</button><button id="changePasswordBtn" type="button" class="quiet">Изменить пароль</button><button id="deleteAccountBtn" type="button" class="danger-quiet">Удалить аккаунт</button></div></details>
   <div id="lessonToolbar" class="lesson-toolbar" hidden><button id="pauseBtn" class="secondary" disabled>Сделать перерыв</button><button id="stopBtn" class="quiet" disabled>Закончить</button></div>
 </header>
 <dialog id="billingDialog" class="billing-dialog" aria-labelledby="subscriptionTitle">
@@ -109,8 +109,8 @@
         <button id="buyUltraBtn" type="button" class="full">Оформить Ультра через Platega</button>
       </article>
     </div>
-    <p class="plan-explainer"><strong>Что считается новой задачей?</strong> Новое условие из домашней работы. Уточнения, попытки ответа и последовательные подсказки внутри этой задачи ничего дополнительно не списывают. Перерыв останавливает таймер занятия. Резервное распознавание включается только тогда, когда основной способ не справился.</p>
-    <p id="billingMessage" class="billing-message" role="status">Оплата подписки проходит на защищённой странице Platega через СБП. Списание повторяется раз в месяц; отменить подписку можно по ссылке из письма Platega.</p>
+    <p class="plan-explainer"><strong>Что считается новой задачей?</strong> Новое условие из домашней работы. Уточнения, попытки ответа и последовательные подсказки внутри этой задачи ничего дополнительно не списывают. Лимиты занятий обновляются первого числа календарного месяца по времени сервера. Перерыв останавливает таймер занятия. Резервное распознавание включается только тогда, когда основной способ не справился.</p>
+    <p id="billingMessage" class="billing-message" role="status">Оплата подписки проходит на защищённой странице Platega через СБП. Условия автопродления нужно отдельно подтвердить перед оплатой; отказаться от будущих списаний можно через поддержку Адым.</p>
   </div>
 </dialog>
 <dialog id="adminDialog" class="admin-dialog" aria-labelledby="adminDialogTitle">

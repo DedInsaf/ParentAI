@@ -88,13 +88,14 @@ class ServerTests(unittest.TestCase):
         redirect='https://pay.platega.io/subscription/11111111'
         class FakePlatega:
             def public_status(self):return {'provider':'Platega','enabled':True,'method':'recurring_sbp'}
-            def create_subscription(self,amount,plan_title):
-                self.amount=amount; self.plan_title=plan_title
+            def create_subscription(self,amount,plan_title, *, buyer_email=None):
+                self.amount=amount; self.plan_title=plan_title; self.buyer_email=buyer_email
                 return {'provider_id':provider_id,'redirect':redirect,'status':'pending'}
             def valid_callback(self,merchant,secret):return merchant=='merchant' and secret=='secret'
         self.s.platega=FakePlatega()
         headers={'Origin':self.s.origin,'X-App-Token':self.s.token,'Content-Type':'application/json'}
         code,body=self.request('/api/billing/checkout',json.dumps({'plan':'paid'}).encode(),headers)
+        self.assertEqual(self.s.platega.buyer_email, 'test@example.com')
         self.assertEqual(code,201)
         self.assertEqual(json.loads(body)['redirect'],redirect)
         self.assertEqual(self.s.platega.amount,490)
@@ -111,7 +112,7 @@ class ServerTests(unittest.TestCase):
         class FakePlatega:
             called = False
             def public_status(self): return {'provider':'Platega','enabled':True}
-            def create_subscription(self, _amount, _title):
+            def create_subscription(self, _amount, _title, *, buyer_email=None):
                 self.called = True
                 raise AssertionError('Platega must not be called')
         self.s.platega = FakePlatega()
