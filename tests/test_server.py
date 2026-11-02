@@ -69,6 +69,9 @@ class ServerTests(unittest.TestCase):
         self.assertIn("default-src 'self'",headers['Content-Security-Policy'])
         self.assertIn("script-src 'self' 'wasm-unsafe-eval'",headers['Content-Security-Policy'])
         self.assertNotIn("script-src 'self' 'unsafe-eval'",headers['Content-Security-Policy'])
+        self.assertEqual(headers['Cross-Origin-Opener-Policy'],'same-origin')
+        self.assertEqual(headers['Cross-Origin-Embedder-Policy'],'require-corp')
+        self.assertEqual(headers['Cross-Origin-Resource-Policy'],'same-origin')
         etag=headers['ETag']
         code,body=self.request('/app.js',headers={'If-None-Match':etag},authenticated=False)
         self.assertEqual(code,304)

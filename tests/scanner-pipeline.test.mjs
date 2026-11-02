@@ -13,25 +13,26 @@ function workerHarness(){
  const ort={env:{wasm:{}},Tensor:class{dispose(){}},InferenceSession:{create:async()=>{
   counts.sessions++;return {inputNames:['image'],outputNames:['matte'],async run(){counts.runs++;return {matte:{dims:[1,1,32,32],data:new Float32Array(1024),dispose(){}}};}};
  }}};
- const s={self:{location:{href:'http://localhost/portrait-worker.js'},postMessage:m=>messages.push(m)},
+ const s={self:{location:{href:'http://localhost/portrait-worker.js'},navigator:{hardwareConcurrency:8},crossOriginIsolated:true,postMessage:m=>messages.push(m)},
   performance:{now:()=>1},URL,Uint8Array,Float32Array,OffscreenCanvas:class{
    getContext(){return {save(){},clearRect(){},translate(){},scale(){},drawImage(){},restore(){},getImageData(){return {data:new Uint8Array(4096)};}};}
   },loadModule:async path=>path.includes('vision_bundle')?vision:path.includes('ort.wasm')?ort:path.includes('portrait-fit')?{portraitAccessoryIssue:lm=>lm.hat?'Снимите головной убор':''}:{imageToNchw:()=>new Float32Array(3072),cleanPortraitAlpha:()=>new Uint8Array(1024)}};
- vm.createContext(s);vm.runInContext(workerSource.replaceAll('await import(', 'await loadModule('),s);
- const send=async(options={})=>s.self.onmessage({data:{bitmap:{width:32,height:32,close(){counts.bitmaps++;}},...options}});
+ vm.createContext(s);vm.runInContext(workerSource.replaceAll('import(', 'loadModule('),s);
+ const send=async(options={})=>s.self.onmessage({data:options.warmup?options:{bitmap:{width:32,height:32,close(){counts.bitmaps++;}},...options}});
  return {send,counts,messages};
 }
 test('two portraits reuse both models and retain two matte passes per image',async()=>{
- const h=workerHarness();await h.send();await h.send();
+ const h=workerHarness();await h.send({warmup:true});await h.send();await h.send();
  assert.equal(h.counts.segmenters,1);assert.equal(h.counts.sessions,1);assert.equal(h.counts.runs,4);
  assert.equal(h.counts.bitmaps,2);assert.equal(h.messages.filter(m=>m.engine==='modnet').length,2);
+ assert.equal(h.messages.filter(m=>m.ready).length,1);
 });
-test('headwear is rejected before loading or running the matting model',async()=>{
+test('headwear is rejected before running the warmed matting model',async()=>{
  const h=workerHarness();await h.send({landmarks:{hat:true}});
- assert.equal(h.counts.sessions,0);assert.equal(h.counts.runs,0);
+ assert.equal(h.counts.sessions,1);assert.equal(h.counts.runs,0);
  assert.equal(h.messages.at(-1).error,'Снимите головной убор');assert.equal(h.counts.bitmaps,1);
 });
-test('all six poses are captured without a blocking accessory worker; final analysis shares one worker',async()=>{
+test('all six poses are captured while warming models; only the used portrait is analysed',async()=>{
  const elements=new Map(),views=[],fits=[];let captures=0,created=0,terminated=0,now=0;
  const points=Array.from({length:478},()=>({x:.5,y:.5,z:0}));
  const canvas=()=>({width:0,height:0,getContext:()=>({drawImage(){}}),toDataURL:()=>{captures++;return 'data:image/jpeg;base64,test';}});
@@ -41,14 +42,14 @@ test('all six poses are captured without a blocking accessory worker; final anal
   video:{videoWidth:640,videoHeight:480,closest:()=>({})},performance:{now:()=>now+=700},landmarks:()=>({faceLandmarks:[points]}),
   portraitQuality:()=>'',scanQuality:()=>'',scanTurnIssue:()=>'',faceYaw:()=>0,
   document:{createElement:()=>canvas()},lastMediaTimestamp:0,detector:{detectForVideo:()=>({faceLandmarks:[points]})},sleep:async()=>{},stopCamera(){},
-  Worker:class{constructor(){created++;assert.equal(captures,6);}terminate(){terminated++;}},
-  fitPortrait:async(view,progress,signal,worker)=>{fits.push(worker);return {};},THREE:{},avatarTopology:{},
+  Worker:class{constructor(){created++;}terminate(){terminated++;}},warmPortraitWorker:async()=>{},
+  fitPortrait:async(view,progress,signal,worker)=>{fits.push({worker,role:view.role});return {};},THREE:{},avatarTopology:{},
   LocalAvatar:{create(t,v){views.push(...v);return {dispose(){}};}},packPortraitAnalysis:()=>({}),
   api:async()=>({}),installModel(){},showPortraitCutout(){},cancelScan(){},
  };
  vm.createContext(s);vm.runInContext(app.slice(app.indexOf('async function scan()'),app.indexOf('function cancelScan()')),s);
- await s.scan();assert.equal(views.length,6);assert.equal(created,1);assert.equal(terminated,1);
- assert.equal(fits.length,2);assert.equal(fits[0],fits[1]);
+ await s.scan();assert.equal(views.length,6);assert.equal(captures,6);assert.equal(created,1);assert.equal(terminated,1);
+ assert.equal(fits.length,1);assert.equal(fits[0].role,'portrait');
 });
 test('cancelling portrait analysis immediately stops the worker and releases the image',async()=>{
  const abort=new AbortController();let stopped=0,closed=0;

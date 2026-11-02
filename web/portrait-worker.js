@@ -1,17 +1,32 @@
 // Both networks run inside this worker. No photo is sent to a remote service.
 // One worker serves both accepted portraits; reuse the loaded models between them.
-let segmenter,session;
+let segmenter,session,initialization,visionModule,matteModule,ort;
+async function initialize(progress){
+  if(!initialization)initialization=(async()=>{
+    [visionModule,matteModule,ort]=await Promise.all([
+      import('./vendor/vision/vision_bundle.mjs'),
+      import('./portrait-matte.mjs'),
+      import('./vendor/matting/ort.wasm.min.mjs'),
+    ]);
+    const {FilesetResolver,ImageSegmenter}=visionModule;
+    progress('Загружаем модель обработки снимков…');
+    const files=await FilesetResolver.forVisionTasks('/vendor/vision/wasm');
+    segmenter=await ImageSegmenter.createFromOptions(files,{baseOptions:{modelAssetPath:'/vendor/vision/selfie_multiclass.tflite',delegate:'CPU'},canvas:new OffscreenCanvas(1,1),runningMode:'IMAGE',outputCategoryMask:true,outputConfidenceMasks:false});
+    ort.env.wasm.numThreads=self.crossOriginIsolated?Math.max(2,Math.min(4,self.navigator?.hardwareConcurrency||2)):1;
+    ort.env.wasm.proxy=false;
+    ort.env.wasm.wasmPaths=new URL('./vendor/matting/',self.location.href).href;
+    progress('Загружаем модель точного удаления фона…');
+    session=await ort.InferenceSession.create('/vendor/matting/modnet.onnx',{executionProviders:['wasm'],graphOptimizationLevel:'all'});
+  })();
+  return await initialization;
+}
 self.onmessage=async ({data:message})=>{
   const bitmap=message?.bitmap||message,accessoriesOnly=!!message?.accessoriesOnly;
   const began=performance.now(),progress=message=>self.postMessage({progress:true,message});
   try {
-    const {FilesetResolver,ImageSegmenter}=await import('./vendor/vision/vision_bundle.mjs');
-    const {imageToNchw,cleanPortraitAlpha}=await import('./portrait-matte.mjs');
-    if(!segmenter){
-      progress('Загружаем модель обработки снимков…');
-      const files=await FilesetResolver.forVisionTasks('/vendor/vision/wasm');
-      segmenter=await ImageSegmenter.createFromOptions(files,{baseOptions:{modelAssetPath:'/vendor/vision/selfie_multiclass.tflite',delegate:'CPU'},canvas:new OffscreenCanvas(1,1),runningMode:'IMAGE',outputCategoryMask:true,outputConfidenceMasks:false});
-    }
+    await initialize(progress);
+    if(message?.warmup){self.postMessage({ready:true});return;}
+    const {imageToNchw,cleanPortraitAlpha}=matteModule;
     progress('Находим лицо, волосы, шею и одежду…');
     // Copy masks inside the callback: MediaPipe releases them when it returns.
     const classes=await new Promise((resolve,reject)=>{
@@ -30,14 +45,6 @@ self.onmessage=async ({data:message})=>{
       if(issue)throw new Error(issue);
     }
     progress('Аккуратно отделяем волосы и края плеч от фона…');
-    const ort=await import('./vendor/matting/ort.wasm.min.mjs');
-    // A single WASM thread works on Safari/iOS without SharedArrayBuffer.
-    ort.env.wasm.numThreads=1;ort.env.wasm.proxy=false;
-    ort.env.wasm.wasmPaths=new URL('./vendor/matting/',self.location.href).href;
-    if(!session){
-      progress('Загружаем модель точного удаления фона…');
-      session=await ort.InferenceSession.create('/vendor/matting/modnet.onnx',{executionProviders:['wasm'],graphOptimizationLevel:'all'});
-    }
     // Use the user's accepted processing window for a near-source-resolution
     // matte. Two passes at this size preserve thin hair and the real neckline;
     // the previous 512 px short side was fast but visibly rounded both.
@@ -68,5 +75,5 @@ self.onmessage=async ({data:message})=>{
     const alpha=cleanPortraitAlpha(consensus,matteWidth,matteHeight);
     self.postMessage({...classes,matte:{alpha,width:matteWidth,height:matteHeight},engine:'modnet',analysisMs:performance.now()-began},[classes.data.buffer,alpha.buffer]);
   } catch(error){self.postMessage({error:error.message||'Не удалось отделить фон.'});}
-  finally {bitmap.close();}
+  finally {if(!message?.warmup)bitmap.close();}
 };

@@ -385,8 +385,12 @@ async function scan() {
   }
   stopAudio();scanning=true;const epoch=++scanEpoch,abort=new AbortController();scannerAbort=abort;restoringAbort?.abort();
   $('scannerDialog').showModal();$('scannerCamera').appendChild(video.closest('.camera-frame'));controls();
+  let portraitWorker=null;
   try {
     scanInstruction('Перед съёмкой снимите шляпу, кепку и наушники. Очки оставьте, если носите их постоянно. Сядьте лицом к свету.',true);
+    portraitWorker=new Worker('/portrait-worker.js');
+    let warmupError=null;
+    const portraitWarmup=warmPortraitWorker(portraitWorker,abort.signal).catch(error=>{warmupError=error;});
     await Promise.all([enableCamera(),dependencies()]);
     const poses=[
       {role:'front',direction:0,instruction:'Посмотрите прямо в объектив и мягко сомкните губы.'},
@@ -430,14 +434,11 @@ async function scan() {
     stopCamera();scanInstruction('Снимки готовы. Отделяем волосы, шею и одежду от фона. Первая загрузка может занять больше времени.',true);
     $('captureStep').textContent='Анализ снимков';$('captureCountdown').textContent='';
     const front=views.find(view=>view.role==='front'),portrait=views.find(view=>view.role==='portrait');
-    const portraitWorker=new Worker('/portrait-worker.js');
-    try {
-      front.anchors=await fitPortrait(front,message=>scanInstruction(message),abort.signal,portraitWorker);
-      if(portrait){
-        scanInstruction('Уточняем шею и края плеч.',true);
-        portrait.anchors=await fitPortrait(portrait,message=>scanInstruction(message),abort.signal,portraitWorker);
-      }
-    } finally {portraitWorker.terminate();}
+    if(!front||!portrait)throw new Error('Не хватает итогового снимка. Повторите сканирование.');
+    scanInstruction('Завершаем подготовку модели обработки.',true);
+    await portraitWarmup;if(warmupError)throw warmupError;
+    scanInstruction('Отделяем волосы, шею и края плеч.',true);
+    portrait.anchors=await fitPortrait(portrait,message=>scanInstruction(message),abort.signal,portraitWorker);
     if(epoch!==scanEpoch)return;
     scanInstruction('Создаём ваш объёмный аватар.',true);
     const model=LocalAvatar.create(THREE,views,avatarTopology);
@@ -448,6 +449,7 @@ async function scan() {
     $('faceStatus').textContent='3D-аватар создан';$('cameraHint').textContent='Аватар сохранён в вашем профиле. Проверьте лицо, волосы, шею и поворот.';
     scanInstruction('Аватар создан. Выбранные снимки и модель сохранены в защищённом профиле семьи.',true);
   } catch(error){if(epoch===scanEpoch){cancelScan();throw error;}}
+  finally {portraitWorker?.terminate();}
 }
 function cancelScan() {
   scanEpoch++;scanning=false;scannerAbort?.abort();stopCamera();
@@ -465,6 +467,17 @@ function scanInstruction(text,force=false) {
   const voice=speechSynthesis.getVoices().find(v=>v.lang.startsWith('ru')&&v.localService);
   if(!voice)return; // Keep instructions on screen; do not send them to a browser cloud voice.
   utterance.voice=voice;speechSynthesis.speak(utterance);
+}
+async function warmPortraitWorker(worker,signal) {
+  return await new Promise((resolve,reject)=>{
+    if(signal?.aborted){reject(new DOMException('Сканирование отменено','AbortError'));return;}
+    const cleanup=()=>signal?.removeEventListener('abort',cancel);
+    const cancel=()=>{cleanup();worker.terminate();reject(new DOMException('Сканирование отменено','AbortError'));};
+    signal?.addEventListener('abort',cancel,{once:true});
+    worker.onmessage=({data})=>{if(data.progress)return;if(data.ready){cleanup();resolve();}else if(data.error){cleanup();reject(new Error(data.error));}};
+    worker.onerror=event=>{cleanup();reject(new Error(event.message||'Не удалось подготовить обработку снимков.'));};
+    worker.postMessage({warmup:true});
+  });
 }
 async function fitPortrait(view,onProgress=()=>{},signal,sharedWorker=null) {
   let worker,bitmap;
