@@ -51,6 +51,10 @@ test('avatar gives a camera reminder and a stronger five-minute call', () => {
   assert.match(script, /speakBrowserPrompt/);
 });
 
+test('setup portrait keeps its eyes open and lesson blinking never collapses the photo mesh', () => {
+  assert.match(script, /const blink=running\|\|audioKind==='preview'\?blinkAmount\(now\/1000\):0/);
+});
+
 test('voice question is visible, accepts ordinary speech and stops after silence', () => {
   assert.match(script, /Услышал: «\$\{heard\}»/);
   assert.match(script, /\|\|\/\[а-яёa-z0-9\]\{2\}\//u);

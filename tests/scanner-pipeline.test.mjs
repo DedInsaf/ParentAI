@@ -51,6 +51,9 @@ test('all six poses are captured while warming models; only the used portrait is
  await s.scan();assert.equal(views.length,6);assert.equal(captures,6);assert.equal(created,1);assert.equal(terminated,1);
  assert.equal(fits.length,1);assert.equal(fits[0].role,'portrait');
 });
+test('final portrait asks for a relaxed neutral pose instead of a stretched neck',()=>{
+ assert.match(app,/Мягко сомкните губы, расслабьте плечи и не вытягивайте шею/);
+});
 test('a stalled accelerated portrait pass retries once in compatible mode',async()=>{
  const elements=new Map(),modes=[];let now=0,workers=0,terminated=0;
  const points=Array.from({length:478},()=>({x:.5,y:.5,z:0}));

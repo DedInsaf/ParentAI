@@ -397,7 +397,7 @@ async function scan() {
       {role:'right',direction:-1,instruction:'Теперь немного поверните голову к стрелке →'},
       {role:'left_outer',direction:1,outer:true,instruction:'Поверните голову к стрелке ← чуть сильнее'},
       {role:'right_outer',direction:-1,outer:true,instruction:'Поверните голову к стрелке → чуть сильнее'},
-      {role:'portrait',direction:0,instruction:'Снова смотрите прямо. Отодвиньте камеру, чтобы были видны макушка, оба уха, шея и плечи.'},
+      {role:'portrait',direction:0,instruction:'Снова смотрите прямо. Мягко сомкните губы, расслабьте плечи и не вытягивайте шею. Должны быть видны макушка, оба уха, шея и плечи.'},
     ];
     const views=[];
     for(const {role,direction,outer=false,instruction} of poses){
@@ -788,7 +788,10 @@ function tick(now) {
     const elapsed=audioContext?audioContext.currentTime-audioStarted:0;
     const cue=playing?activeCues.findLast(c=>c.time<=elapsed):null;
     const pose=avatarMotion.update(now/1000,{active:(running&&!paused)||audioKind==='preview',speaking:playing,listening:now<childSpeakingUntil,engaged:listenerPending||questionRecording||tutorBusy,preview:running?0:previewYaw,reduced:matchMedia('(prefers-reduced-motion: reduce)').matches});
-    modelAvatar?.update(pose,opening,cue?.shape,blinkAmount(now/1000));
+    // Keep the setup portrait still while the parent evaluates its quality.
+    // Natural motion, including a restrained blink, starts in preview/lesson.
+    const blink=running||audioKind==='preview'?blinkAmount(now/1000):0;
+    modelAvatar?.update(pose,opening,cue?.shape,blink);
     renderer.render(scene,camera);
   }
   if (running) {

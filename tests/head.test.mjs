@@ -15,7 +15,7 @@ test('skull matches every face seam vertex and extends behind the face',()=>{
   const neck=neckGeometry(head);
   assert.ok(Math.min(...neck.positions.filter((_,i)=>i%3===1)) < -1.3);
   assert.deepEqual(hairGeometry(head,'none').positions,[]);
-  assert.ok(blinkAmount(.09)>.99);
+  assert.ok(blinkAmount(.065)>.55&&blinkAmount(.065)<.57);
   assert.equal(blinkAmount(1),0);
 });
 

@@ -82,7 +82,10 @@ export function hairGeometry(head,style='short') {
 
 export function blinkAmount(seconds) {
   const phase=seconds%4.7;
-  return phase<.18 ? Math.sin(Math.PI*phase/.18) : 0;
+  // The photographic mesh has no separate eyelid surface. A full collapse
+  // stretched skin-coloured pixels over the eyes and looked like a broken
+  // avatar for one frame, so keep the blink short and recognisably partial.
+  return phase<.13 ? .56*Math.sin(Math.PI*phase/.13) : 0;
 }
 
 export function torsoGeometry(head){
