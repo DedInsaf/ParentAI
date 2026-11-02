@@ -67,6 +67,24 @@ export function portraitCutout(view){
   ctx.putImageData(image,0,0);return canvas;
 }
 
+export function neckOverlapAlpha(y,chinY,faceHeight){
+  if(!(faceHeight>0))return 1;
+  const t=Math.max(0,Math.min(1,(y-(chinY-faceHeight*.14))/(faceHeight*.105)));
+  return t*t*(3-2*t);
+}
+
+export function portraitBodyCutout(view){
+  const canvas=portraitCutout(view),chin=view.landmarks?.[152],forehead=view.landmarks?.[10];
+  if(!chin||!forehead)return canvas;
+  const ctx=canvas.getContext('2d',{willReadFrequently:true}),image=ctx.getImageData(0,0,canvas.width,canvas.height);
+  for(let y=0;y<canvas.height;y++){
+    const weight=neckOverlapAlpha((y+.5)/canvas.height,chin.y,chin.y-forehead.y);
+    if(weight===1)break;
+    for(let x=0;x<canvas.width;x++)image.data[(y*canvas.width+x)*4+3]=Math.round(image.data[(y*canvas.width+x)*4+3]*weight);
+  }
+  ctx.putImageData(image,0,0);return canvas;
+}
+
 // The semantic mask is deliberately conservative and often removes fine hair
 // that MODNet still identifies correctly. Hair geometry already limits where
 // this texture can appear, so keep the soft high-resolution matte for the head

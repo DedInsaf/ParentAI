@@ -223,7 +223,18 @@ test('visible neck follows the soft photographed matte without synthetic narrowi
   // The root hidden inside the face uses the same carrier width, so no shelf
   // or horizontal cut can appear under the animated jaw.
   const top=chin.y-fh*.14,topSpan=spanAt(top);
-  assert.deepEqual(topSpan,chinSpan);
+  topSpan.forEach((value,i)=>assert.ok(Math.abs(value-chinSpan[i])<1e-9));
+});
+
+test('upper neck carrier samples the actual jaw rows rather than extending collar width upwards',()=>{
+  const lm=fixture(),a=defaultPortraitAnchors(lm),matte=bodyMatte(),face=positionsFor(lm,1000,750),frame={nose:lm[1],aspect:.75,scale:4.2};
+  const top=lm[152].y-(lm[152].y-lm[10].y)*.14;
+  for(let y=Math.floor(top*matte.height);y<Math.floor(lm[152].y*matte.height);y++){
+    for(let x=90;x<110;x++)matte.alpha[y*matte.width+x]=1;
+  }
+  const body=matteBodyGeometry(lm,a,frame,face,matte),xs=[];
+  for(let i=0;i<body.uv.length;i+=2)if(Math.abs(1-body.uv[i+1]-top)<1e-9)xs.push(body.uv[i]);
+  assert.ok(Math.min(...xs)>.44);assert.ok(Math.max(...xs)<.56);
 });
 
 test('matte body has complete photo and closed sides/base with its top hidden by the head',()=>{

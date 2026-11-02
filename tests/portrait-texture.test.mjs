@@ -1,6 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {defringeHairEdges,portraitHairCutout,portraitSupportAt} from '../web/portrait-texture.mjs';
+import {defringeHairEdges,portraitHairCutout,portraitSupportAt,neckOverlapAlpha} from '../web/portrait-texture.mjs';
+
+test('neck overlap has no hard top edge and preserves the visible neck below the jaw',()=>{
+  const chin=.6,height=.4,top=chin-height*.14;
+  assert.equal(neckOverlapAlpha(top,chin,height),0);
+  assert.ok(neckOverlapAlpha(top+.01,chin,height)>0&&neckOverlapAlpha(top+.01,chin,height)<.3);
+  assert.equal(neckOverlapAlpha(chin,chin,height),1);
+  assert.equal(neckOverlapAlpha(.8,chin,height),1);
+});
 
 test('room pixels next to the neck are removed while fine hair keeps its allowance',()=>{
   const width=20,height=20,data=new Uint8Array(width*height);

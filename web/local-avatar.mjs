@@ -2,7 +2,7 @@ import {closeFaceOpenings, FACE_OPENINGS, mouthRig, positionsFor} from './core.m
 import {skullGeometry, earGeometry, neckGeometry, torsoGeometry, hairGeometry, OVAL} from './head-geometry.mjs';
 import {mouthInteriorGeometry, mouthInteriorPositions} from './mouth-geometry.mjs';
 import {defaultPortraitAnchors, foreheadScalpGeometry, photoHairPatchGeometry, portraitHairGeometry, portraitEarGeometry, matteBodyGeometry} from './portrait-geometry.mjs';
-import {portraitCutout,portraitHairCutout,portraitHairUnderlay,portraitHeadCutout} from './portrait-texture.mjs';
+import {portraitBodyCutout,portraitHairCutout,portraitHairUnderlay,portraitHeadCutout} from './portrait-texture.mjs';
 import {deformPortraitNeck} from './neck-skinning.mjs';
 
 const clamp=value=>Math.max(0,Math.min(.999999,value));
@@ -121,7 +121,7 @@ export class LocalAvatar {
       const hairPhotoMaterial=new THREE.MeshBasicMaterial({map:hairTexture,side:THREE.DoubleSide,transparent:true,alphaTest:.01});
       const denseHairTexture=new THREE.CanvasTexture(portraitHairCutout(bust,.50));denseHairTexture.colorSpace=THREE.SRGBColorSpace;denseHairTexture.generateMipmaps=false;denseHairTexture.minFilter=THREE.LinearFilter;
       const denseHairMaterial=new THREE.MeshBasicMaterial({map:denseHairTexture,side:THREE.FrontSide,transparent:true,alphaTest:.01,depthWrite:false});
-      const bodyTexture=new THREE.CanvasTexture(portraitCutout(bodyView));bodyTexture.colorSpace=THREE.SRGBColorSpace;
+      const bodyTexture=new THREE.CanvasTexture(portraitBodyCutout(bodyView));bodyTexture.colorSpace=THREE.SRGBColorSpace;
       const bodyMaterial=new THREE.MeshBasicMaterial({map:bodyTexture,side:THREE.DoubleSide,transparent:true,alphaTest:.02});
       // The photographed front half already curves around the torso. Opaque
       // inner faces used to show through its transparent room gaps as straight

@@ -111,7 +111,9 @@ export function matteBodyGeometry(lm,a,frame,face,matte) {
   if(!(fw>0&&fh>0))throw new Error('Не удалось измерить пропорции лица.');
   const center=(a?.neckLeft?.x+a?.neckRight?.x)/2||chin.x;
   const minimumWidth=fw*.2,gapLimit=Math.max(1,Math.floor(width*.003)),silhouetteThreshold=.25;
-  const firstRow=Math.max(0,Math.floor(chin.y*height)),lastRow=Math.min(height-1,Math.floor(.97*height));
+  // Read the actual jaw silhouette in the overlap too. Repeating the first
+  // neck row above the chin made a rectangular tab beneath the tapered jaw.
+  const firstRow=Math.max(0,Math.floor((chin.y-fh*.14)*height)),lastRow=Math.min(height-1,Math.floor(.97*height));
   const rows=new Array(height).fill(null);
   // Use the span connected through the centre of the person. Tiny mask islands
   // beside a shoulder must not pull the silhouette out into the room.
