@@ -421,26 +421,23 @@ async function scan() {
           if(frozenIssue){stable=0;continue;}
           const view={role,yaw:faceYaw(fresh),canvas,landmarks:fresh.map(p=>({x:p.x,y:p.y,z:p.z})),photo:canvas.toDataURL('image/jpeg',.88)};
           views.push(view);
-          if(role==='front'){
-            scanInstruction('Проверяем, что шляпа, кепка или наушники сняты. Очки можно оставить.',true);
-            const accessoryMask=await scanAccessories(view,abort.signal);
-            const accessoryIssue=portraitAccessoryIssue(view.landmarks,accessoryMask);
-            if(accessoryIssue)throw new Error(accessoryIssue);
-          }
-          scanInstruction('Снимок готов.',true);await sleep(1200);break;
+          scanInstruction('Снимок готов.',true);await sleep(350);break;
         }
         await sleep(80);
       }
     }
     if(epoch!==scanEpoch)return;
-    stopCamera();scanInstruction('Все снимки готовы. Несколько раз проверяем волосы, шею и одежду. Это может занять до 30 секунд.',true);
+    stopCamera();scanInstruction('Снимки готовы. Отделяем волосы, шею и одежду от фона. Первая загрузка может занять больше времени.',true);
     $('captureStep').textContent='Анализ снимков';$('captureCountdown').textContent='';
     const front=views.find(view=>view.role==='front'),portrait=views.find(view=>view.role==='portrait');
-    front.anchors=await fitPortrait(front,message=>scanInstruction(message),abort.signal);
-    if(portrait){
-      scanInstruction('Отдельно уточняем шею, футболку и края плеч.',true);
-      portrait.anchors=await fitPortrait(portrait,message=>scanInstruction(message),abort.signal);
-    }
+    const portraitWorker=new Worker('/portrait-worker.js');
+    try {
+      front.anchors=await fitPortrait(front,message=>scanInstruction(message),abort.signal,portraitWorker);
+      if(portrait){
+        scanInstruction('Уточняем шею и края плеч.',true);
+        portrait.anchors=await fitPortrait(portrait,message=>scanInstruction(message),abort.signal,portraitWorker);
+      }
+    } finally {portraitWorker.terminate();}
     if(epoch!==scanEpoch)return;
     scanInstruction('Создаём ваш объёмный аватар.',true);
     const model=LocalAvatar.create(THREE,views,avatarTopology);
@@ -469,20 +466,20 @@ function scanInstruction(text,force=false) {
   if(!voice)return; // Keep instructions on screen; do not send them to a browser cloud voice.
   utterance.voice=voice;speechSynthesis.speak(utterance);
 }
-async function fitPortrait(view,onProgress=()=>{},signal) {
+async function fitPortrait(view,onProgress=()=>{},signal,sharedWorker=null) {
   let worker,bitmap;
   try {
     bitmap=await createImageBitmap(view.canvas);
     const mask=await new Promise((resolve,reject)=>{
       if(signal?.aborted){reject(new DOMException('Сканирование отменено','AbortError'));return;}
-      worker=new Worker('/portrait-worker.js');
+      worker=sharedWorker||new Worker('/portrait-worker.js');
       const cleanup=()=>{clearTimeout(timer);signal?.removeEventListener('abort',cancel);};
       const cancel=()=>{cleanup();worker.terminate();reject(new DOMException('Сканирование отменено','AbortError'));};
       const timer=setTimeout(()=>{cleanup();reject(new Error('Обработка снимка заняла слишком долго. Попробуйте ещё раз.'));},90000);
       signal?.addEventListener('abort',cancel,{once:true});
       worker.onmessage=({data})=>{if(data.progress){onProgress(data.message);return;}cleanup();data.error?reject(new Error(data.error)):resolve(data);};
       worker.onerror=event=>{cleanup();reject(new Error(event.message||'Контур не найден'));};
-      try {worker.postMessage(bitmap,[bitmap]);} catch(error){cleanup();reject(error);}
+      try {worker.postMessage({bitmap,landmarks:view.landmarks},[bitmap]);} catch(error){cleanup();reject(error);}
     });
     view.segmentation=mask;
     view.matte=mask.matte;
@@ -490,24 +487,7 @@ async function fitPortrait(view,onProgress=()=>{},signal) {
     if(accessoryIssue)throw new Error(accessoryIssue);
     return fitStablePortraitAnchors(view.landmarks,mask);
   }
-  finally {worker?.terminate();bitmap?.close();}
-}
-async function scanAccessories(view,signal) {
-  let worker,bitmap;
-  try {
-    bitmap=await createImageBitmap(view.canvas);
-    return await new Promise((resolve,reject)=>{
-      if(signal?.aborted){reject(new DOMException('Сканирование отменено','AbortError'));return;}
-      worker=new Worker('/portrait-worker.js');
-      const cleanup=()=>{clearTimeout(timer);signal?.removeEventListener('abort',cancel);};
-      const cancel=()=>{cleanup();worker.terminate();reject(new DOMException('Сканирование отменено','AbortError'));};
-      const timer=setTimeout(()=>{cleanup();reject(new Error('Проверка головного убора заняла слишком долго. Попробуйте ещё раз.'));},30000);
-      signal?.addEventListener('abort',cancel,{once:true});
-      worker.onmessage=({data})=>{if(data.progress)return;cleanup();data.error?reject(new Error(data.error)):resolve(data);};
-      worker.onerror=event=>{cleanup();reject(new Error(event.message||'Не удалось проверить головной убор.'));};
-      try {worker.postMessage({bitmap,accessoriesOnly:true},[bitmap]);bitmap=null;} catch(error){cleanup();reject(error);}
-    });
-  } finally {worker?.terminate();bitmap?.close();}
+  finally {if(!sharedWorker)worker?.terminate();bitmap?.close();}
 }
 function showPortraitCutout(view){
   $('cutoutImage').src=portraitCutout(view).toDataURL('image/png');$('cutoutPreview').hidden=false;

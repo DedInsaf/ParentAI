@@ -1,15 +1,18 @@
 // Both networks run inside this worker. No photo is sent to a remote service.
+// One worker serves both accepted portraits; reuse the loaded models between them.
+let segmenter,session;
 self.onmessage=async ({data:message})=>{
   const bitmap=message?.bitmap||message,accessoriesOnly=!!message?.accessoriesOnly;
-  let segmenter,session;
   const began=performance.now(),progress=message=>self.postMessage({progress:true,message});
   try {
     const {FilesetResolver,ImageSegmenter}=await import('./vendor/vision/vision_bundle.mjs');
     const {imageToNchw,cleanPortraitAlpha}=await import('./portrait-matte.mjs');
-    const ort=await import('./vendor/matting/ort.wasm.min.mjs');
+    if(!segmenter){
+      progress('Загружаем модель обработки снимков…');
+      const files=await FilesetResolver.forVisionTasks('/vendor/vision/wasm');
+      segmenter=await ImageSegmenter.createFromOptions(files,{baseOptions:{modelAssetPath:'/vendor/vision/selfie_multiclass.tflite',delegate:'CPU'},canvas:new OffscreenCanvas(1,1),runningMode:'IMAGE',outputCategoryMask:true,outputConfidenceMasks:false});
+    }
     progress('Находим лицо, волосы, шею и одежду…');
-    const files=await FilesetResolver.forVisionTasks('/vendor/vision/wasm');
-    segmenter=await ImageSegmenter.createFromOptions(files,{baseOptions:{modelAssetPath:'/vendor/vision/selfie_multiclass.tflite',delegate:'CPU'},canvas:new OffscreenCanvas(1,1),runningMode:'IMAGE',outputCategoryMask:true,outputConfidenceMasks:false});
     // Copy masks inside the callback: MediaPipe releases them when it returns.
     const classes=await new Promise((resolve,reject)=>{
       try {segmenter.segment(bitmap,result=>{
@@ -17,16 +20,24 @@ self.onmessage=async ({data:message})=>{
         resolve({data:mask.getAsUint8Array().slice(),width:mask.width,height:mask.height});
       });} catch(error){reject(error);}
     });
-    segmenter.close();segmenter=null;
     if(accessoriesOnly){
       self.postMessage({...classes,engine:'mediapipe-accessories'},[classes.data.buffer]);
       return;
     }
+    if(message?.landmarks){
+      const {portraitAccessoryIssue}=await import('./portrait-fit.mjs');
+      const issue=portraitAccessoryIssue(message.landmarks,classes);
+      if(issue)throw new Error(issue);
+    }
     progress('Аккуратно отделяем волосы и края плеч от фона…');
+    const ort=await import('./vendor/matting/ort.wasm.min.mjs');
     // A single WASM thread works on Safari/iOS without SharedArrayBuffer.
     ort.env.wasm.numThreads=1;ort.env.wasm.proxy=false;
     ort.env.wasm.wasmPaths=new URL('./vendor/matting/',self.location.href).href;
-    session=await ort.InferenceSession.create('/vendor/matting/modnet.onnx',{executionProviders:['wasm'],graphOptimizationLevel:'all'});
+    if(!session){
+      progress('Загружаем модель точного удаления фона…');
+      session=await ort.InferenceSession.create('/vendor/matting/modnet.onnx',{executionProviders:['wasm'],graphOptimizationLevel:'all'});
+    }
     // Use the user's accepted processing window for a near-source-resolution
     // matte. Two passes at this size preserve thin hair and the real neckline;
     // the previous 512 px short side was fast but visibly rounded both.
@@ -55,8 +66,7 @@ self.onmessage=async ({data:message})=>{
     for(let i=0;i<consensus.length;i++)consensus[i]=primary.data[i]*.62+mirrored.data[i]*.38;
     progress('Проверяем цельность лица, шеи и одежды…');
     const alpha=cleanPortraitAlpha(consensus,matteWidth,matteHeight);
-    await session.release();session=null;
     self.postMessage({...classes,matte:{alpha,width:matteWidth,height:matteHeight},engine:'modnet',analysisMs:performance.now()-began},[classes.data.buffer,alpha.buffer]);
   } catch(error){self.postMessage({error:error.message||'Не удалось отделить фон.'});}
-  finally {bitmap.close();segmenter?.close();if(session)await session.release();self.close();}
+  finally {bitmap.close();}
 };
