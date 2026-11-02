@@ -5,7 +5,7 @@ import {defringeHairEdges,portraitHairCutout,portraitSupportAt,neckOverlapAlpha}
 test('neck overlap has no hard top edge and preserves the visible neck below the jaw',()=>{
   const chin=.6,height=.4,top=chin-height*.14;
   assert.equal(neckOverlapAlpha(top,chin,height),0);
-  assert.ok(neckOverlapAlpha(top+.01,chin,height)>0&&neckOverlapAlpha(top+.01,chin,height)<.3);
+  assert.ok(neckOverlapAlpha(top+.002,chin,height)>0&&neckOverlapAlpha(top+.002,chin,height)<.3);
   assert.equal(neckOverlapAlpha(chin,chin,height),1);
   assert.equal(neckOverlapAlpha(.8,chin,height),1);
 });

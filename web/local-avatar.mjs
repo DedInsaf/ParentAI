@@ -171,7 +171,10 @@ export class LocalAvatar {
     const {cx,cy,edgeZ,depth,width,height}=head;group.position.set(cx,cy,edgeZ-depth*.32);
     const joint=new THREE.Vector3(cx,base[152*3+1]+height*.08,edgeZ-width*.23);
     pivot.position.copy(joint).sub(group.position);for(const child of pivot.children)child.position.sub(joint);for(const child of body.children)child.position.sub(group.position);
-    return new LocalAvatar(THREE,{group,pivot,face,cavity,base,weights:rig.weights,mouthWidth,cavityIds,neckSurface,neckJoint:joint});
+    // Seat the head slightly deeper in the neck. Keep the original rotation
+    // centre and move the weighted neck attachment by the same amount.
+    const headDrop=height*.06;pivot.position.y-=headDrop;
+    return new LocalAvatar(THREE,{group,pivot,face,cavity,base,weights:rig.weights,mouthWidth,cavityIds,neckSurface,neckJoint:joint,headDrop});
   }
   constructor(THREE,data){Object.assign(this,data);this.THREE=THREE;this.object=this.group;this.rest=this.group.position.clone();this.restUv=this.face.geometry.getAttribute('uv').array.slice();this.box=new THREE.Box3().setFromObject(this.group);}
   fit(camera,aspect){
@@ -197,7 +200,7 @@ export class LocalAvatar {
     this.pivot.rotation.set(pose.pitch,pose.yaw,pose.roll);
     if(this.neckSurface){
       const {geometry,base,jawY,collarY}=this.neckSurface,position=geometry.getAttribute('position');
-      deformPortraitNeck(base,position.array,this.neckJoint,this.pivot.rotation,jawY,collarY);position.needsUpdate=true;
+      deformPortraitNeck(base,position.array,this.neckJoint,this.pivot.rotation,jawY,collarY,this.headDrop);position.needsUpdate=true;
     }
     this.face.geometry.computeVertexNormals();
   }
