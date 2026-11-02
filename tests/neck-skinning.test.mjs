@@ -2,12 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {deformPortraitNeck} from '../web/neck-skinning.mjs';
 
-test('lowered head moves upper neck with it without moving the collar',()=>{
+test('head seating offset does not translate or shorten the photographed neck',()=>{
   const base=new Float32Array([.2,1,.1,.3,.5,.1,.4,0,.1]),output=new Float32Array(base.length);
   deformPortraitNeck(base,output,{x:0,y:1,z:0},{x:0,y:0,z:0},1,0,.06);
-  assert.ok(Math.abs(output[1]-.94)<1e-6);
-  assert.ok(Math.abs(output[4]-.47)<1e-6);
-  assert.deepEqual([...output.slice(6)],[...base.slice(6)]);
+  assert.deepEqual(output,base);
 });
 
 test('upper neck follows the same head rotation while collar stays fixed',()=>{
