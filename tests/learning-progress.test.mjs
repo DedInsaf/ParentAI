@@ -25,3 +25,11 @@ test('updated parent report removes a recovered recommendation and shows clarifi
  assert.ok(!root.children.some(e=>e.className==='progress-next'));
  assert.match(text(root),/уточнений: 2/);
 });
+test('practice confirmation stays visible across polling and cancellation leaves it unchanged',()=>{
+ const root=new Element('section');let accepted=false;
+ renderLearningProgress(root,progress(),()=>accepted);
+ const button=root.children.find(e=>e.className==='progress-next').children.find(e=>e.tag==='button');
+ button.events.click();assert.equal(button.textContent,'Подготовить короткое задание');
+ accepted=true;button.events.click();renderLearningProgress(root,progress());
+ assert.equal(button.textContent,'Задание подготовлено · начните занятие');
+});

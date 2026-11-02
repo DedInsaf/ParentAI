@@ -23,7 +23,7 @@ export function renderLearningProgress(root,progress,onPractice){
   if(progress.recommendation){
     const r=progress.recommendation,card=element('div',undefined,'progress-next');
     card.append(element('strong',`Что попробовать дальше: ${r.topic}`),element('p',r.text));
-    if(r.question){const button=element('button','Подготовить короткое задание','secondary');button.type='button';button.addEventListener('click',()=>onPractice?.(r.question));card.append(button);}
+    if(r.question){const button=element('button','Подготовить короткое задание','secondary');button.type='button';button.addEventListener('click',()=>{if(onPractice?.(r.question)!==false)button.textContent='Задание подготовлено · начните занятие';});card.append(button);}
     root.append(card);
   }
   root.append(element('p',progress.note,'helper'));

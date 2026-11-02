@@ -15,7 +15,7 @@ function harness(options={}){
     lessonTransition:null,resumeCancelled:false,lessonCameraEnabled:true,lessonPresenceEnabled:true,
     lessonElapsed:1000,lessonStarted:0,lessonLimitSeconds:1200,detectError:false,
     performance:{now:()=>2000},document:{hidden:false,body:{classList:{add(){},remove(){}}}},
-    $:id=>{if(!elements.has(id))elements.set(id,{textContent:''});return elements.get(id);},
+    $:id=>{if(!elements.has(id))elements.set(id,{textContent:'',replaceChildren(){this.cleared=true;}});return elements.get(id);},
     controls(){},stopAudio(){},cancelTutor(){},stopHandsFree(){},setListenerState(){},fail(){},
     stopCamera(){cameraLive=false;calls.push('camera:stop');},cameraLive:()=>cameraLive,
     async enableCamera(){calls.push('camera:start');cameraLive=true;},
@@ -140,6 +140,7 @@ test('hiding the tab during lesson start pauses before activating mic or avatar 
   assert.equal(h.state.paused,true);assert.equal(h.state.cameraLive(),false);
   assert.deepEqual(h.calls.filter(c=>['start','pause'].includes(c)),['start','pause']);
   assert.ok(!h.calls.includes('mic:start'));
+  assert.equal(h.elements.get('tutorMessages').cleared,true);
 });
 
 test('face detector error keeps live camera and avatar loop running, discards detector',()=>{

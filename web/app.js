@@ -205,9 +205,10 @@ function renderParentSummary(value) {
   $('summaryText').textContent = value.report.summary;
   renderLearningProgress($('learningProgress'),value.learning,question=>{
     if($('assignment').value.trim()&&$('assignment').value.trim()!==question&&
-       !window.confirm('Заменить подготовленный вопрос коротким заданием для повторения?'))return;
+       !window.confirm('Заменить подготовленный вопрос коротким заданием для повторения?'))return false;
     $('assignment').value=question;
     $('readyHint').textContent='Задание подготовлено. Начните занятие и нажмите «Дай подсказку», когда ребёнок будет готов.';
+    return true;
   });
 }
 function renderSubscription(summary, billing) {
@@ -643,6 +644,8 @@ async function start() {
   try { study = await api('study-session', JSON.stringify({action:'start'})); }
   catch(error){stopCamera();throw error;}
   studySessionId=study.id;lessonLimitSeconds=study.limit_seconds;lessonLimitHandled=false;pausePending=false;dialogId=null;taskFinished=false;taskSolved=false;hideTaskSwitch();
+  $('tutorMessages').replaceChildren();
+  $('assignment').placeholder='Например: не понимаю, как решить 2x + 3 = 11';
   stopAudio(); running = true; paused = false; presence.reset(); lessonElapsed = Number(study.elapsed_seconds||0)*1000; lessonStarted = performance.now(); showLesson();
   // The tab may have been hidden while the server was starting the lesson.
   if(document.hidden||(lessonCameraEnabled&&!cameraLive())){await pause(true);return;}
