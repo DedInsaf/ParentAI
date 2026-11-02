@@ -1,7 +1,7 @@
 // Both networks run inside this worker. No photo is sent to a remote service.
 // One worker serves both accepted portraits; reuse the loaded models between them.
 let segmenter,session,initialization,visionModule,matteModule,ort;
-async function initialize(progress){
+async function initialize(progress,singleThread=false){
   if(!initialization)initialization=(async()=>{
     [visionModule,matteModule,ort]=await Promise.all([
       import('./vendor/vision/vision_bundle.mjs'),
@@ -12,7 +12,7 @@ async function initialize(progress){
     progress('Загружаем модель обработки снимков…');
     const files=await FilesetResolver.forVisionTasks('/vendor/vision/wasm');
     segmenter=await ImageSegmenter.createFromOptions(files,{baseOptions:{modelAssetPath:'/vendor/vision/selfie_multiclass.tflite',delegate:'CPU'},canvas:new OffscreenCanvas(1,1),runningMode:'IMAGE',outputCategoryMask:true,outputConfidenceMasks:false});
-    ort.env.wasm.numThreads=self.crossOriginIsolated?Math.max(2,Math.min(4,self.navigator?.hardwareConcurrency||2)):1;
+    ort.env.wasm.numThreads=!singleThread&&self.crossOriginIsolated?Math.max(2,Math.min(4,self.navigator?.hardwareConcurrency||2)):1;
     ort.env.wasm.proxy=false;
     ort.env.wasm.wasmPaths=new URL('./vendor/matting/',self.location.href).href;
     progress('Загружаем модель точного удаления фона…');
@@ -24,7 +24,7 @@ self.onmessage=async ({data:message})=>{
   const bitmap=message?.bitmap||message,accessoriesOnly=!!message?.accessoriesOnly;
   const began=performance.now(),progress=message=>self.postMessage({progress:true,message});
   try {
-    await initialize(progress);
+    await initialize(progress,!!message?.singleThread);
     if(message?.warmup){self.postMessage({ready:true});return;}
     const {imageToNchw,cleanPortraitAlpha}=matteModule;
     progress('Находим лицо, волосы, шею и одежду…');

@@ -388,10 +388,9 @@ async function scan() {
   let portraitWorker=null;
   try {
     scanInstruction('Перед съёмкой снимите шляпу, кепку и наушники. Очки оставьте, если носите их постоянно. Сядьте лицом к свету.',true);
-    portraitWorker=new Worker('/portrait-worker.js');
-    let warmupError=null;
-    const portraitWarmup=warmPortraitWorker(portraitWorker,abort.signal).catch(error=>{warmupError=error;});
     await Promise.all([enableCamera(),dependencies()]);
+    portraitWorker=new Worker('/portrait-worker.js');
+    const portraitWarmup=warmPortraitWorker(portraitWorker,abort.signal).then(()=>true,()=>false);
     const poses=[
       {role:'front',direction:0,instruction:'Посмотрите прямо в объектив и мягко сомкните губы.'},
       {role:'left',direction:1,instruction:'Немного поверните голову к стрелке ←'},
@@ -436,9 +435,17 @@ async function scan() {
     const front=views.find(view=>view.role==='front'),portrait=views.find(view=>view.role==='portrait');
     if(!front||!portrait)throw new Error('Не хватает итогового снимка. Повторите сканирование.');
     scanInstruction('Завершаем подготовку модели обработки.',true);
-    await portraitWarmup;if(warmupError)throw warmupError;
+    const warmed=await portraitWarmup;
+    if(!warmed){portraitWorker.terminate();portraitWorker=new Worker('/portrait-worker.js');}
     scanInstruction('Отделяем волосы, шею и края плеч.',true);
-    portrait.anchors=await fitPortrait(portrait,message=>scanInstruction(message),abort.signal,portraitWorker);
+    try {
+      portrait.anchors=await fitPortrait(portrait,message=>scanInstruction(message),abort.signal,portraitWorker,{singleThread:!warmed,timeoutMs:warmed?20000:60000});
+    } catch(error) {
+      if(!warmed||/головн|наушник/i.test(error.message))throw error;
+      portraitWorker.terminate();portraitWorker=new Worker('/portrait-worker.js');
+      scanInstruction('Ускорение не ответило. Продолжаем в совместимом режиме.',true);
+      portrait.anchors=await fitPortrait(portrait,message=>scanInstruction(message),abort.signal,portraitWorker,{singleThread:true,timeoutMs:60000});
+    }
     if(epoch!==scanEpoch)return;
     scanInstruction('Создаём ваш объёмный аватар.',true);
     const model=LocalAvatar.create(THREE,views,avatarTopology);
@@ -468,18 +475,19 @@ function scanInstruction(text,force=false) {
   if(!voice)return; // Keep instructions on screen; do not send them to a browser cloud voice.
   utterance.voice=voice;speechSynthesis.speak(utterance);
 }
-async function warmPortraitWorker(worker,signal) {
+async function warmPortraitWorker(worker,signal,timeoutMs=20000) {
   return await new Promise((resolve,reject)=>{
     if(signal?.aborted){reject(new DOMException('Сканирование отменено','AbortError'));return;}
-    const cleanup=()=>signal?.removeEventListener('abort',cancel);
+    const cleanup=()=>{clearTimeout(timer);signal?.removeEventListener('abort',cancel);};
     const cancel=()=>{cleanup();worker.terminate();reject(new DOMException('Сканирование отменено','AbortError'));};
+    const timer=setTimeout(()=>{cleanup();worker.terminate();reject(new Error('Подготовка обработки заняла слишком долго.'));},timeoutMs);
     signal?.addEventListener('abort',cancel,{once:true});
     worker.onmessage=({data})=>{if(data.progress)return;if(data.ready){cleanup();resolve();}else if(data.error){cleanup();reject(new Error(data.error));}};
     worker.onerror=event=>{cleanup();reject(new Error(event.message||'Не удалось подготовить обработку снимков.'));};
     worker.postMessage({warmup:true});
   });
 }
-async function fitPortrait(view,onProgress=()=>{},signal,sharedWorker=null) {
+async function fitPortrait(view,onProgress=()=>{},signal,sharedWorker=null,{singleThread=false,timeoutMs=90000}={}) {
   let worker,bitmap;
   try {
     bitmap=await createImageBitmap(view.canvas);
@@ -488,11 +496,11 @@ async function fitPortrait(view,onProgress=()=>{},signal,sharedWorker=null) {
       worker=sharedWorker||new Worker('/portrait-worker.js');
       const cleanup=()=>{clearTimeout(timer);signal?.removeEventListener('abort',cancel);};
       const cancel=()=>{cleanup();worker.terminate();reject(new DOMException('Сканирование отменено','AbortError'));};
-      const timer=setTimeout(()=>{cleanup();reject(new Error('Обработка снимка заняла слишком долго. Попробуйте ещё раз.'));},90000);
+      const timer=setTimeout(()=>{cleanup();worker.terminate();reject(new Error('Обработка снимка заняла слишком долго. Попробуйте ещё раз.'));},timeoutMs);
       signal?.addEventListener('abort',cancel,{once:true});
       worker.onmessage=({data})=>{if(data.progress){onProgress(data.message);return;}cleanup();data.error?reject(new Error(data.error)):resolve(data);};
       worker.onerror=event=>{cleanup();reject(new Error(event.message||'Контур не найден'));};
-      try {worker.postMessage({bitmap,landmarks:view.landmarks},[bitmap]);} catch(error){cleanup();reject(error);}
+      try {worker.postMessage({bitmap,landmarks:view.landmarks,singleThread},[bitmap]);} catch(error){cleanup();reject(error);}
     });
     view.segmentation=mask;
     view.matte=mask.matte;

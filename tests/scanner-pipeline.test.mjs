@@ -51,6 +51,28 @@ test('all six poses are captured while warming models; only the used portrait is
  await s.scan();assert.equal(views.length,6);assert.equal(captures,6);assert.equal(created,1);assert.equal(terminated,1);
  assert.equal(fits.length,1);assert.equal(fits[0].role,'portrait');
 });
+test('a stalled accelerated portrait pass retries once in compatible mode',async()=>{
+ const elements=new Map(),modes=[];let now=0,workers=0,terminated=0;
+ const points=Array.from({length:478},()=>({x:.5,y:.5,z:0}));
+ const s={currentUser:{avatar_consent_current:true},AbortController,scanEpoch:0,scannerAbort:null,restoringAbort:null,
+  $:id=>{if(!elements.has(id))elements.set(id,{textContent:'',showModal(){},appendChild(){}});return elements.get(id);},
+  stopAudio(){},controls(){},scanInstruction(){},enableCamera:async()=>{},dependencies:async()=>{},
+  video:{videoWidth:640,videoHeight:480,closest:()=>({})},performance:{now:()=>now+=700},landmarks:()=>({faceLandmarks:[points]}),
+  portraitQuality:()=>'',scanQuality:()=>'',scanTurnIssue:()=>'',faceYaw:()=>0,
+  document:{createElement:()=>({width:0,height:0,getContext:()=>({drawImage(){}}),toDataURL:()=>''})},
+  lastMediaTimestamp:0,detector:{detectForVideo:()=>({faceLandmarks:[points]})},sleep:async()=>{},stopCamera(){},
+  Worker:class{constructor(){workers++;}terminate(){terminated++;}},warmPortraitWorker:async()=>{},
+  async fitPortrait(view,progress,signal,worker,options){modes.push(options);if(!options.singleThread)throw new Error('Обработка снимка заняла слишком долго.');return {};},
+  THREE:{},avatarTopology:{},LocalAvatar:{create:()=>({dispose(){}})},packPortraitAnalysis:()=>({}),
+  api:async()=>({}),installModel(){},showPortraitCutout(){},cancelScan(){},
+ };
+ vm.createContext(s);vm.runInContext(app.slice(app.indexOf('async function scan()'),app.indexOf('function cancelScan()')),s);
+ await s.scan();
+ assert.deepEqual(modes.map(({singleThread,timeoutMs})=>({singleThread,timeoutMs})),[
+  {singleThread:false,timeoutMs:20000},{singleThread:true,timeoutMs:60000},
+ ]);
+ assert.equal(workers,2);assert.equal(terminated,2);
+});
 test('cancelling portrait analysis immediately stops the worker and releases the image',async()=>{
  const abort=new AbortController();let stopped=0,closed=0;
  const worker={postMessage(){abort.abort();},terminate(){stopped++;}};
@@ -59,4 +81,11 @@ test('cancelling portrait analysis immediately stops the worker and releases the
  vm.createContext(s);vm.runInContext(app.slice(app.indexOf('async function fitPortrait('),app.indexOf('function showPortraitCutout(')),s);
  await assert.rejects(s.fitPortrait({canvas:{},landmarks:[]},()=>{},abort.signal,worker),{name:'AbortError'});
  assert.equal(stopped,1);assert.equal(closed,1);
+});
+test('portrait warmup has a deadline and terminates a stuck worker',async()=>{
+ let stopped=0;const worker={postMessage(){},terminate(){stopped++;}};
+ const s={DOMException,setTimeout:(fn)=>{queueMicrotask(fn);return 1;},clearTimeout(){}};
+ vm.createContext(s);vm.runInContext(app.slice(app.indexOf('async function warmPortraitWorker('),app.indexOf('async function fitPortrait(')),s);
+ await assert.rejects(s.warmPortraitWorker(worker,new AbortController().signal,1),/слишком долго/);
+ assert.equal(stopped,1);
 });
