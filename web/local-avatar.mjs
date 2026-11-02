@@ -1,6 +1,6 @@
 import {closeFaceOpenings, FACE_OPENINGS, mouthRig, positionsFor} from './core.mjs';
 import {skullGeometry, earGeometry, neckGeometry, torsoGeometry, hairGeometry, OVAL} from './head-geometry.mjs';
-import {bakeFaceAtlas} from './face-atlas.mjs';
+import {bakeDetailedFaceAtlas} from './face-atlas.mjs';
 import {mouthInteriorGeometry, mouthInteriorPositions} from './mouth-geometry.mjs';
 import {defaultPortraitAnchors, foreheadScalpGeometry, photoHairPatchGeometry, portraitHairGeometry, portraitEarGeometry, matteBodyGeometry} from './portrait-geometry.mjs';
 import {portraitCutout,portraitHairCutout,portraitHairUnderlay,portraitHeadCutout} from './portrait-texture.mjs';
@@ -83,7 +83,10 @@ export class LocalAvatar {
     faceGeometry.setAttribute('position',new THREE.BufferAttribute(base.slice(),3));
     faceGeometry.setAttribute('uv',new THREE.BufferAttribute(new Float32Array(points.flatMap(p=>[p.x,1-p.y])),2));
     faceGeometry.setIndex(filled.indices);faceGeometry.computeVertexNormals();
-    const atlas=bakeFaceAtlas(bust,views,filled.indices);
+    // The wide portrait keeps one seamless coordinate system for the head,
+    // hair and neck. Overlay the close frontal capture only in the facial
+    // centre so eyes, nose and mouth retain the camera's full detail.
+    const atlas=bakeDetailedFaceAtlas(bust,front,views,filled.indices);
     const texture=new THREE.CanvasTexture(atlas);texture.colorSpace=THREE.SRGBColorSpace;
     const face=new THREE.Mesh(faceGeometry,new THREE.MeshBasicMaterial({map:texture,side:THREE.DoubleSide}));
     const rig=mouthRig(points),mouthWidth=Math.abs(base[308*3]-base[78*3]),cavityIds=FACE_OPENINGS[2];

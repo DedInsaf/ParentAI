@@ -11,6 +11,22 @@ export function isFrontOnlyEyeTriangle(front,ids){
     y>=eyeY-faceHeight*.18&&y<=eyeY+faceHeight*.25;
 }
 
+export function portraitDetailBlend(portrait,ids){
+  if(!portrait?.landmarks||!Array.isArray(ids)||ids.length!==3)return 0;
+  const lm=portrait.landmarks,left=lm[234],right=lm[454],top=lm[10],chin=lm[152];
+  if(!left||!right||!top||!chin)return 0;
+  const width=Math.abs(right.x-left.x),height=Math.abs(chin.y-top.y);
+  if(width<.001||height<.001)return 0;
+  const points=ids.map(id=>lm[id]);if(points.some(point=>!point))return 0;
+  const x=points.reduce((sum,point)=>sum+point.x,0)/3,y=points.reduce((sum,point)=>sum+point.y,0)/3;
+  const horizontal=Math.abs((x-(left.x+right.x)/2)/(width/2)),vertical=(y-top.y)/height;
+  const clamp=value=>Math.max(0,Math.min(1,value));
+  // Keep the sharper close-up in the facial centre. Fade it before the
+  // hairline, ears and jaw so those areas retain the seamless portrait frame.
+  const sides=clamp((.95-horizontal)/.18),forehead=clamp((vertical+.02)/.12),jaw=clamp((.92-vertical)/.18);
+  return Math.min(.94,sides*forehead*jaw);
+}
+
 // Keep the portrait's coordinate system, with sharper facial pixels from the close-up.
 export function bakePortraitFaceAtlas(portrait,detail,indices) {
   const atlas=document.createElement('canvas');atlas.width=portrait.canvas.width;atlas.height=portrait.canvas.height;
@@ -20,13 +36,14 @@ export function bakePortraitFaceAtlas(portrait,detail,indices) {
   const dstPoints=closeFaceOpenings(portrait.landmarks,[],false).points;
   for(let i=0;i<indices.length;i+=3) {
     const ids=indices.slice(i,i+3);
+    const blend=portraitDetailBlend(portrait,ids);if(blend<=0)continue;
     const src=ids.map(id=>[srcPoints[id].x*detail.canvas.width,srcPoints[id].y*detail.canvas.height]);
     const dst=ids.map(id=>[dstPoints[id].x*atlas.width,dstPoints[id].y*atlas.height]);
     const [p,q,r]=src,[a,b,c]=dst,u=q[0]-p[0],v=q[1]-p[1],s=r[0]-p[0],t=r[1]-p[1],det=u*t-s*v;
     if(Math.abs(det)<.05)continue;
     const aa=((b[0]-a[0])*t-(c[0]-a[0])*v)/det,cc=((c[0]-a[0])*u-(b[0]-a[0])*s)/det;
     const bb=((b[1]-a[1])*t-(c[1]-a[1])*v)/det,dd=((c[1]-a[1])*u-(b[1]-a[1])*s)/det;
-    ctx.save();ctx.beginPath();ctx.moveTo(...a);ctx.lineTo(...b);ctx.lineTo(...c);ctx.closePath();ctx.clip();
+    ctx.save();ctx.globalAlpha=blend;ctx.beginPath();ctx.moveTo(...a);ctx.lineTo(...b);ctx.lineTo(...c);ctx.closePath();ctx.clip();
     ctx.setTransform(aa,bb,cc,dd,a[0]-aa*p[0]-cc*p[1],a[1]-bb*p[0]-dd*p[1]);ctx.drawImage(detail.canvas,0,0);ctx.restore();
   }
   return atlas;
@@ -34,9 +51,9 @@ export function bakePortraitFaceAtlas(portrait,detail,indices) {
 
 // Warp visible cheek triangles from the side scans into the front UV atlas.
 // Unseen/foreshortened triangles keep the front photo; no invented side pixels.
-export function bakeFaceAtlas(front,views,indices){
+export function bakeFaceAtlas(front,views,indices,baseCanvas=front.canvas){
   const atlas=document.createElement('canvas');atlas.width=front.canvas.width;atlas.height=front.canvas.height;
-  const ctx=atlas.getContext('2d');ctx.drawImage(front.canvas,0,0);
+  const ctx=atlas.getContext('2d');ctx.drawImage(baseCanvas,0,0);
   const nose=front.landmarks[1].x,half=Math.abs(front.landmarks[454].x-front.landmarks[234].x)/2;
   for(let i=0;i<indices.length;i+=3){
     const ids=indices.slice(i,i+3);
@@ -62,4 +79,8 @@ export function bakeFaceAtlas(front,views,indices){
     ctx.drawImage(source.canvas,0,0);ctx.restore();
   }
   return atlas;
+}
+
+export function bakeDetailedFaceAtlas(portrait,detail,views,indices){
+  return bakeFaceAtlas(portrait,views,indices,bakePortraitFaceAtlas(portrait,detail,indices));
 }
