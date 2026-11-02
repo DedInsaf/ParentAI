@@ -10,7 +10,9 @@ export function skullGeometry(face) {
   // Ring zero is exactly the face oval: a shared positional boundary, not an overlay.
   for(let ring=0;ring<=8;ring++) {
     const t=ring/8;
-    const contourScale=Math.cos(Math.PI*t/2)*(1+.12*Math.sin(Math.PI*t));
+    // Every rear ring must stay inside the photographed oval. The former
+    // bulge widened the first rings and exposed angular wedges at the jaw.
+    const contourScale=Math.cos(Math.PI*t/2);
     for(const [j,id] of OVAL.entries()) {
       const fx=face[id*3],fy=face[id*3+1],fz=face[id*3+2];
       const upper=Math.max(0,(fy-cy)/height);

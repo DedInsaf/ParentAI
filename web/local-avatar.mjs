@@ -3,6 +3,7 @@ import {skullGeometry, earGeometry, neckGeometry, torsoGeometry, hairGeometry, O
 import {mouthInteriorGeometry, mouthInteriorPositions} from './mouth-geometry.mjs';
 import {defaultPortraitAnchors, foreheadScalpGeometry, photoHairPatchGeometry, portraitHairGeometry, portraitEarGeometry, matteBodyGeometry} from './portrait-geometry.mjs';
 import {portraitCutout,portraitHairCutout,portraitHairUnderlay,portraitHeadCutout} from './portrait-texture.mjs';
+import {deformPortraitNeck} from './neck-skinning.mjs';
 
 const clamp=value=>Math.max(0,Math.min(.999999,value));
 
@@ -101,6 +102,7 @@ export class LocalAvatar {
     const skinMaterial=new THREE.MeshBasicMaterial({color:skin,side:THREE.FrontSide});
     const shell=new THREE.Mesh(shellGeometry,new THREE.MeshBasicMaterial({vertexColors:true,side:THREE.DoubleSide}));
     const group=new THREE.Group(),pivot=new THREE.Group(),body=new THREE.Group();pivot.add(shell);
+    let neckSurface=null;
     const hairSample=segmentedColor(THREE,bust,1,0x37261c);
     const anchors=bust.anchors||defaultPortraitAnchors(bust.landmarks);
     if(bust.anchors){
@@ -127,7 +129,9 @@ export class LocalAvatar {
       const hiddenRearSkin=new THREE.MeshBasicMaterial({transparent:true,opacity:0,depthWrite:false,colorWrite:false});
       const hiddenRearCloth=hiddenRearSkin.clone();
       const bodyData=matteBodyGeometry(bodyView.landmarks,bodyView.anchors,bodyFrame,base,bodyView.matte);
-      body.add(new THREE.Mesh(geometry(THREE,bodyData),[bodyMaterial,hiddenRearSkin,hiddenRearCloth]));
+      const bodyGeometry=geometry(THREE,bodyData);
+      neckSurface={geometry:bodyGeometry,base:bodyGeometry.getAttribute('position').array.slice(),jawY:base[152*3+1],collarY:-(Math.max(anchors.neckLeft.y,anchors.neckRight.y)-bodyFrame.nose.y)*bodyFrame.aspect*bodyFrame.scale};
+      body.add(new THREE.Mesh(bodyGeometry,[bodyMaterial,hiddenRearSkin,hiddenRearCloth]));
       pivot.add(new THREE.Mesh(geometry(THREE,foreheadBridge),headMaterial));
       // Photo hair and rear hair volume share the exact upper face seam.  A
       // single connected mesh prevents the forehead crack that appeared when
@@ -167,7 +171,7 @@ export class LocalAvatar {
     const {cx,cy,edgeZ,depth,width,height}=head;group.position.set(cx,cy,edgeZ-depth*.32);
     const joint=new THREE.Vector3(cx,base[152*3+1]+height*.08,edgeZ-width*.23);
     pivot.position.copy(joint).sub(group.position);for(const child of pivot.children)child.position.sub(joint);for(const child of body.children)child.position.sub(group.position);
-    return new LocalAvatar(THREE,{group,pivot,face,cavity,base,weights:rig.weights,mouthWidth,cavityIds});
+    return new LocalAvatar(THREE,{group,pivot,face,cavity,base,weights:rig.weights,mouthWidth,cavityIds,neckSurface,neckJoint:joint});
   }
   constructor(THREE,data){Object.assign(this,data);this.THREE=THREE;this.object=this.group;this.rest=this.group.position.clone();this.restUv=this.face.geometry.getAttribute('uv').array.slice();this.box=new THREE.Box3().setFromObject(this.group);}
   fit(camera,aspect){
@@ -190,7 +194,12 @@ export class LocalAvatar {
     }
     pos.needsUpdate=true;mouthInteriorPositions(pos.array,this.cavityIds,this.mouthWidth,this.cavity.geometry.getAttribute('position').array);this.cavity.geometry.getAttribute('position').needsUpdate=true;
     this.group.rotation.set(0,pose.preview+pose.bodyYaw,pose.bodyRoll);this.group.position.copy(this.rest);this.group.position.y+=pose.breath;
-    this.pivot.rotation.set(pose.pitch,pose.yaw,pose.roll);this.face.geometry.computeVertexNormals();
+    this.pivot.rotation.set(pose.pitch,pose.yaw,pose.roll);
+    if(this.neckSurface){
+      const {geometry,base,jawY,collarY}=this.neckSurface,position=geometry.getAttribute('position');
+      deformPortraitNeck(base,position.array,this.neckJoint,this.pivot.rotation,jawY,collarY);position.needsUpdate=true;
+    }
+    this.face.geometry.computeVertexNormals();
   }
   dispose(){const geometries=new Set(),materials=new Set(),textures=new Set();this.group.traverse(item=>{if(item.geometry)geometries.add(item.geometry);for(const material of(Array.isArray(item.material)?item.material:[item.material]).filter(Boolean)){materials.add(material);for(const value of Object.values(material))if(value?.isTexture)textures.add(value);}});textures.forEach(x=>x.dispose());materials.forEach(x=>x.dispose());geometries.forEach(x=>x.dispose());}
 }

@@ -6,6 +6,10 @@ test('skull matches every face seam vertex and extends behind the face',()=>{
   const face=new Float32Array(468*3);
   OVAL.forEach((id,i)=>{const a=i/OVAL.length*Math.PI*2; face.set([Math.sin(a),Math.cos(a)*1.3,.1*Math.sin(a)],id*3);});
   const head=skullGeometry(face);
+  for(let ring=1;ring<=8;ring++)for(let j=0;j<OVAL.length;j++){
+    const boundary=Math.abs(face[OVAL[j]*3]-head.cx),rear=Math.abs(head.positions[(ring*OVAL.length+j)*3]-head.cx);
+    assert.ok(rear<=boundary+1e-7,'rear skull must not protrude outside the photographed jaw');
+  }
   OVAL.forEach((id,i)=>assert.deepEqual(head.positions.slice(i*3,i*3+3),Array.from(face.slice(id*3,id*3+3))));
   assert.ok(Math.min(...head.positions.filter((_,i)=>i%3===2)) < -1);
   for(const geometry of [head,earGeometry(head,-1),earGeometry(head,1),neckGeometry(head),hairGeometry(head)]) {
