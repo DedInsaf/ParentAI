@@ -21,9 +21,31 @@ export function smoothBodyCutoutEdges(rgba,width,height,startRow){
   }
   const alpha=new Uint8Array(count);
   for(let i=0;i<count;i++)alpha[i]=labels[i]===best?rgba[i*4+3]:0;
-  const filtered=alpha.slice(),samples=new Array(9);
+  // A one-pixel median misses several-pixel spurs from an enlarged semantic
+  // mask. Opening with a small round footprint removes narrow attachments,
+  // then restores the broad neck silhouette instead of uniformly shrinking it.
+  const radius=Math.max(2,Math.min(3,Math.round(width/480))),offsets=[];
+  for(let dy=-radius;dy<=radius;dy++)for(let dx=-radius;dx<=radius;dx++)if(dx*dx+dy*dy<=radius*radius)offsets.push([dx,dy]);
+  const eroded=alpha.slice(),filtered=alpha.slice();
+  for(let y=startRow;y<height;y++)for(let x=0;x<width;x++){
+    let value=255;
+    for(const [dx,dy] of offsets){
+      const px=Math.max(0,Math.min(width-1,x+dx)),py=Math.max(startRow,Math.min(height-1,y+dy));
+      value=Math.min(value,alpha[py*width+px]);if(value===0)break;
+    }
+    eroded[y*width+x]=value;
+  }
+  for(let y=startRow;y<height;y++)for(let x=0;x<width;x++){
+    let value=0;
+    for(const [dx,dy] of offsets){
+      const px=Math.max(0,Math.min(width-1,x+dx)),py=Math.max(startRow,Math.min(height-1,y+dy));
+      value=Math.max(value,eroded[py*width+px]);if(value===255)break;
+    }
+    filtered[y*width+x]=value;
+  }
+  const opened=filtered.slice(),samples=new Array(9);
   for(let y=Math.max(1,startRow);y<height-1;y++)for(let x=1;x<width-1;x++){
-    let n=0;for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++)samples[n++]=alpha[(y+dy)*width+x+dx];
+    let n=0;for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++)samples[n++]=opened[(y+dy)*width+x+dx];
     samples.sort((a,b)=>a-b);filtered[y*width+x]=samples[4];
   }
   for(let y=startRow;y<height;y++)for(let x=0;x<width;x++){

@@ -16,6 +16,17 @@ test('body edge cleanup removes detached dust and softens a sharp neck spur with
   for(let i=0;i<width*height;i++)assert.deepEqual(rgba.slice(i*4,i*4+3),before.slice(i*4,i*4+3));
 });
 
+test('body cleanup removes a three-pixel attached spike and keeps broad straight neck edges',()=>{
+  const width=40,height=40,rgba=new Uint8ClampedArray(width*height*4);
+  for(let y=0;y<height;y++)for(let x=12;x<28;x++)rgba[(y*width+x)*4+3]=255;
+  for(let y=20;y<23;y++)for(let x=8;x<12;x++)rgba[(y*width+x)*4+3]=255;
+  smoothBodyCutoutEdges(rgba,width,height,10);
+  assert.ok(rgba[(21*width+8)*4+3]<16);
+  assert.equal(rgba[(30*width+20)*4+3],255);
+  assert.ok(rgba[(30*width+12)*4+3]>128);
+  assert.equal(rgba[(30*width+11)*4+3],0);
+});
+
 test('neck overlap has no hard top edge and preserves the visible neck below the jaw',()=>{
   const chin=.6,height=.4,top=chin-height*.14;
   assert.equal(neckOverlapAlpha(top,chin,height),0);
