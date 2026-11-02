@@ -1,6 +1,20 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {defringeHairEdges,portraitHairCutout,portraitSupportAt,neckOverlapAlpha} from '../web/portrait-texture.mjs';
+import {defringeHairEdges,portraitHairCutout,portraitSupportAt,neckOverlapAlpha,smoothBodyCutoutEdges} from '../web/portrait-texture.mjs';
+
+test('body edge cleanup removes detached dust and softens a sharp neck spur without changing hair or RGB',()=>{
+  const width=20,height=20,rgba=new Uint8ClampedArray(width*height*4);
+  for(let i=0;i<width*height;i++)rgba.set([100,80,60,0],i*4);
+  const paint=(x,y)=>rgba[(y*width+x)*4+3]=255;
+  for(let y=0;y<20;y++)for(let x=6;x<14;x++)paint(x,y);
+  paint(5,12);paint(17,12);paint(18,12);paint(5,2);
+  const before=rgba.slice();smoothBodyCutoutEdges(rgba,width,height,8);
+  assert.equal(rgba[(12*width+17)*4+3],0);assert.equal(rgba[(12*width+18)*4+3],0);
+  assert.ok(rgba[(12*width+5)*4+3]<128);
+  assert.equal(rgba[(12*width+9)*4+3],255);
+  assert.deepEqual(rgba.slice(0,8*width*4),before.slice(0,8*width*4));
+  for(let i=0;i<width*height;i++)assert.deepEqual(rgba.slice(i*4,i*4+3),before.slice(i*4,i*4+3));
+});
 
 test('neck overlap has no hard top edge and preserves the visible neck below the jaw',()=>{
   const chin=.6,height=.4,top=chin-height*.14;

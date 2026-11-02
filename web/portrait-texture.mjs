@@ -1,6 +1,49 @@
 import {openedCategoryComponent,resampleAlpha} from './portrait-matte.mjs';
 const supportCache=new WeakMap();
 
+// Refine only neck/clothing alpha. RGB and the accepted head placement stay
+// untouched, and fine hair above startRow never enters the contour filter.
+export function smoothBodyCutoutEdges(rgba,width,height,startRow){
+  const count=width*height;
+  if(rgba?.length!==count*4||!Number.isInteger(startRow)||startRow>=height)return rgba;
+  startRow=Math.max(0,startRow);
+  const labels=new Int32Array(count),queue=new Int32Array(count);let label=0,best=0,bestSize=0;
+  for(let seed=0;seed<count;seed++){
+    if(labels[seed]||rgba[seed*4+3]<8)continue;
+    let read=0,size=1;queue[0]=seed;labels[seed]=++label;
+    while(read<size){
+      const index=queue[read++],x=index%width,y=Math.floor(index/width);
+      for(const next of [x>0?index-1:-1,x+1<width?index+1:-1,y>0?index-width:-1,y+1<height?index+width:-1]){
+        if(next>=0&&!labels[next]&&rgba[next*4+3]>=8){labels[next]=label;queue[size++]=next;}
+      }
+    }
+    if(size>bestSize){bestSize=size;best=label;}
+  }
+  const alpha=new Uint8Array(count);
+  for(let i=0;i<count;i++)alpha[i]=labels[i]===best?rgba[i*4+3]:0;
+  const filtered=alpha.slice(),samples=new Array(9);
+  for(let y=Math.max(1,startRow);y<height-1;y++)for(let x=1;x<width-1;x++){
+    let n=0;for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++)samples[n++]=alpha[(y+dy)*width+x+dx];
+    samples.sort((a,b)=>a-b);filtered[y*width+x]=samples[4];
+  }
+  for(let y=startRow;y<height;y++)for(let x=0;x<width;x++){
+    const i=y*width+x;
+    if(!alpha[i]){rgba[i*4+3]=0;continue;}
+    let sum=0,weight=0;
+    for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++){
+      const px=x+dx,py=y+dy;if(px<0||py<startRow||px>=width||py>=height)continue;
+      const w=(dx===0?2:1)*(dy===0?2:1);sum+=filtered[py*width+px]*w;weight+=w;
+    }
+    rgba[i*4+3]=Math.min(alpha[i],Math.round(sum/weight));
+  }
+  return rgba;
+}
+
+function refineBodyEdge(image,view,width,height){
+  const chin=view.landmarks?.[152],forehead=view.landmarks?.[10];
+  if(chin&&forehead)smoothBodyCutoutEdges(image.data,width,height,Math.floor((chin.y-(chin.y-forehead.y)*.12)*height));
+}
+
 // Hair needs a generous semantic allowance; the neck does not. Applying the
 // hair allowance to the entire person retained little pieces of the room
 // beside the jaw and collar. Return continuous coverage, not a blocky label.
@@ -62,6 +105,7 @@ export function portraitCutout(view){
     const i=y*canvas.width+x;
     image.data[i*4+3]=Math.round(alpha[i]*255*portraitSupportAt(view,(x+.5)/canvas.width,(y+.5)/canvas.height));
   }
+  refineBodyEdge(image,view,canvas.width,canvas.height);
   const matteScale=Math.max(canvas.width/view.matte.width,canvas.height/view.matte.height);
   defringeHairEdges(image.data,canvas.width,canvas.height,matteScale*2);
   ctx.putImageData(image,0,0);return canvas;
@@ -99,6 +143,7 @@ export function portraitHeadCutout(view){
     const i=y*canvas.width+x;
     image.data[i*4+3]=Math.round(alpha[i]*255*portraitSupportAt(view,(x+.5)/canvas.width,(y+.5)/canvas.height));
   }
+  refineBodyEdge(image,view,canvas.width,canvas.height);
   const matteScale=Math.max(canvas.width/view.matte.width,canvas.height/view.matte.height);
   defringeHairEdges(image.data,canvas.width,canvas.height,matteScale*2);
   ctx.putImageData(image,0,0);return canvas;
