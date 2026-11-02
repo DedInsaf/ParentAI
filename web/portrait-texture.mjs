@@ -1,4 +1,33 @@
 import {openedCategoryComponent,resampleAlpha} from './portrait-matte.mjs';
+const supportCache=new WeakMap();
+
+// Hair needs a generous semantic allowance; the neck does not. Applying the
+// hair allowance to the entire person retained little pieces of the room
+// beside the jaw and collar. Return continuous coverage, not a blocky label.
+export function portraitSupportAt(view,x,y){
+  const mask=view?.segmentation;
+  if(!mask?.data?.length)return 1;
+  const chin=view.landmarks?.[152],forehead=view.landmarks?.[10];
+  const belowJaw=chin&&forehead&&y>chin.y-(chin.y-forehead.y)*.06;
+  let planes=supportCache.get(mask);
+  if(!planes){
+    const tight=Uint8Array.from(mask.data,category=>category>=1&&category<=4?1:0),wide=new Uint8Array(tight.length);
+    for(let my=0;my<mask.height;my++)for(let mx=0;mx<mask.width;mx++){
+      let found=0;
+      for(let dy=-3;dy<=3&&!found;dy++)for(let dx=-3;dx<=3;dx++){
+        const px=mx+dx,py=my+dy;
+        if(px>=0&&py>=0&&px<mask.width&&py<mask.height&&tight[py*mask.width+px]){found=1;break;}
+      }
+      wide[my*mask.width+mx]=found;
+    }
+    planes={tight,wide};supportCache.set(mask,planes);
+  }
+  const support=belowJaw?planes.tight:planes.wide,sample=(mx,my)=>support[my*mask.width+mx];
+  const sx=Math.max(0,Math.min(mask.width-1,x*mask.width-.5)),sy=Math.max(0,Math.min(mask.height-1,y*mask.height-.5));
+  const mx=Math.floor(sx),my=Math.floor(sy),tx=sx-mx,ty=sy-my;
+  return sample(mx,my)*(1-tx)*(1-ty)+sample(Math.min(mask.width-1,mx+1),my)*tx*(1-ty)+
+    sample(mx,Math.min(mask.height-1,my+1))*(1-tx)*ty+sample(Math.min(mask.width-1,mx+1),Math.min(mask.height-1,my+1))*tx*ty;
+}
 
 // Transparent edge pixels still contain the colour of the photographed room.
 // When WebGL blends them over the avatar background that colour becomes a pale
@@ -30,17 +59,8 @@ export function portraitCutout(view){
   const alpha=resampleAlpha(view.matte.alpha,view.matte.width,view.matte.height,canvas.width,canvas.height);
   const categories=view?.segmentation;
   for(let y=0;y<canvas.height;y++)for(let x=0;x<canvas.width;x++){
-    const i=y*canvas.width+x;let supported=true;
-    if(categories?.data?.length){
-      const mx=Math.min(categories.width-1,Math.floor((x+.5)/canvas.width*categories.width));
-      const my=Math.min(categories.height-1,Math.floor((y+.5)/canvas.height*categories.height));supported=false;
-      // A three-cell allowance retains antialiased hair and clothing edges while
-      // rejecting MODNet haze over the room beside the neck.
-      for(let dy=-3;dy<=3&&!supported;dy++)for(let dx=-3;dx<=3;dx++){
-        const px=mx+dx,py=my+dy;if(px>=0&&py>=0&&px<categories.width&&py<categories.height&&categories.data[py*categories.width+px]!==0){supported=true;break;}
-      }
-    }
-    image.data[i*4+3]=supported?Math.round(alpha[i]*255):0;
+    const i=y*canvas.width+x;
+    image.data[i*4+3]=Math.round(alpha[i]*255*portraitSupportAt(view,(x+.5)/canvas.width,(y+.5)/canvas.height));
   }
   const matteScale=Math.max(canvas.width/view.matte.width,canvas.height/view.matte.height);
   defringeHairEdges(image.data,canvas.width,canvas.height,matteScale*2);
@@ -58,18 +78,8 @@ export function portraitHeadCutout(view){
   const image=ctx.getImageData(0,0,canvas.width,canvas.height);
   const alpha=resampleAlpha(view.matte.alpha,view.matte.width,view.matte.height,canvas.width,canvas.height),categories=view?.segmentation;
   for(let y=0;y<canvas.height;y++)for(let x=0;x<canvas.width;x++){
-    const i=y*canvas.width+x;let supported=!categories?.data?.length;
-    if(!supported){
-      const mx=Math.min(categories.width-1,Math.floor((x+.5)/canvas.width*categories.width));
-      const my=Math.min(categories.height-1,Math.floor((y+.5)/canvas.height*categories.height));
-      // A wider semantic guard retains soft flyaway hair while removing the
-      // large low-alpha room rectangle that MODNet can leave around the head.
-      for(let dy=-3;dy<=3&&!supported;dy++)for(let dx=-3;dx<=3;dx++){
-        const px=mx+dx,py=my+dy;
-        if(px>=0&&py>=0&&px<categories.width&&py<categories.height&&categories.data[py*categories.width+px]!==0){supported=true;break;}
-      }
-    }
-    image.data[i*4+3]=supported?Math.round(alpha[i]*255):0;
+    const i=y*canvas.width+x;
+    image.data[i*4+3]=Math.round(alpha[i]*255*portraitSupportAt(view,(x+.5)/canvas.width,(y+.5)/canvas.height));
   }
   const matteScale=Math.max(canvas.width/view.matte.width,canvas.height/view.matte.height);
   defringeHairEdges(image.data,canvas.width,canvas.height,matteScale*2);

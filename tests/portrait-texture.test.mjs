@@ -1,6 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {defringeHairEdges,portraitHairCutout} from '../web/portrait-texture.mjs';
+import {defringeHairEdges,portraitHairCutout,portraitSupportAt} from '../web/portrait-texture.mjs';
+
+test('room pixels next to the neck are removed while fine hair keeps its allowance',()=>{
+  const width=20,height=20,data=new Uint8Array(width*height);
+  for(let y=2;y<19;y++)for(let x=8;x<=11;x++)data[y*width+x]=y<9?1:2;
+  const landmarks=Array.from({length:478},()=>({x:.5,y:.5}));landmarks[10].y=.15;landmarks[152].y=.5;
+  const view={segmentation:{data,width,height},landmarks};
+  assert.equal(portraitSupportAt(view,6.5/width,4.5/height),1);
+  assert.equal(portraitSupportAt(view,6.5/width,14.5/height),0);
+  assert.equal(portraitSupportAt(view,9.5/width,14.5/height),1);
+  assert.ok(Math.abs(portraitSupportAt(view,8/width,14.5/height)-.5)<1e-6);
+});
 
 test('hair texture preserves translucent strands instead of cutting them at fifty percent',()=>{
   const width=9,height=9,rgba=new Uint8ClampedArray(width*height*4).fill(100),alpha=new Float32Array(width*height).fill(.35);
