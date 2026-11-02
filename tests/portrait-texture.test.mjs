@@ -1,6 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {defringeHairEdges} from '../web/portrait-texture.mjs';
+import {defringeHairEdges,portraitHairCutout} from '../web/portrait-texture.mjs';
+
+test('hair texture preserves translucent strands instead of cutting them at fifty percent',()=>{
+  const width=9,height=9,rgba=new Uint8ClampedArray(width*height*4).fill(100),alpha=new Float32Array(width*height).fill(.35);
+  const data=new Uint8Array(width*height).fill(1),previous=globalThis.document;
+  globalThis.document={createElement:()=>{const context={drawImage(){},getImageData(){return {data:(this.result||rgba).slice()};},putImageData(image){this.result=image.data;}};return {width,height,getContext:()=>context};}};
+  try {
+    const canvas=portraitHairCutout({canvas:{width,height},segmentation:{width,height,data},matte:{width,height,alpha}},.5);
+    const result=canvas.getContext('2d').result;
+    assert.ok(result[(4*width+4)*4+3]>80&&result[(4*width+4)*4+3]<100);
+  } finally {globalThis.document=previous;}
+});
 
 test('soft hair pixels borrow opaque hair colour without losing alpha',()=>{
   const rgba=new Uint8ClampedArray([

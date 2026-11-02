@@ -216,7 +216,7 @@ export function photoHairPatchGeometry(lm,a,frame,face,columns=49,rows=33,suppor
     const from=Math.max(0,Math.floor(left*segmentation.width)),to=Math.min(segmentation.width-1,Math.ceil(right*segmentation.width));let first=-1,last=-1;
     for(let x=from;x<=to;x++){
       if(segmentation.data[my*segmentation.width+x]!==1)continue;
-      if(validMatte){const ax=Math.min(matte.width-1,Math.floor((x+.5)/segmentation.width*matte.width)),ay=Math.min(matte.height-1,Math.floor(y*matte.height));if(matte.alpha[ay*matte.width+ax]<.72)continue;}
+      if(validMatte){const ax=Math.min(matte.width-1,Math.floor((x+.5)/segmentation.width*matte.width)),ay=Math.min(matte.height-1,Math.floor(y*matte.height));if(matte.alpha[ay*matte.width+ax]<.18)continue;}
       if(first<0)first=x;last=x;
     }
     if(first<0)return {left:cx,right:cx};

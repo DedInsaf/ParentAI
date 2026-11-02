@@ -34,9 +34,9 @@ export function portraitCutout(view){
     if(categories?.data?.length){
       const mx=Math.min(categories.width-1,Math.floor((x+.5)/canvas.width*categories.width));
       const my=Math.min(categories.height-1,Math.floor((y+.5)/canvas.height*categories.height));supported=false;
-      // A one-cell allowance retains antialiased hair and clothing edges while
+      // A three-cell allowance retains antialiased hair and clothing edges while
       // rejecting MODNet haze over the room beside the neck.
-      for(let dy=-1;dy<=1&&!supported;dy++)for(let dx=-1;dx<=1;dx++){
+      for(let dy=-3;dy<=3&&!supported;dy++)for(let dx=-3;dx<=3;dx++){
         const px=mx+dx,py=my+dy;if(px>=0&&py>=0&&px<categories.width&&py<categories.height&&categories.data[py*categories.width+px]!==0){supported=true;break;}
       }
     }
@@ -80,32 +80,26 @@ export function portraitHeadCutout(view){
 // Give it a hair-only alpha mask so those opaque skin pixels cannot become
 // floating photo triangles. A one-cell neighbourhood retains thin edge hairs.
 export function portraitHairCutout(view,minimumCoverage=.16){
-  const canvas=portraitCutout(view),mask=view?.segmentation;
+  const canvas=portraitHeadCutout(view),mask=view?.segmentation;
   if(!mask?.data?.length)return canvas;
   const ctx=canvas.getContext('2d',{willReadFrequently:true}),image=ctx.getImageData(0,0,canvas.width,canvas.height);
-  const connected=openedCategoryComponent(mask.data,mask.width,mask.height,1,3);
+  const connected=openedCategoryComponent(mask.data,mask.width,mask.height,1,1);
   const isHair=(mx,my)=>mx>=0&&my>=0&&mx<mask.width&&my<mask.height&&connected[my*mask.width+mx]===1;
   for(let y=0;y<canvas.height;y++)for(let x=0;x<canvas.width;x++){
     const mx=Math.min(mask.width-1,Math.floor((x+.5)/canvas.width*mask.width));
     const my=Math.min(mask.height-1,Math.floor((y+.5)/canvas.height*mask.height));
     let neighbours=0;
     for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++)if(isHair(mx+dx,my+dy))neighbours++;
-    // A stable local majority removes isolated flyaway predictions which would
-    // otherwise be magnified into a long triangle by the curved scalp mesh.
+    // Semantic labels locate hair; MODNet owns the soft photographed edge.
     const alphaIndex=(y*canvas.width+x)*4+3,coverage=image.data[alphaIndex]/255;
     const cutoff=Math.max(0,Math.min(.9,minimumCoverage));
-    if(neighbours<4||coverage<cutoff)image.data[alphaIndex]=0;
+    if(neighbours===0||coverage<Math.min(.08,cutoff))image.data[alphaIndex]=0;
     else {
-      // MODNet sometimes leaves a broad 5–15% haze around backlit hair. It is
-      // invisible in the cutout preview but becomes a rectangular veil when
-      // curved in 3D. Remap only that low-confidence range to transparency.
-      const t=Math.max(0,Math.min(1,(coverage-cutoff)/Math.max(.08,1-cutoff))),smooth=t*t*(3-2*t);
-      // Feather both the outer silhouette and the inner hairline. A binary
-      // semantic edge looked like a pasted-on strip even when its shape was
-      // correct; blending the one-pixel neighbourhood reveals the matching
-      // photographed forehead underneath.
-      const edgeT=Math.max(0,Math.min(1,(neighbours-3)/6)),edge=edgeT*edgeT*(3-2*edgeT);
-      image.data[alphaIndex]=Math.round(255*(coverage*(1-smooth)+smooth)*edge);
+      const smooth=Math.max(0,Math.min(1,coverage));
+      // Preserve soft alpha instead of promoting translucent strands to an
+      // opaque slab. Only feather the outermost semantic support cells.
+      const edge=Math.min(1,neighbours/3);
+      image.data[alphaIndex]=Math.round(255*smooth*edge);
     }
   }
   const pixelScale=Math.max(canvas.width/mask.width,canvas.height/mask.height);
