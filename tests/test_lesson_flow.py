@@ -85,3 +85,27 @@ class LessonFlowTests(unittest.TestCase):
         self.assertEqual(len(self.tutor.questions), 2)
         self.assertEqual(self.usage.dashboard(1)['report']['assignments'], 2)
         self.assertEqual(self.usage.dashboard(1)['report']['solved_independently'], 0)
+
+
+    def test_repeats_and_clarifications_do_not_consume_new_hints(self):
+        first,_=self.turn('Сколько будет 7+5?')
+        for _ in range(5):
+            _,result=self.turn('Повтори',first['session']);self.assertFalse(result['finished'])
+            _,result=self.turn('Почему?',first['session']);self.assertFalse(result['finished'])
+        summary=self.usage.dashboard(1)
+        self.assertEqual(summary['report']['hints'],1)
+        self.assertEqual(summary['learning']['topics'][0]['incorrect_attempts'],0)
+        _,result=self.turn('12',first['session']);self.assertTrue(result['solved'])
+        topic=self.usage.dashboard(1)['learning']['topics'][0]
+        self.assertEqual(topic['light_support'],1);self.assertEqual(topic['solved'],1)
+
+    def test_historical_support_changes_the_next_check_without_extra_model_requests(self):
+        for index in range(3):
+            key='history-'+str(index)
+            self.usage.record_learning(1,key,'addition',dict(hint_stage=2,answer_attempts=0,incorrect_attempts=0,repeats=0,outcome='explained'))
+            self.usage.finish_lesson(1,key,False,True)
+        first,_=self.turn('Сколько будет 7+5?')
+        _,result=self.turn('13',first['session'])
+        self.assertIn('Давай проверим этот шаг',result['answer'])
+        self.assertEqual(self.manager.sessions[first['session']]['learning']['hint_stage'],0)
+        self.assertEqual(len(self.tutor.questions),1)

@@ -391,19 +391,17 @@ class Dialogues:
                             actual_usage=usage.get('actual', False))
 
     def _from_plan(self, session, question):
+        from learning import plan_turn
         plan, attempt = session['plan'], session['attempt']
         accepted = [*plan.get('acceptable_answers', []), plan.get('answer_criterion', '')]
-        if attempt and any(word in question.casefold() for word in REPEAT_WORDS):
-            index = min(attempt - 1, 2)
-            return self._hint(plan, index), False, False, False
-        if attempt and accepted and _answers_match(question, accepted):
-            return ('Верно! Ответ правильный. Отличная работа! Переходим к новому заданию? '
-                    'Напиши или скажи его условие.'), True, True, False
-        if attempt >= 3:
-            return plan['final_explanation'] or plan['solution'], True, False, True
-        index = min(attempt, 2)
-        difficult = bool(attempt and any(word in question.casefold() for word in NEXT_WORDS)) or index == 2
-        return self._hint(plan, index), False, False, difficult
+        state = session.setdefault('learning', {'hint_stage': min(attempt-1,2)})
+        text = question.casefold().replace('ё','е')
+        repeat = any(word in text for word in REPEAT_WORDS)
+        help_requested = any(word in text for word in NEXT_WORDS) or any(
+            word in text for word in ('дай ответ','скажи ответ','покажи решение','объясни решение',
+                                     'подскажи','помоги','не понял','не поняла'))
+        return plan_turn(plan, state, question, bool(attempt and accepted and _answers_match(question, accepted)),
+                         repeat=repeat, help_requested=help_requested)
 
     @staticmethod
     def _hint(plan, index):
@@ -430,6 +428,13 @@ class Dialogues:
                     self.usage.abandon_empty_lesson(job['user_id'], job['session'])
                 raise
             session['plan'] = result['plan']
+            from learning import topic_for
+            session['learning_topic'] = topic_for(question)
+            if self.usage and job['user_id']:
+                previous = self.usage.learning_progress(job['user_id'])
+                topic = next((t for t in previous['topics'] if t['code']==session['learning_topic']), None)
+                if session['learning_topic']!='other' and topic and topic['tasks'] >= 3 and topic['explained'] >= 2:
+                    session['learning'] = {'hint_stage': -1, 'gentle': True}
             answer, finished, independent, difficult = self._from_plan(session, question)
         elif session['plan'] is not None:
             answer, finished, independent, difficult = self._from_plan(session, question)
@@ -439,11 +444,19 @@ class Dialogues:
         if job['cancel'].is_set() or self.closed.is_set():
             raise InterruptedError()
         if not finished:
-            session['attempt'] += 1
-            if self.usage and job['user_id']:
+            if session.get('learning'):
+                session['attempt'] = session['learning']['hint_stage']+1
+                new_hint = session['learning']['event'] == 'hint'
+            else:
+                session['attempt'] += 1
+                new_hint = True
+            if self.usage and job['user_id'] and new_hint:
                 self.usage.lesson_hint(job['user_id'], job['session'], difficult)
         elif self.usage and job['user_id']:
             self.usage.finish_lesson(job['user_id'], job['session'], independent, difficult)
+        if self.usage and job['user_id'] and session.get('learning'):
+            self.usage.record_learning(job['user_id'], job['session'],
+                                       session.get('learning_topic','other'), session['learning'])
         session['difficult'] = session['difficult'] or difficult
         session['finished'] = finished
         session['history'] = (session['history'] + [

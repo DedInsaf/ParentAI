@@ -135,7 +135,8 @@ class Tutor:
                 'Составь внутренний план помощи, но не обращайся к ребёнку и не добавляй Markdown. '
                 'Верни только JSON-объект с полями: solution (внутреннее решение), hints (ровно 3 короткие '
                 'последовательные подсказки без готового ответа, каждая до 170 знаков), control_questions '
-                '(ровно 3 коротких вопроса), common_errors (массив коротких описаний), answer_criterion '
+                '(ровно 3 коротких вопроса), step_explanations (3 дополнительных объяснения соответствующих '
+                'шагов до 110 знаков, без итогового ответа), common_errors (массив коротких описаний), answer_criterion '
                 '(критерий правильности), acceptable_answers (массив только однозначных кратких ответов, '
                 'включая равнозначные формы записи и произношения числа словами; пустой, только если '
                 'надёжная локальная проверка невозможна), final_explanation (объяснение по шагам '
@@ -176,6 +177,10 @@ class Tutor:
             'acceptable_answers': [item.strip()[:120] for item in value['acceptable_answers'][:12] if item.strip()],
             'final_explanation': value['final_explanation'].strip()[:600],
         }
+        explanations = value.get('step_explanations')
+        if (isinstance(explanations, list) and len(explanations) >= 3
+                and all(isinstance(item,str) and item.strip() for item in explanations[:3])):
+            plan['step_explanations'] = [item.strip()[:160] for item in explanations[:3]]
         return {'plan': plan, 'usage': usage}
 
     def answer(self, question, history, level, attempt=0):

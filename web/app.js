@@ -1,3 +1,4 @@
+import {renderLearningProgress} from './learning-progress.mjs';
 import {Presence, encodeWav, withTimeout, fetchFailure, requestUserCamera, speechOpening, scanQuality, scanTurnIssue, portraitQuality, faceYaw} from './core.mjs';
 import {blinkAmount} from './head-geometry.mjs';
 import {SpeechGate,isDirectedSpeech,classifySpeechRecognitionError} from './listening.mjs';
@@ -202,6 +203,12 @@ function renderParentSummary(value) {
   $('summaryRemaining').textContent = value.plan.unlimited ? 'Без ограничений' :
     `${value.remaining.sessions} занятий · ${value.remaining.assignments} новых задач`;
   $('summaryText').textContent = value.report.summary;
+  renderLearningProgress($('learningProgress'),value.learning,question=>{
+    if($('assignment').value.trim()&&$('assignment').value.trim()!==question&&
+       !window.confirm('Заменить подготовленный вопрос коротким заданием для повторения?'))return;
+    $('assignment').value=question;
+    $('readyHint').textContent='Задание подготовлено. Начните занятие и нажмите «Дай подсказку», когда ребёнок будет готов.';
+  });
 }
 function renderSubscription(summary, billing) {
   if (!summary || !billing || !$('currentPlanHero')) return;

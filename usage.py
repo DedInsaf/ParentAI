@@ -174,6 +174,17 @@ class UsageStore:
         lesson_columns = {row[1] for row in connection.execute("PRAGMA table_info(lessons)")}
         if "study_session_id" not in lesson_columns:
             connection.execute("ALTER TABLE lessons ADD COLUMN study_session_id TEXT")
+        for name, definition in (
+            ('topic_code', "TEXT NOT NULL DEFAULT 'other'"),
+            ('learning_version', 'INTEGER NOT NULL DEFAULT 0'),
+            ('hint_level', 'INTEGER NOT NULL DEFAULT 0'),
+            ('answer_attempts', 'INTEGER NOT NULL DEFAULT 0'),
+            ('incorrect_attempts', 'INTEGER NOT NULL DEFAULT 0'),
+            ('repeat_requests', 'INTEGER NOT NULL DEFAULT 0'),
+            ('learning_outcome', "TEXT NOT NULL DEFAULT ''"),
+        ):
+            if name not in lesson_columns:
+                connection.execute(f'ALTER TABLE lessons ADD COLUMN {name} {definition}')
         for table, create_sql, columns in (
             ("subscriptions",
              """CREATE TABLE subscriptions (
@@ -544,6 +555,28 @@ class UsageStore:
                 (lesson_id, user_id, study_session_id, now, now),
             )
 
+    def record_learning(self, user_id, lesson_id, topic_code, state):
+        from learning import TOPICS
+        self.ensure_lesson(user_id, lesson_id)
+        with self._connect() as connection:
+            connection.execute("""UPDATE lessons SET topic_code=?,learning_version=1,hint_level=?,
+                answer_attempts=?,incorrect_attempts=?,repeat_requests=?,learning_outcome=?,
+                difficulty=MAX(difficulty,?),updated_at=? WHERE id=? AND user_id=?""",
+                (topic_code if topic_code in TOPICS else 'other', state['hint_stage']+1,
+                 state['answer_attempts'], state['incorrect_attempts'], state['repeats'],
+                 state.get('outcome',''),int(state['incorrect_attempts']>0 or state['hint_stage']>=1),
+                 int(time.time()),lesson_id,user_id))
+
+    def learning_progress(self, user_id):
+        from learning import progress_report
+        now=int(time.time())
+        with self._connect() as connection:
+            rows=connection.execute("""SELECT topic_code,learning_version,learning_outcome,
+                started_at,updated_at,status,incorrect_attempts FROM lessons
+                WHERE user_id=? AND started_at>=? ORDER BY started_at DESC LIMIT 2000""",
+                (user_id,now-30*86400)).fetchall()
+        return progress_report(rows,now)
+
     def lesson_hint(self, user_id, lesson_id, difficult=False):
         self.ensure_lesson(user_id, lesson_id)
         with self._connect() as connection:
@@ -817,9 +850,10 @@ class UsageStore:
                 "assignments": lesson["assignments"], "hints": lesson["hints"],
                 "solved_independently": lesson["independent"], "difficult": lesson["difficult"],
                 "summary": ("Пока нет завершённых заданий." if not lesson["assignments"] else
-                            f"Самостоятельно получилось: {lesson['independent']} из {lesson['assignments']}. "
+                            f"Ответ совпал с планом без показа готового решения в {lesson['independent']} заданиях. "
                             f"Сложности возникли в {lesson['difficult']} заданиях."),
             },
+            "learning": self.learning_progress(user_id),
             "recent_lessons": [{"started_at": row["started_at"], "status": row["status"],
                                 "hints": row["hints"], "solved_independently": bool(row["solved_independently"]),
                                 "difficulty": bool(row["difficulty"]),
