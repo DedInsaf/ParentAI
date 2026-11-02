@@ -181,6 +181,7 @@ class UsageStore:
             ('answer_attempts', 'INTEGER NOT NULL DEFAULT 0'),
             ('incorrect_attempts', 'INTEGER NOT NULL DEFAULT 0'),
             ('repeat_requests', 'INTEGER NOT NULL DEFAULT 0'),
+            ('clarification_requests', 'INTEGER NOT NULL DEFAULT 0'),
             ('learning_outcome', "TEXT NOT NULL DEFAULT ''"),
         ):
             if name not in lesson_columns:
@@ -559,12 +560,12 @@ class UsageStore:
         from learning import TOPICS
         self.ensure_lesson(user_id, lesson_id)
         with self._connect() as connection:
-            connection.execute("""UPDATE lessons SET topic_code=?,learning_version=1,hint_level=?,
-                answer_attempts=?,incorrect_attempts=?,repeat_requests=?,learning_outcome=?,
+            connection.execute("""UPDATE lessons SET topic_code=?,learning_version=2,hint_level=?,
+                answer_attempts=?,incorrect_attempts=?,repeat_requests=?,clarification_requests=?,learning_outcome=?,
                 difficulty=MAX(difficulty,?),updated_at=? WHERE id=? AND user_id=?""",
                 (topic_code if topic_code in TOPICS else 'other', state['hint_stage']+1,
-                 state['answer_attempts'], state['incorrect_attempts'], state['repeats'],
-                 state.get('outcome',''),int(state['incorrect_attempts']>0 or state['hint_stage']>=1),
+                 state['answer_attempts'], state['incorrect_attempts'], state['repeats'],state.get('clarifications',0),
+                 state.get('outcome',''),int(state['incorrect_attempts']>0 or state['hint_stage']>=1 or state.get('clarifications',0)>0),
                  int(time.time()),lesson_id,user_id))
 
     def learning_progress(self, user_id):
@@ -572,8 +573,8 @@ class UsageStore:
         now=int(time.time())
         with self._connect() as connection:
             rows=connection.execute("""SELECT topic_code,learning_version,learning_outcome,
-                started_at,updated_at,status,incorrect_attempts FROM lessons
-                WHERE user_id=? AND started_at>=? ORDER BY started_at DESC LIMIT 2000""",
+                started_at,updated_at,status,incorrect_attempts,clarification_requests FROM lessons
+                WHERE user_id=? AND started_at>=? ORDER BY started_at DESC,rowid DESC LIMIT 2000""",
                 (user_id,now-30*86400)).fetchall()
         return progress_report(rows,now)
 

@@ -36,6 +36,22 @@ class AdaptiveTests(unittest.TestCase):
         self.assertIn('Объяснение первого шага',answer);self.assertFalse(finished)
         self.assertEqual(state['hint_stage'],0);self.assertEqual(state['incorrect_attempts'],0)
 
+    def test_clarification_is_not_minimum_help_and_repeat_repeats_last_explanation(self):
+        plan={**PLAN,'step_explanations':['Пояснение к первому шагу','Второму','Третьему']}
+        state={};plan_turn(plan,state,'7+5',False)
+        clarified=plan_turn(plan,state,'Почему?',False)[0]
+        repeated=plan_turn(plan,state,'Повтори',False,repeat=True)[0]
+        self.assertEqual(repeated,clarified);self.assertEqual(state['clarifications'],1)
+        plan_turn(plan,state,'12',True);self.assertEqual(state['outcome'],'solved_supported')
+        state={};self.turn(state,'7+5');self.turn(state,'Понятно');self.turn(state,'12',True)
+        self.assertEqual(state['outcome'],'solved_light')
+
+    def test_asr_punctuation_compound_numbers_and_uncertain_answers_are_attempts(self):
+        for text in ['Тринадцать.','13.','13?','Сто двадцать три.','Я думаю, что тринадцать.', 'Минус пять!', 'У меня получилось тринадцать.']:
+            self.assertTrue(answer_attempt(text),text)
+        for text in ['Ответ','Я думаю','Минус','Плюс','-','Я думаю, что надо прибавить','Почему 13?']:
+            self.assertFalse(answer_attempt(text),text)
+
     def test_gentle_mode_keeps_one_extra_check_on_the_same_step(self):
         state={'gentle':True};self.turn(state,'7+5');self.turn(state,'13')
         self.assertEqual(state['hint_stage'],0);self.turn(state,'14');self.assertEqual(state['hint_stage'],1)
@@ -78,3 +94,35 @@ class ProgressTests(unittest.TestCase):
     def test_small_or_empty_samples_do_not_claim_improvement(self):
         p=self.store.learning_progress(1);self.assertIsNone(p['recommendation']);self.assertFalse(p['comparison_ready'])
         self.assertIsNone(p['current_week']['light_support_percent'])
+
+
+    def test_recommendation_recovers_after_two_light_solutions_not_just_task_switch(self):
+        self.store.ensure_lesson(1,'abandoned')
+        self.store.record_learning(1,'abandoned','geometry',dict(hint_stage=0,answer_attempts=0,incorrect_attempts=0,repeats=0))
+        self.store.switch_lesson(1,'abandoned')
+        self.assertIsNone(self.store.learning_progress(1)['recommendation'])
+        self.record(1,'hard','explained',incorrect=2)
+        self.assertEqual(self.store.learning_progress(1)['recommendation']['topic'],'Дроби')
+        self.record(1,'practice-1','solved_light')
+        self.assertIsNotNone(self.store.learning_progress(1)['recommendation'])
+        self.record(1,'practice-2','solved_light')
+        report=self.store.learning_progress(1)
+        self.assertIsNone(report['recommendation'])
+        topic=next(t for t in report['topics'] if t['code']=='fractions')
+        self.assertFalse(topic['needs_practice']);self.assertEqual(topic['explained'],1)
+        # Historical evidence remains visible without forcing stale recommendations.
+        self.assertEqual(topic['incorrect_attempts'],2)
+
+    def test_old_counters_without_clarification_events_are_not_reinterpreted(self):
+        self.record(1,'legacy','solved_light')
+        with self.store._connect() as c:c.execute("UPDATE lessons SET learning_version=1 WHERE id='legacy'")
+        report=self.store.learning_progress(1)
+        self.assertEqual(report['tracked_tasks'],0);self.assertEqual(report['untracked_tasks'],1)
+
+
+    def test_new_active_difficulty_reopens_recommendation_after_recovery(self):
+        self.record(1,'old','explained',incorrect=1)
+        self.record(1,'clean-1','solved_light');self.record(1,'clean-2','solved_light')
+        self.assertIsNone(self.store.learning_progress(1)['recommendation'])
+        self.store.record_learning(1,'new-active','fractions',dict(hint_stage=1,answer_attempts=1,incorrect_attempts=1,repeats=0))
+        self.assertEqual(self.store.learning_progress(1)['recommendation']['topic'],'Дроби')

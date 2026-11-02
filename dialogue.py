@@ -433,7 +433,8 @@ class Dialogues:
             if self.usage and job['user_id']:
                 previous = self.usage.learning_progress(job['user_id'])
                 topic = next((t for t in previous['topics'] if t['code']==session['learning_topic']), None)
-                if session['learning_topic']!='other' and topic and topic['tasks'] >= 3 and topic['explained'] >= 2:
+                if (session['learning_topic']!='other' and topic and topic['needs_practice']
+                        and topic['recent_completed'] >= 3 and topic['recent_explanations'] >= 2):
                     session['learning'] = {'hint_stage': -1, 'gentle': True}
             answer, finished, independent, difficult = self._from_plan(session, question)
         elif session['plan'] is not None:

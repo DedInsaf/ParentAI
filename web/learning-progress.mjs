@@ -9,7 +9,7 @@ export function renderLearningProgress(root,progress,onPractice){
   root.append(element('p','За последние 30 дней · по данным занятий в Адым','helper'));
   if(!progress?.tracked_tasks){root.append(element('p','После новых заданий здесь появятся темы, результаты и следующий шаг для повторения. Старые задания без подробных событий не оцениваем заново.','helper'));return;}
   const week=progress.current_week,old=progress.previous_week;
-  root.append(element('p',`За 7 дней завершено: ${week.completed}. С первой подсказкой и без зафиксированных ошибок: ${week.light_support}.`,'progress-week'));
+  root.append(element('p',`За 7 дней завершено: ${week.completed}. С минимумом помощи: ${week.light_support}.`,'progress-week'));
   root.append(element('p',progress.comparison_ready
     ?`Доля заданий с минимумом помощи: ${week.light_support_percent}% за последние 7 дней, ${old.light_support_percent}% за предыдущие 7 дней. Это наблюдение за использованием подсказок, а не оценка знаний.`
     :'Для сравнения недель нужно хотя бы по 3 завершённых задания в каждой.','helper'));
@@ -17,7 +17,7 @@ export function renderLearningProgress(root,progress,onPractice){
   for(const topic of progress.topics){
     const row=element('article',undefined,'progress-topic');row.append(element('strong',topic.title));
     row.append(element('p',`Заданий: ${topic.tasks} · решено: ${topic.solved} · с минимумом помощи: ${topic.light_support}`));
-    row.append(element('small',`Полное объяснение: ${topic.explained} · несовпадений ответа с планом: ${topic.incorrect_attempts} · оставлено: ${topic.switched}`));list.append(row);
+    row.append(element('small',`Полное объяснение: ${topic.explained} · несовпадений ответа с планом: ${topic.incorrect_attempts} · уточнений: ${topic.clarifications??0} · оставлено: ${topic.switched}`));list.append(row);
   }
   root.append(list);
   if(progress.recommendation){
@@ -27,5 +27,5 @@ export function renderLearningProgress(root,progress,onPractice){
     root.append(card);
   }
   root.append(element('p',progress.note,'helper'));
-  if(progress.untracked_tasks)root.append(element('p',`Без подробных событий: ${progress.untracked_tasks}. Они не включены в оценку помощи.`,'helper'));
+  if(progress.untracked_tasks)root.append(element('p',`Без полной детализации новой версии: ${progress.untracked_tasks}. Итоги этих заданий сохранены, но в сравнение помощи они не включены.`,'helper'));
 }

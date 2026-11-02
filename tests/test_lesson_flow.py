@@ -97,7 +97,8 @@ class LessonFlowTests(unittest.TestCase):
         self.assertEqual(summary['learning']['topics'][0]['incorrect_attempts'],0)
         _,result=self.turn('12',first['session']);self.assertTrue(result['solved'])
         topic=self.usage.dashboard(1)['learning']['topics'][0]
-        self.assertEqual(topic['light_support'],1);self.assertEqual(topic['solved'],1)
+        self.assertEqual(topic['light_support'],0);self.assertEqual(topic['solved'],1)
+        self.assertEqual(topic['clarifications'],5)
 
     def test_historical_support_changes_the_next_check_without_extra_model_requests(self):
         for index in range(3):
@@ -109,3 +110,31 @@ class LessonFlowTests(unittest.TestCase):
         self.assertIn('Давай проверим этот шаг',result['answer'])
         self.assertEqual(self.manager.sessions[first['session']]['learning']['hint_stage'],0)
         self.assertEqual(len(self.tutor.questions),1)
+
+
+    def test_full_session_reports_clarification_repeat_error_solution_and_recovery(self):
+        class StableTutor(PlanTutor):
+            def create_plan(self,question,level):
+                self.questions.append(question)
+                return {'plan':{'hints':['Первый шаг','Второй шаг','Третий шаг'],
+                    'control_questions':['Сколько получится?']*3,'step_explanations':['Пояснение 1','Пояснение 2','Пояснение 3'],
+                    'solution':'12','final_explanation':'Полный разбор: 12','acceptable_answers':['12'],
+                    'answer_criterion':'12','common_errors':[]},'usage':{}}
+        self.manager.tutor=StableTutor()
+        first,_=self.turn('Сколько будет 7+5?')
+        _,clarified=self.turn('Почему?',first['session'])
+        _,repeated=self.turn('Повтори',first['session'])
+        self.assertEqual(repeated['answer'],clarified['answer'])
+        _,wrong=self.turn('Тринадцать.',first['session']);self.assertFalse(wrong['finished'])
+        _,correct=self.turn('12',first['session']);self.assertTrue(correct['solved'])
+        report=self.usage.dashboard(1)['learning'];topic=report['topics'][0]
+        self.assertEqual((topic['solved'],topic['light_support'],topic['incorrect_attempts'],topic['clarifications']),(1,0,1,1))
+        self.assertIsNotNone(report['recommendation'])
+        for _ in range(2):
+            fresh,_=self.turn('Сколько будет 7+5?')
+            self.turn('12',fresh['session'])
+        report=self.usage.dashboard(1)['learning'];self.assertIsNone(report['recommendation'])
+        self.assertEqual(report['current_week']['completed'],3)
+        self.assertEqual(report['current_week']['light_support'],2)
+        self.assertEqual(report['topics'][0]['solved'],3)
+        self.assertEqual(len(self.manager.tutor.questions),3)
