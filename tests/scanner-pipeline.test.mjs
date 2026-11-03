@@ -38,7 +38,7 @@ test('all six poses are captured while warming models; only the used portrait is
  const canvas=()=>({width:0,height:0,getContext:()=>({drawImage(){}}),toDataURL:()=>{captures++;return 'data:image/jpeg;base64,test';}});
  const s={currentUser:{avatar_consent_current:true},AbortController,scanEpoch:0,scannerAbort:null,restoringAbort:null,
   $:id=>{if(!elements.has(id))elements.set(id,{textContent:'',showModal(){},appendChild(){}});return elements.get(id);},
-  stopAudio(){},controls(){},scanInstruction(){},enableCamera:async()=>{},dependencies:async()=>{},
+  stopAudio(){},controls(){},scanInstruction(){},updatePortraitGuide(){},enableCamera:async()=>{},dependencies:async()=>{},
   video:{videoWidth:640,videoHeight:480,closest:()=>({})},performance:{now:()=>now+=700},landmarks:()=>({faceLandmarks:[points]}),
   portraitQuality:()=>'',scanQuality:()=>'',scanTurnIssue:()=>'',faceYaw:()=>0,
   document:{createElement:()=>canvas()},lastMediaTimestamp:0,detector:{detectForVideo:()=>({faceLandmarks:[points]})},sleep:async()=>{},stopCamera(){},
@@ -59,7 +59,7 @@ test('a stalled accelerated portrait pass retries once in compatible mode',async
  const points=Array.from({length:478},()=>({x:.5,y:.5,z:0}));
  const s={currentUser:{avatar_consent_current:true},AbortController,scanEpoch:0,scannerAbort:null,restoringAbort:null,
   $:id=>{if(!elements.has(id))elements.set(id,{textContent:'',showModal(){},appendChild(){}});return elements.get(id);},
-  stopAudio(){},controls(){},scanInstruction(){},enableCamera:async()=>{},dependencies:async()=>{},
+  stopAudio(){},controls(){},scanInstruction(){},updatePortraitGuide(){},enableCamera:async()=>{},dependencies:async()=>{},
   video:{videoWidth:640,videoHeight:480,closest:()=>({})},performance:{now:()=>now+=700},landmarks:()=>({faceLandmarks:[points]}),
   portraitQuality:()=>'',scanQuality:()=>'',scanTurnIssue:()=>'',faceYaw:()=>0,
   document:{createElement:()=>({width:0,height:0,getContext:()=>({drawImage(){}}),toDataURL:()=>''})},

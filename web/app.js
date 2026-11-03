@@ -9,6 +9,7 @@ import {fitStablePortraitAnchors,portraitAccessoryIssue} from './portrait-fit.mj
 import {portraitCutout} from './portrait-texture.mjs';
 import {packPortraitAnalysis,unpackPortraitAnalysis} from './avatar-persistence.mjs';
 import {requestAuth} from './auth-client.mjs';
+import {updatePortraitGuide} from './portrait-guide.mjs';
 const $ = id => document.getElementById(id);
 const video = $('camera');
 const fail = e => { $('error').hidden = false; $('error').textContent = e.message || String(e); };
@@ -403,15 +404,18 @@ async function scan() {
     for(const {role,direction,outer=false,instruction} of poses){
       if(epoch!==scanEpoch)return;
       $('captureStep').textContent=`Снимок ${views.length+1} из ${poses.length}`;scanInstruction(instruction,true);
+      updatePortraitGuide(video,role==='portrait');
       let stable=0,previous=null;const began=performance.now();
       while(epoch===scanEpoch){
         const now=performance.now();if(now-began>90000)throw new Error('Не удалось сделать снимок. Отдохните и попробуйте ещё раз.');
         const result=landmarks(now),points=result?.faceLandmarks?.length===1?result.faceLandmarks[0]:null;
         const issue=!points?'В кадре должен быть один человек.':role==='portrait'?portraitQuality(points,video.videoWidth,video.videoHeight):role==='front'?scanQuality(points,video.videoWidth,video.videoHeight):scanTurnIssue(points,video.videoWidth,video.videoHeight,direction,outer);
         const movement=points&&previous?Math.max(...[1,33,263,152].map(i=>Math.hypot(points[i].x-previous[i].x,points[i].y-previous[i].y))):1;
+        updatePortraitGuide(video,role==='portrait',!issue&&movement<=.012);
         if(issue||movement>.012)stable=0;else if(!stable)stable=now;
         previous=points;
         if(issue)scanInstruction(issue);
+        else if(role==='portrait')scanInstruction('Положение подходит. Расслабьте плечи, смотрите в объектив и не двигайтесь.');
         const remaining=stable?Math.max(0,1.2-(now-stable)/1000):1.2;
         $('captureCountdown').textContent=stable?String(Math.ceil(remaining)):'…';
         if(stable&&remaining<=0){
@@ -430,6 +434,7 @@ async function scan() {
       }
     }
     if(epoch!==scanEpoch)return;
+    updatePortraitGuide(video,false);
     stopCamera();scanInstruction('Снимки готовы. Отделяем волосы, шею и одежду от фона. Первая загрузка может занять больше времени.',true);
     $('captureStep').textContent='Анализ снимков';$('captureCountdown').textContent='';
     const front=views.find(view=>view.role==='front'),portrait=views.find(view=>view.role==='portrait');
@@ -459,6 +464,7 @@ async function scan() {
   finally {portraitWorker?.terminate();}
 }
 function cancelScan() {
+  updatePortraitGuide(video,false);
   scanEpoch++;scanning=false;scannerAbort?.abort();stopCamera();
   $('setupCameraSlot').appendChild(video.closest('.camera-frame'));
   if($('scannerDialog').open)$('scannerDialog').close();
