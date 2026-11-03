@@ -22,12 +22,12 @@ async function initialize(progress,singleThread=false){
 }
 self.onmessage=async ({data:message})=>{
   const bitmap=message?.bitmap||message,accessoriesOnly=!!message?.accessoriesOnly;
-  const began=performance.now(),progress=message=>self.postMessage({progress:true,message});
+  const began=performance.now(),progress=(message,percent)=>self.postMessage({progress:true,message,percent});
   try {
     await initialize(progress,!!message?.singleThread);
     if(message?.warmup){self.postMessage({ready:true});return;}
     const {imageToNchw,cleanPortraitAlpha}=matteModule;
-    progress('Находим лицо, волосы, шею и одежду…');
+    progress('Находим лицо, волосы, шею и одежду…',25);
     // Copy masks inside the callback: MediaPipe releases them when it returns.
     const classes=await new Promise((resolve,reject)=>{
       try {segmenter.segment(bitmap,result=>{
@@ -44,7 +44,7 @@ self.onmessage=async ({data:message})=>{
       const issue=portraitAccessoryIssue(message.landmarks,classes);
       if(issue)throw new Error(issue);
     }
-    progress('Аккуратно отделяем волосы и края плеч от фона…');
+    progress('Аккуратно отделяем волосы и края плеч от фона…',40);
     // Use the user's accepted processing window for a near-source-resolution
     // matte. Two passes at this size preserve thin hair and the real neckline;
     // the previous 512 px short side was fast but visibly rounded both.
@@ -65,13 +65,20 @@ self.onmessage=async ({data:message})=>{
       }
       return {data:result,width:outWidth,height:outHeight};
     };
+    const primaryStarted=performance.now();
     const primary=await infer(false);
-    progress('Повторно проверяем волосы и края одежды…');
-    const mirrored=await infer(true);
-    if(primary.width!==mirrored.width||primary.height!==mirrored.height)throw new Error('Не удалось сопоставить проходы удаления фона.');
-    const matteWidth=primary.width,matteHeight=primary.height,consensus=new Float32Array(primary.data.length);
-    for(let i=0;i<consensus.length;i++)consensus[i]=primary.data[i]*.62+mirrored.data[i]*.38;
-    progress('Проверяем цельность лица, шеи и одежды…');
+    const budget=message?.budgetMs ?? Infinity;
+    const remaining=budget-(performance.now()-began);
+    const primaryDuration=performance.now()-primaryStarted;
+    const matteWidth=primary.width,matteHeight=primary.height,consensus=primary.data;
+    if(remaining>primaryDuration*1.4+4000){
+      progress('Повторно проверяем волосы и края одежды…',60);
+      const mirrored=await infer(true);
+      if(primary.width===mirrored.width&&primary.height===mirrored.height){
+        for(let i=0;i<consensus.length;i++)consensus[i]=consensus[i]*.62+mirrored.data[i]*.38;
+      }
+    }
+    progress('Проверяем цельность лица, шеи и одежды…',70);
     const alpha=cleanPortraitAlpha(consensus,matteWidth,matteHeight);
     self.postMessage({...classes,matte:{alpha,width:matteWidth,height:matteHeight},engine:'modnet',analysisMs:performance.now()-began},[classes.data.buffer,alpha.buffer]);
   } catch(error){self.postMessage({error:error.message||'Не удалось отделить фон.'});}

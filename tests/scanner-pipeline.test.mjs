@@ -36,7 +36,7 @@ test('all six poses are captured while warming models; only the used portrait is
  const elements=new Map(),views=[],fits=[];let captures=0,created=0,terminated=0,now=0;
  const points=Array.from({length:478},()=>({x:.5,y:.5,z:0}));
  const canvas=()=>({width:0,height:0,getContext:()=>({drawImage(){}}),toDataURL:()=>{captures++;return 'data:image/jpeg;base64,test';}});
- const s={currentUser:{avatar_consent_current:true},AbortController,scanEpoch:0,scannerAbort:null,restoringAbort:null,
+ const s={currentUser:{avatar_consent_current:true},AbortController,setTimeout,clearTimeout,scanEpoch:0,scannerAbort:null,restoringAbort:null,
   $:id=>{if(!elements.has(id))elements.set(id,{textContent:'',showModal(){},appendChild(){}});return elements.get(id);},
   stopAudio(){},controls(){},scanInstruction(){},updatePortraitGuide(){},enableCamera:async()=>{},dependencies:async()=>{},
   video:{videoWidth:640,videoHeight:480,closest:()=>({})},performance:{now:()=>now+=700},landmarks:()=>({faceLandmarks:[points]}),
@@ -49,15 +49,16 @@ test('all six poses are captured while warming models; only the used portrait is
  };
  vm.createContext(s);vm.runInContext(app.slice(app.indexOf('async function scan()'),app.indexOf('function cancelScan()')),s);
  await s.scan();assert.equal(views.length,6);assert.equal(captures,6);assert.equal(created,1);assert.equal(terminated,1);
+ assert.equal(elements.get('captureCountdown').textContent,'100%');
  assert.equal(fits.length,1);assert.equal(fits[0].role,'portrait');
 });
 test('final portrait asks for a relaxed neutral pose instead of a stretched neck',()=>{
  assert.match(app,/Мягко сомкните губы, расслабьте плечи и не вытягивайте шею/);
 });
-test('a stalled accelerated portrait pass retries once in compatible mode',async()=>{
+test('a stalled portrait pass cannot restart with a fresh budget',async()=>{
  const elements=new Map(),modes=[];let now=0,workers=0,terminated=0;
  const points=Array.from({length:478},()=>({x:.5,y:.5,z:0}));
- const s={currentUser:{avatar_consent_current:true},AbortController,scanEpoch:0,scannerAbort:null,restoringAbort:null,
+ const s={currentUser:{avatar_consent_current:true},AbortController,setTimeout,clearTimeout,scanEpoch:0,scannerAbort:null,restoringAbort:null,
   $:id=>{if(!elements.has(id))elements.set(id,{textContent:'',showModal(){},appendChild(){}});return elements.get(id);},
   stopAudio(){},controls(){},scanInstruction(){},updatePortraitGuide(){},enableCamera:async()=>{},dependencies:async()=>{},
   video:{videoWidth:640,videoHeight:480,closest:()=>({})},performance:{now:()=>now+=700},landmarks:()=>({faceLandmarks:[points]}),
@@ -70,11 +71,10 @@ test('a stalled accelerated portrait pass retries once in compatible mode',async
   api:async()=>({}),installModel(){},showPortraitCutout(){},cancelScan(){},
  };
  vm.createContext(s);vm.runInContext(app.slice(app.indexOf('async function scan()'),app.indexOf('function cancelScan()')),s);
- await s.scan();
- assert.deepEqual(modes.map(({singleThread,timeoutMs})=>({singleThread,timeoutMs})),[
-  {singleThread:false,timeoutMs:20000},{singleThread:true,timeoutMs:60000},
- ]);
- assert.equal(workers,2);assert.equal(terminated,2);
+ await assert.rejects(s.scan(),/слишком долго/);
+ assert.equal(modes.length,1);
+ assert.ok(modes[0].timeoutMs>0&&modes[0].timeoutMs<=30000);
+ assert.equal(workers,1);assert.equal(terminated,1);
 });
 test('cancelling portrait analysis immediately stops the worker and releases the image',async()=>{
  const abort=new AbortController();let stopped=0,closed=0;

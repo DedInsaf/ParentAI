@@ -385,8 +385,9 @@ async function scan() {
     currentUser=consent.user;
   }
   stopAudio();scanning=true;const epoch=++scanEpoch,abort=new AbortController();scannerAbort=abort;restoringAbort?.abort();
+  $('captureStep').textContent='Подключаем камеру';$('captureCountdown').textContent='';
   $('scannerDialog').showModal();$('scannerCamera').appendChild(video.closest('.camera-frame'));controls();
-  let portraitWorker=null;
+  let portraitWorker=null, generationTimer, generationExpired=false;
   try {
     scanInstruction('Перед съёмкой снимите шляпу, кепку и наушники. Очки оставьте, если носите их постоянно. Сядьте лицом к свету.',true);
     await Promise.all([enableCamera(),dependencies()]);
@@ -435,33 +436,49 @@ async function scan() {
     }
     if(epoch!==scanEpoch)return;
     updatePortraitGuide(video,false);
-    stopCamera();scanInstruction('Снимки готовы. Отделяем волосы, шею и одежду от фона. Первая загрузка может занять больше времени.',true);
-    $('captureStep').textContent='Анализ снимков';$('captureCountdown').textContent='';
+    const deadline=performance.now()+30000;
+    generationTimer=setTimeout(()=>{generationExpired=true;abort.abort();},30000);
+    const remaining=()=>{
+      const ms=deadline-performance.now();
+      if(ms<=0){generationExpired=true;abort.abort();}
+      abort.signal.throwIfAborted();
+      return ms;
+    };
+    const progress=(percent,message)=>{
+      $('captureStep').textContent='Создание аватара';
+      $('captureCountdown').textContent=`${percent}%`;
+      scanInstruction(message);
+    };
+    stopCamera();
+    progress(5,'Готовим обработку снимка.');
     const front=views.find(view=>view.role==='front'),portrait=views.find(view=>view.role==='portrait');
     if(!front||!portrait)throw new Error('Не хватает итогового снимка. Повторите сканирование.');
-    scanInstruction('Завершаем подготовку модели обработки.',true);
     const warmed=await portraitWarmup;
     if(!warmed){portraitWorker.terminate();portraitWorker=new Worker('/portrait-worker.js');}
-    scanInstruction('Отделяем волосы, шею и края плеч.',true);
-    try {
-      portrait.anchors=await fitPortrait(portrait,message=>scanInstruction(message),abort.signal,portraitWorker,{singleThread:!warmed,timeoutMs:warmed?20000:60000});
-    } catch(error) {
-      if(!warmed||/головн|наушник/i.test(error.message))throw error;
-      portraitWorker.terminate();portraitWorker=new Worker('/portrait-worker.js');
-      scanInstruction('Ускорение не ответило. Продолжаем в совместимом режиме.',true);
-      portrait.anchors=await fitPortrait(portrait,message=>scanInstruction(message),abort.signal,portraitWorker,{singleThread:true,timeoutMs:60000});
-    }
-    if(epoch!==scanEpoch)return;
-    scanInstruction('Создаём ваш объёмный аватар.',true);
+    progress(15,'Отделяем человека от фона.');
+    let percent=15;
+    portrait.anchors=await fitPortrait(portrait,(message,stage)=>{
+      percent=Math.max(percent,stage||15);
+      progress(percent,message);
+    },abort.signal,portraitWorker,{singleThread:!warmed,timeoutMs:remaining(),deadline});
+    remaining();
+    progress(78,'Собираем объёмный аватар.');
+    await sleep(0);
+    remaining();
     const model=LocalAvatar.create(THREE,views,avatarTopology);
-    try {await api('avatar',JSON.stringify({version:7,views:views.map(({role,yaw,landmarks,photo})=>({role,yaw,landmarks,photo})),anchors:(portrait||front).anchors,portraitAnalysis:packPortraitAnalysis(portrait||front)}),true,60000,abort.signal);}
-    catch(error){model.dispose();throw error;}
+    try {
+      progress(92,'Сохраняем аватар в профиле.');
+      const payload=JSON.stringify({version:7,views:views.map(({role,yaw,landmarks,photo})=>({role,yaw,landmarks,photo})),anchors:portrait.anchors,portraitAnalysis:packPortraitAnalysis(portrait)});
+      await api('avatar',payload,true,remaining(),abort.signal);
+      remaining();
+    } catch(error){model.dispose();throw error;}
+    progress(100,'Аватар готов.');
     if(epoch!==scanEpoch){model.dispose();return;}
     installModel(model);showPortraitCutout(portrait||front);cancelScan();
-    $('faceStatus').textContent='3D-аватар создан';$('cameraHint').textContent='Аватар сохранён в вашем профиле. Проверьте лицо, волосы, шею и поворот.';
+    $('faceStatus').textContent='3D-аватар создан';$('cameraHint').textContent='Аватар готов · 100%. Проверьте лицо, волосы, шею и поворот.';
     scanInstruction('Аватар создан. Выбранные снимки и модель сохранены в защищённом профиле семьи.',true);
-  } catch(error){if(epoch===scanEpoch){cancelScan();throw error;}}
-  finally {portraitWorker?.terminate();}
+  } catch(error){if(epoch===scanEpoch){cancelScan();throw generationExpired?new Error('Создание аватара заняло больше 30 секунд. Попробуйте ещё раз.'):error;}}
+  finally {clearTimeout(generationTimer);portraitWorker?.terminate();}
 }
 function cancelScan() {
   updatePortraitGuide(video,false);
@@ -493,7 +510,7 @@ async function warmPortraitWorker(worker,signal,timeoutMs=20000) {
     worker.postMessage({warmup:true});
   });
 }
-async function fitPortrait(view,onProgress=()=>{},signal,sharedWorker=null,{singleThread=false,timeoutMs=90000}={}) {
+async function fitPortrait(view,onProgress=()=>{},signal,sharedWorker=null,{singleThread=false,timeoutMs=90000,deadline}={}) {
   let worker,bitmap;
   try {
     bitmap=await createImageBitmap(view.canvas);
@@ -504,9 +521,9 @@ async function fitPortrait(view,onProgress=()=>{},signal,sharedWorker=null,{sing
       const cancel=()=>{cleanup();worker.terminate();reject(new DOMException('Сканирование отменено','AbortError'));};
       const timer=setTimeout(()=>{cleanup();worker.terminate();reject(new Error('Обработка снимка заняла слишком долго. Попробуйте ещё раз.'));},timeoutMs);
       signal?.addEventListener('abort',cancel,{once:true});
-      worker.onmessage=({data})=>{if(data.progress){onProgress(data.message);return;}cleanup();data.error?reject(new Error(data.error)):resolve(data);};
+      worker.onmessage=({data})=>{if(data.progress){onProgress(data.message,data.percent);return;}cleanup();data.error?reject(new Error(data.error)):resolve(data);};
       worker.onerror=event=>{cleanup();reject(new Error(event.message||'Контур не найден'));};
-      try {worker.postMessage({bitmap,landmarks:view.landmarks,singleThread},[bitmap]);} catch(error){cleanup();reject(error);}
+      try {worker.postMessage({bitmap,landmarks:view.landmarks,singleThread,budgetMs:deadline===undefined?undefined:deadline-performance.now()},[bitmap]);} catch(error){cleanup();reject(error);}
     });
     view.segmentation=mask;
     view.matte=mask.matte;
