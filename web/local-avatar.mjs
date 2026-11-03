@@ -171,8 +171,8 @@ export class LocalAvatar {
     const {cx,cy,edgeZ,depth,width,height}=head;group.position.set(cx,cy,edgeZ-depth*.32);
     const joint=new THREE.Vector3(cx,base[152*3+1]+height*.08,edgeZ-width*.23);
     pivot.position.copy(joint).sub(group.position);for(const child of pivot.children)child.position.sub(joint);for(const child of body.children)child.position.sub(group.position);
-    // Keep the photographed jaw registered with the neck. The body mesh
-    // already extends above the chin to cover the joint during small turns.
+    // Seat the head in the photographed neck without moving the neck mesh.
+    pivot.position.y-=height*.06;
     return new LocalAvatar(THREE,{group,pivot,face,cavity,base,weights:rig.weights,mouthWidth,cavityIds,neckSurface,neckJoint:joint});
   }
   constructor(THREE,data){Object.assign(this,data);this.THREE=THREE;this.object=this.group;this.rest=this.group.position.clone();this.restUv=this.face.geometry.getAttribute('uv').array.slice();this.box=new THREE.Box3().setFromObject(this.group);}

@@ -135,7 +135,8 @@ export function portraitCutout(view){
 
 export function neckOverlapAlpha(y,chinY,faceHeight){
   if(!(faceHeight>0))return 1;
-  const t=Math.max(0,Math.min(1,(y-(chinY-faceHeight*.14))/(faceHeight*.14)));
+  // Finish the fade above the lowered jaw so the visible neck stays opaque.
+  const t=Math.max(0,Math.min(1,(y-(chinY-faceHeight*.14))/(faceHeight*.065)));
   return t*t*(3-2*t);
 }
 

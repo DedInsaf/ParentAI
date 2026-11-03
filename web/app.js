@@ -401,7 +401,7 @@ async function scan() {
       {role:'right_outer',direction:-1,outer:true,instruction:'Поверните голову к стрелке → чуть сильнее'},
       {role:'portrait',direction:0,instruction:'Снова смотрите прямо. Мягко сомкните губы, расслабьте плечи и не вытягивайте шею. Должны быть видны макушка, оба уха, шея и плечи.'},
     ];
-    const views=[];
+    const views=[];let portraitCapturedAt;
     for(const {role,direction,outer=false,instruction} of poses){
       if(epoch!==scanEpoch)return;
       $('captureStep').textContent=`Снимок ${views.length+1} из ${poses.length}`;scanInstruction(instruction,true);
@@ -429,6 +429,7 @@ async function scan() {
           if(frozenIssue){stable=0;continue;}
           const view={role,yaw:faceYaw(fresh),canvas,landmarks:fresh.map(p=>({x:p.x,y:p.y,z:p.z})),photo:canvas.toDataURL('image/jpeg',.88)};
           views.push(view);
+          if(role==='portrait')portraitCapturedAt=performance.now();
           scanInstruction('Снимок готов.',true);await sleep(350);break;
         }
         await sleep(80);
@@ -436,8 +437,8 @@ async function scan() {
     }
     if(epoch!==scanEpoch)return;
     updatePortraitGuide(video,false);
-    const deadline=performance.now()+30000;
-    generationTimer=setTimeout(()=>{generationExpired=true;abort.abort();},30000);
+    const deadline=portraitCapturedAt+30000;
+    generationTimer=setTimeout(()=>{generationExpired=true;abort.abort();},Math.max(0,deadline-performance.now()));
     const remaining=()=>{
       const ms=deadline-performance.now();
       if(ms<=0){generationExpired=true;abort.abort();}
@@ -473,9 +474,10 @@ async function scan() {
       remaining();
     } catch(error){model.dispose();throw error;}
     progress(100,'Аватар готов.');
+    const elapsedSeconds=((performance.now()-portraitCapturedAt)/1000).toFixed(2);
     if(epoch!==scanEpoch){model.dispose();return;}
     installModel(model);showPortraitCutout(portrait||front);cancelScan();
-    $('faceStatus').textContent='3D-аватар создан';$('cameraHint').textContent='Аватар готов · 100%. Проверьте лицо, волосы, шею и поворот.';
+    $('faceStatus').textContent=`3D-аватар создан · 100% · ${elapsedSeconds} с`;$('cameraHint').textContent='Аватар готов · 100%. Проверьте лицо, волосы, шею и поворот.';
     scanInstruction('Аватар создан. Выбранные снимки и модель сохранены в защищённом профиле семьи.',true);
   } catch(error){if(epoch===scanEpoch){cancelScan();throw generationExpired?new Error('Создание аватара заняло больше 30 секунд. Попробуйте ещё раз.'):error;}}
   finally {clearTimeout(generationTimer);portraitWorker?.terminate();}
