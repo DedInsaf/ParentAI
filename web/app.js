@@ -458,10 +458,24 @@ async function scan() {
     if(!warmed){portraitWorker.terminate();portraitWorker=new Worker('/portrait-worker.js');}
     progress(15,'Отделяем человека от фона.');
     let percent=15;
-    portrait.anchors=await fitPortrait(portrait,(message,stage)=>{
+    const reportPortraitProgress=(message,stage)=>{
       percent=Math.max(percent,stage||15);
       progress(percent,message);
-    },abort.signal,portraitWorker,{singleThread:!warmed,timeoutMs:remaining(),deadline});
+    };
+    const attemptDeadline=warmed?Math.min(deadline,performance.now()+12000):deadline;
+    try {
+      portrait.anchors=await fitPortrait(portrait,reportPortraitProgress,abort.signal,portraitWorker,{
+        singleThread:!warmed,timeoutMs:Math.min(remaining(),attemptDeadline-performance.now()),deadline:attemptDeadline,
+      });
+    } catch(error) {
+      if(!warmed||abort.signal.aborted||/головн|наушник/i.test(error.message))throw error;
+      portraitWorker.terminate();
+      portraitWorker=new Worker('/portrait-worker.js');
+      progress(percent,'Продолжаем обработку в совместимом режиме. Снимки уже готовы.');
+      portrait.anchors=await fitPortrait(portrait,reportPortraitProgress,abort.signal,portraitWorker,{
+        singleThread:true,timeoutMs:remaining(),deadline,
+      });
+    }
     remaining();
     progress(78,'Собираем объёмный аватар.');
     await sleep(0);
