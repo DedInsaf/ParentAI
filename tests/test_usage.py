@@ -158,13 +158,33 @@ class UsageTests(unittest.TestCase):
         self.assertEqual(self.store.subscription(12)['plan'], 'free')
         self.store.payment_callback(provider_id, 'CONFIRMED', 299, 'RUB')
         self.assertEqual(self.store.subscription(12)['plan'], 'paid')
-        self.store.payment_callback(provider_id, 'SUBSCRIPTION_CANCELLED', 299, 'RUB')
-        self.assertEqual(self.store.subscription(12)['plan'], 'free')
-        self.store.payment_callback(provider_id, 'CONFIRMED', 299, 'RUB')
-        self.store.payment_callback(provider_id, 'SUBSCRIPTION_CANCELED', 299, 'RUB')
-        self.assertEqual(self.store.subscription(12)['plan'], 'free')
+        with sqlite3.connect(self.store.path) as connection:
+            first_expiry = connection.execute(
+                "SELECT expires_at FROM subscriptions WHERE user_id=12").fetchone()[0]
+        self.assertAlmostEqual(first_expiry, int(time.time()) + 30 * 86400, delta=2)
+        with patch('usage.time.time', return_value=time.time() + 60):
+            self.store.payment_callback(provider_id, 'CONFIRMED', 299, 'RUB')
+        with sqlite3.connect(self.store.path) as connection:
+            self.assertEqual(connection.execute(
+                "SELECT expires_at FROM subscriptions WHERE user_id=12").fetchone()[0], first_expiry)
+            connection.execute("UPDATE subscriptions SET expires_at=0 WHERE user_id=12")
+        self.assertEqual(self.store.dashboard(12)['plan']['code'], 'free')
+        self.assertEqual(self.store.admin_plan_counts()['paid'], 0)
         with self.assertRaisesRegex(ValueError, 'Сумма'):
-            self.store.payment_callback(provider_id, 'CONFIRMED', 300, 'RUB')
+            self.store.payment_callback(provider_id, 'CONFIRMED', 299.50, 'RUB')
+
+    def test_chargeback_only_revokes_access_from_the_matching_order(self):
+        provider_id = '11111111-1111-4111-8111-111111111111'
+        self.store.record_checkout(12, provider_id, 'https://pay.platega.io/pay', 299)
+        self.store.payment_callback(provider_id, 'CONFIRMED', 299, 'RUB')
+        self.store.payment_callback(provider_id, 'CANCELED', 299, 'RUB')
+        self.assertEqual(self.store.subscription(12)['plan'], 'paid')
+        self.store.payment_callback(provider_id, 'CHARGEBACKED', 299, 'RUB')
+        self.store.payment_callback(provider_id, 'CONFIRMED', 299, 'RUB')
+        self.assertEqual(self.store.subscription(12)['plan'], 'free')
+        self.store.set_subscription(12, 'ultra')
+        self.store.payment_callback(provider_id, 'CHARGEBACKED', 299, 'RUB')
+        self.assertEqual(self.store.subscription(12)['plan'], 'ultra')
 
     def test_timed_session_groups_tasks_and_applies_voice_limit(self):
         study = self.store.start_study_session(21)

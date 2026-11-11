@@ -376,7 +376,7 @@ class Handler(BaseHTTPRequestHandler):
             if not isinstance(value, dict):
                 raise ValueError('Некорректный callback Platega.')
             get = lambda *names: next((value[name] for name in names if name in value), None)
-            provider_id = get('SubscriptionId', 'subscriptionId', 'Id', 'id')
+            provider_id = get('Id', 'id')
             self.server.usage.payment_callback(
                 provider_id, get('Status', 'status'), get('Amount', 'amount'),
                 get('Currency', 'currency'))
@@ -728,27 +728,29 @@ class Handler(BaseHTTPRequestHandler):
                     raise ValueError('Неизвестный тариф подписки.')
                 if user.role == 'admin':
                     raise ValueError('У администратора уже есть тестовый доступ без ограничений.')
-                current_plan = self.server.usage.subscription(user.id)['plan']
-                if current_plan == plan:
-                    raise ValueError('Этот тариф уже подключён.')
-                if current_plan in ('paid', 'ultra'):
-                    raise ValueError(
-                        'Сначала отмените действующую подписку через Platega или обратитесь в поддержку. '
-                        'Это защищает от двух одновременных списаний.'
-                    )
-                # The buyer must be identified and the check must be logged before
-                # we create or return a Platega payment link.
+                # Log buyer identity before creating or returning a payment link.
                 self.server.auth.record_checkout_identity(user.id, plan)
                 with self.server.payment_locks[user.id]:
+                    current_plan = self.server.usage.subscription(user.id)['plan']
+                    if current_plan in ('paid', 'ultra'):
+                        raise ValueError('У вас уже есть платный доступ. Новый период можно купить по окончании текущего.')
                     pending = self.server.usage.pending_checkout(user.id)
-                    if pending:
+                    if pending and pending['created_at'] >= time.time() - 15 * 60:
                         if pending['plan'] != plan:
                             raise ValueError('Сначала завершите уже начатое оформление подписки.')
                         return self.send(200, {'provider':'Platega', 'redirect':pending['redirect_url'],
                                                'status':'pending', 'duplicate':True})
+                    if pending:
+                        provider_id = pending['provider_id']
+                        payment_status, amount, currency = self.server.platega.checkout_status(provider_id)
+                        if payment_status not in ('CONFIRMED', 'CANCELED', 'CHARGEBACKED'):
+                            raise ValueError('Platega ещё проверяет предыдущий платёж. Повторите попытку позже.')
+                        self.server.usage.payment_callback(provider_id, payment_status, amount, currency)
+                        if payment_status == 'CONFIRMED':
+                            return self.send(200, {'provider':'Platega', 'status':'confirmed'})
                     catalog = self.server.usage.catalog()[plan]
                     amount = catalog['monthly_price_rubles']
-                    checkout = self.server.platega.create_subscription(amount, catalog['title'], buyer_email=user.email)
+                    checkout = self.server.platega.create_checkout(amount, catalog['title'], buyer_email=user.email)
                     self.server.usage.record_checkout(
                         user.id, checkout['provider_id'], checkout['redirect'], amount, plan)
                 return self.send(201, {'provider':'Platega', 'redirect':checkout['redirect'],

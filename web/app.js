@@ -17,7 +17,9 @@ const clearError = () => { $('error').hidden = true; };
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const requestId = () => globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 let token, currentUser, authenticated = false, appStarted = false;
-const requestedPlan = new URLSearchParams(location.search).get('plan');
+const pageParams = new URLSearchParams(location.search);
+const requestedPlan = pageParams.get('plan');
+const paymentReturn = ['return', 'failed'].includes(pageParams.get('payment'));
 let status = {}, stream, detector, avatarTopology, THREE, renderer, scene, camera, mesh, avatarGroup, modelAvatar;
 let audioContext, analyser, audioSource, pcm, playing = false, recording = false, scanning = false;
 let browserUtterance = null, browserSpeechStarted = 0, browserSpeechFinish = null;
@@ -240,30 +242,36 @@ function renderSubscription(summary, billing) {
   $('freePlanState').textContent = current === 'free' ? 'Текущий тариф' : 'Базовый тариф';
   $('freePlanBtn').textContent = current === 'free' ? 'Текущий тариф' : 'Бесплатный';
   const button = $('buyPaidBtn'), ultraButton = $('buyUltraBtn');
-  const waiting = ['pending','subscription_activated'].includes(summary.payment?.status);
+  const waiting = summary.payment?.status === 'pending';
   const hasPaidPlan = current === 'paid' || current === 'ultra';
   const buyerIdentified = !!currentUser?.email && !!currentUser?.telegram_username;
   button.disabled = summary.plan.unlimited || hasPaidPlan || waiting || !buyerIdentified;
   ultraButton.disabled = summary.plan.unlimited || hasPaidPlan || waiting || !buyerIdentified;
   button.textContent = summary.plan.unlimited ? 'У вас доступ без ограничений' : current === 'paid' ?
     'Подписка активна' : hasPaidPlan ? 'Смена тарифа — через поддержку' : waiting ? 'Ожидаем подтверждение Platega' :
-    `Оформить за ${paid.monthly_price_rubles ?? 490} ₽/месяц`;
+    `Купить за ${paid.monthly_price_rubles ?? 490} ₽`;
   ultraButton.textContent = summary.plan.unlimited ? 'У вас доступ без ограничений' : current === 'ultra' ?
     'Подписка активна' : hasPaidPlan ? 'Смена тарифа — через поддержку' : waiting ? 'Ожидаем подтверждение Platega' :
-    `Оформить за ${ultra.monthly_price_rubles ?? 990} ₽/месяц`;
+    `Купить за ${ultra.monthly_price_rubles ?? 990} ₽`;
   if (!buyerIdentified && current === 'free') {
     $('billingMessage').textContent = 'Перед оплатой сохраните Telegram username родителя в блоке «Данные покупателя».';
   } else if (!billing.provider?.enabled && current === 'free') {
     $('billingMessage').textContent = 'Покупка подписки временно недоступна. Пока можно пользоваться бесплатным тарифом.';
   } else if (waiting) {
-    $('billingMessage').textContent = 'Подписка создана в Platega и ожидает подтверждения. Нажмите кнопку ещё раз, чтобы вернуться к оплате.';
-    (summary.payment?.plan === 'ultra' ? ultraButton : button).disabled = false;
+    $('billingMessage').textContent = 'Платёж ожидает подтверждения. Если вы ещё не оплатили, можно вернуться к форме оплаты.';
+    const pendingButton = summary.payment?.plan === 'ultra' ? ultraButton : button;
+    pendingButton.disabled = false;
+    pendingButton.textContent = 'Вернуться к оплате';
   } else if (current === 'paid' || current === 'ultra') {
-    $('billingMessage').textContent = `${summary.plan.title} активен. Чтобы сменить тариф без двойного списания, сначала отмените текущую подписку через Platega или напишите в поддержку.`;
+    const expiry = summary.plan.expires_at && new Intl.DateTimeFormat('ru-RU', {
+      dateStyle: 'long', timeStyle: 'short',
+    }).format(summary.plan.expires_at * 1000);
+    $('billingMessage').textContent = expiry ? `Доступ по тарифу «${summary.plan.title}» действует до ${expiry}.` :
+      `${summary.plan.title} активен.`;
   } else if (summary.plan.unlimited) {
     $('billingMessage').textContent = 'Доступ администратора работает без тарифных ограничений.';
   } else {
-    $('billingMessage').textContent = 'Оплата проходит на защищённой странице Platega через СБП. Условия автопродления нужно отдельно подтвердить перед оплатой; отказаться от будущих списаний можно через поддержку Адым.';
+    $('billingMessage').textContent = 'Разовый платёж за 30 дней доступа через СБП. При оплате через СБП Platega добавляет комиссию 8,5%. Итоговую сумму вы увидите перед оплатой.';
   }
   if(billingNotice)$('billingMessage').textContent=billingNotice;
 }
@@ -1348,7 +1356,7 @@ function showApplication(user) {
       if (!$('legalConsentDialog').open) $('legalConsentDialog').showModal();
     });
   }
-  if (requestedPlan === 'paid' || requestedPlan === 'ultra') {
+  if (paymentReturn || requestedPlan === 'paid' || requestedPlan === 'ultra') {
     requestAnimationFrame(() => { if (user.legal_current) $('billingDialog').showModal(); });
   }
 }
@@ -1408,7 +1416,7 @@ $('legalConsentForm').addEventListener('submit', async event => {
   try{
     const data=await api('account/consent',JSON.stringify({kind:'legal',accepted:true}),true,15000);
     currentUser=data.user;$('legalConsentDialog').close();
-    if(requestedPlan==='paid'||requestedPlan==='ultra')$('billingDialog').showModal();
+    if(paymentReturn||requestedPlan==='paid'||requestedPlan==='ultra')$('billingDialog').showModal();
   }catch(error){$('legalConsentError').textContent=error.message||String(error);$('legalConsentError').hidden=false;}
   finally{button.disabled=false;button.textContent='Подтвердить и продолжить';}
 });
@@ -1498,6 +1506,10 @@ async function buyPlan(plan, buttonId) {
   pendingActions.add(buttonId); controls();
   try {
     const checkout = await api('billing/checkout', JSON.stringify({plan}), true, 30000);
+    if (checkout.status === 'confirmed') {
+      billingNotice = 'Оплата подтверждена. Тариф активирован.';
+      return;
+    }
     const target = new URL(checkout.redirect);
     if (target.protocol !== 'https:' || target.hostname !== 'pay.platega.io') throw new Error('Получена небезопасная ссылка оплаты.');
     location.assign(target.href);

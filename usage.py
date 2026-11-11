@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from decimal import Decimal, ROUND_CEILING, ROUND_HALF_UP
+from decimal import Decimal, InvalidOperation, ROUND_CEILING, ROUND_HALF_UP
 import json
 import math
 import os
@@ -14,6 +14,7 @@ import time
 import uuid
 
 
+PAID_ACCESS_SECONDS = 30 * 24 * 60 * 60
 MICROS_PER_RUBLE = 1_000_000
 OPERATIONS = {"llm", "stt", "tts"}
 
@@ -211,6 +212,17 @@ class UsageStore:
                 connection.execute(create_sql)
                 connection.execute(f"INSERT INTO {table} ({columns}) SELECT {columns} FROM {legacy}")
                 connection.execute(f"DROP TABLE {legacy}")
+        columns = {row[1] for row in connection.execute("PRAGMA table_info(subscriptions)")}
+        for name, definition in (("expires_at", "INTEGER"), ("payment_id", "TEXT")):
+            if name not in columns:
+                connection.execute(f"ALTER TABLE subscriptions ADD COLUMN {name} {definition}")
+        connection.execute("""
+            CREATE VIEW IF NOT EXISTS effective_subscriptions AS
+            SELECT user_id, plan, expires_at,
+                   CASE WHEN status='active' AND expires_at <= CAST(strftime('%s','now') AS INTEGER)
+                        THEN 'expired' ELSE status END AS status
+            FROM subscriptions
+        """)
         connection.execute(
             "CREATE INDEX IF NOT EXISTS payment_user_created ON payment_subscriptions(user_id, created_at)")
         connection.execute(
@@ -256,14 +268,14 @@ class UsageStore:
             connection.execute(
                 """INSERT INTO subscriptions(user_id, plan, status, updated_at) VALUES (?, ?, ?, ?)
                    ON CONFLICT(user_id) DO UPDATE SET plan=excluded.plan, status=excluded.status,
-                   updated_at=excluded.updated_at""",
+                   updated_at=excluded.updated_at, expires_at=NULL, payment_id=NULL""",
                 (user_id, plan, status, int(time.time())),
             )
 
     def subscription(self, user_id):
         self.ensure_subscription(user_id)
         with self._connect() as connection:
-            row = connection.execute("SELECT plan, status FROM subscriptions WHERE user_id = ?", (user_id,)).fetchone()
+            row = connection.execute("SELECT plan, status FROM effective_subscriptions WHERE user_id = ?", (user_id,)).fetchone()
         plan = row["plan"] if row and row["status"] == "active" else "free"
         return {"plan": plan, "status": row["status"] if row else "active", **self.config.plan(plan)}
 
@@ -282,14 +294,12 @@ class UsageStore:
             "tts_blocks": int(value["tts_blocks"]),
         } for name, value in self.config.values["plans"].items()}
 
-    def pending_checkout(self, user_id, max_age=15 * 60):
-        threshold = int(time.time()) - max_age
+    def pending_checkout(self, user_id):
         with self._connect() as connection:
             row = connection.execute(
-                """SELECT provider_id, plan, redirect_url, status FROM payment_subscriptions
-                   WHERE user_id=? AND (status='subscription_activated'
-                         OR (status='pending' AND created_at>=?))
-                   ORDER BY created_at DESC LIMIT 1""", (user_id, threshold)).fetchone()
+                """SELECT provider_id, plan, redirect_url, created_at FROM payment_subscriptions
+                   WHERE user_id=? AND status='pending'
+                   ORDER BY created_at DESC LIMIT 1""", (user_id,)).fetchone()
         return (dict(row) if row else None)
 
     def record_checkout(self, user_id, provider_id, redirect_url, amount_rubles, plan="paid"):
@@ -310,38 +320,49 @@ class UsageStore:
         with self.lock, self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
             row = connection.execute(
-                "SELECT user_id,plan,amount_rubles,currency FROM payment_subscriptions WHERE provider_id=?",
+                "SELECT user_id,plan,amount_rubles,currency,status FROM payment_subscriptions WHERE provider_id=?",
                 (provider_id,)).fetchone()
             if not row:
                 raise ValueError("Подписка Platega не найдена.")
             try:
-                received_amount = int(amount)
-            except (TypeError, ValueError):
+                received_amount = Decimal(str(amount))
+            except InvalidOperation:
                 raise ValueError("Platega не передала сумму подписки.") from None
-            if received_amount != row["amount_rubles"] or currency != row["currency"]:
+            if not received_amount.is_finite() or received_amount != row["amount_rubles"] or currency != row["currency"]:
                 raise ValueError("Сумма или валюта Platega не совпадает с заказом.")
+            previous = row["status"]
+            if (normalized not in {"CONFIRMED", "CANCELED", "CHARGEBACKED"}
+                    or previous in {"canceled", "chargebacked"}
+                    or previous == normalized.lower()
+                    or (previous == "confirmed" and normalized == "CANCELED")):
+                return {"user_id": row["user_id"], "status": previous.upper()}
             now = int(time.time())
             connection.execute(
                 "UPDATE payment_subscriptions SET status=?,updated_at=? WHERE provider_id=?",
                 (normalized.lower(), now, provider_id))
             if normalized == "CONFIRMED":
                 connection.execute(
-                    """INSERT INTO subscriptions(user_id,plan,status,updated_at) VALUES (?,?,'active',?)
-                       ON CONFLICT(user_id) DO UPDATE SET plan=excluded.plan,status='active',updated_at=excluded.updated_at""",
-                    (row["user_id"], row["plan"], now))
-            elif normalized in {"CANCELED", "CANCELLED", "CHARGEBACKED",
-                                "SUBSCRIPTION_CANCELED", "SUBSCRIPTION_CANCELLED"}:
+                    """INSERT INTO subscriptions(user_id,plan,status,updated_at,expires_at,payment_id)
+                       VALUES (?,?,'active',?,?,?)
+                       ON CONFLICT(user_id) DO UPDATE SET plan=excluded.plan,status='active',
+                           updated_at=excluded.updated_at,expires_at=excluded.expires_at,payment_id=excluded.payment_id
+                       WHERE subscriptions.status!='active' OR subscriptions.plan='free'
+                          OR subscriptions.expires_at <= excluded.updated_at""",
+                    (row["user_id"], row["plan"], now, now + PAID_ACCESS_SECONDS, provider_id))
+            elif normalized == "CHARGEBACKED":
                 connection.execute(
-                    """INSERT INTO subscriptions(user_id,plan,status,updated_at) VALUES (?,?,'cancelled',?)
-                       ON CONFLICT(user_id) DO UPDATE SET plan=excluded.plan,status='cancelled',updated_at=excluded.updated_at""",
-                    (row["user_id"], row["plan"], now))
+                    """UPDATE subscriptions SET status='cancelled',updated_at=?
+                       WHERE user_id=? AND payment_id=?""",
+                    (now, row["user_id"], provider_id))
         return {"user_id": row["user_id"], "status": normalized}
 
     def latest_payment(self, user_id):
         with self._connect() as connection:
             row = connection.execute(
-                """SELECT provider,plan,status,created_at,updated_at FROM payment_subscriptions
-                   WHERE user_id=? ORDER BY created_at DESC LIMIT 1""", (user_id,)).fetchone()
+                """SELECT provider,plan,CASE WHEN status='pending' AND created_at<?
+                          THEN 'expired' ELSE status END AS status,created_at,updated_at
+                   FROM payment_subscriptions
+                   WHERE user_id=? ORDER BY created_at DESC LIMIT 1""", (int(time.time()) - 15 * 60, user_id)).fetchone()
         return dict(row) if row else None
 
     def delete_user_data(self, user_id):
@@ -368,7 +389,7 @@ class UsageStore:
         } for user_id in ids}
         with self._connect() as connection:
             subscriptions = connection.execute(
-                f"SELECT user_id,plan,status FROM subscriptions WHERE user_id IN ({placeholders})", ids
+                f"SELECT user_id,plan,status FROM effective_subscriptions WHERE user_id IN ({placeholders})", ids
             ).fetchall()
             lessons = connection.execute(
                 f"""SELECT user_id,COUNT(*) AS assignments,COALESCE(SUM(hints),0) AS hints,
@@ -413,13 +434,13 @@ class UsageStore:
             row = connection.execute(
                 """SELECT COALESCE(SUM(CASE WHEN status='active' AND plan IN ('paid','ultra')
                                              THEN 1 ELSE 0 END),0) AS paid
-                   FROM subscriptions"""
+                   FROM effective_subscriptions"""
             ).fetchone()
         return {"paid": row["paid"]}
 
     def _active_plan(self, connection, user_id):
         row = connection.execute(
-            "SELECT plan,status FROM subscriptions WHERE user_id=?", (user_id,)
+            "SELECT plan,status FROM effective_subscriptions WHERE user_id=?", (user_id,)
         ).fetchone()
         return row["plan"] if row and row["status"] == "active" else "free"
 
@@ -699,7 +720,7 @@ class UsageStore:
                         (day_start,)).fetchone()["value"]
                     if spent + estimated_cost > self.global_daily_budget:
                         raise LimitExceeded("Дневной бюджет сервиса исчерпан. Попробуйте завтра.")
-            row = connection.execute("SELECT plan, status FROM subscriptions WHERE user_id=?", (user_id,)).fetchone()
+            row = connection.execute("SELECT plan, status FROM effective_subscriptions WHERE user_id=?", (user_id,)).fetchone()
             plan = row["plan"] if row and row["status"] == "active" else "free"
             if study_session_id:
                 session = connection.execute(
@@ -801,7 +822,7 @@ class UsageStore:
         self.ensure_subscription(user_id)
         start, end = self._month_bounds()
         with self._connect() as connection:
-            sub = connection.execute("SELECT plan, status FROM subscriptions WHERE user_id=?", (user_id,)).fetchone()
+            sub = connection.execute("SELECT plan, status, expires_at FROM effective_subscriptions WHERE user_id=?", (user_id,)).fetchone()
             plan = sub["plan"] if sub and sub["status"] == "active" else "free"
             totals = self._totals(connection, user_id, start, end)
             lesson = connection.execute(
@@ -838,6 +859,7 @@ class UsageStore:
                      if unlimited else
                      {"code": plan, "title": plan_config["title"],
                       "status": sub["status"], "unlimited": False,
+                      "expires_at": sub["expires_at"] if plan != "free" else None,
                       "session_minutes": int(plan_config["session_minutes"]),
                       "assignments_per_session": int(plan_config["assignments_per_session"]),
                       "yandex_voice_per_session": int(plan_config["yandex_voice_per_session"])}),

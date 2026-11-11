@@ -90,8 +90,8 @@ class ServerTests(unittest.TestCase):
         provider_id='11111111-1111-4111-8111-111111111111'
         redirect='https://pay.platega.io/subscription/11111111'
         class FakePlatega:
-            def public_status(self):return {'provider':'Platega','enabled':True,'method':'recurring_sbp'}
-            def create_subscription(self,amount,plan_title, *, buyer_email=None):
+            def public_status(self):return {'provider':'Platega','enabled':True,'method':'sbp'}
+            def create_checkout(self,amount,plan_title, *, buyer_email=None):
                 self.amount=amount; self.plan_title=plan_title; self.buyer_email=buyer_email
                 return {'provider_id':provider_id,'redirect':redirect,'status':'pending'}
             def valid_callback(self,merchant,secret):return merchant=='merchant' and secret=='secret'
@@ -111,11 +111,11 @@ class ServerTests(unittest.TestCase):
         status=json.loads(self.request('/api/status',headers={'X-App-Token':self.s.token})[1])
         self.assertTrue(status['billing']['provider']['enabled'])
 
-    def test_checkout_does_not_create_a_second_recurring_subscription(self):
+    def test_checkout_rejects_purchase_during_active_access(self):
         class FakePlatega:
             called = False
             def public_status(self): return {'provider':'Platega','enabled':True}
-            def create_subscription(self, _amount, _title, *, buyer_email=None):
+            def create_checkout(self, _amount, _title, *, buyer_email=None):
                 self.called = True
                 raise AssertionError('Platega must not be called')
         self.s.platega = FakePlatega()
@@ -124,7 +124,7 @@ class ServerTests(unittest.TestCase):
         code, body = self.request(
             '/api/billing/checkout', json.dumps({'plan':'ultra'}).encode(), headers)
         self.assertEqual(code, 400)
-        self.assertIn('двух одновременных списаний', json.loads(body)['error'])
+        self.assertIn('уже есть платный доступ', json.loads(body)['error'])
         self.assertFalse(self.s.platega.called)
 
     def test_login_accepts_login_or_email_and_logout_revokes_session(self):

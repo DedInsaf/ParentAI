@@ -10,7 +10,7 @@ from urllib.parse import urlsplit
 import uuid
 
 
-PLATEGA_SUBSCRIPTION_ENDPOINT = "https://app.platega.io/transaction/process"
+PLATEGA_TRANSACTION_ENDPOINT = "https://app.platega.io/transaction/process"
 
 
 class PlategaClient:
@@ -27,7 +27,7 @@ class PlategaClient:
         return {
             "provider": "Platega",
             "enabled": self.enabled,
-            "method": "recurring_sbp",
+            "method": "sbp",
             "message": ("Оплата через Platega готова" if self.enabled else
                         "Для покупки нужно подключить магазин Platega"),
         }
@@ -37,7 +37,7 @@ class PlategaClient:
                 and hmac.compare_digest(merchant_id, self.merchant_id)
                 and hmac.compare_digest(secret, self.secret))
 
-    def create_subscription(self, amount_rubles, plan_title="Адым Плюс", *, buyer_email=None):
+    def create_checkout(self, amount_rubles, plan_title="Адым Плюс", *, buyer_email=None):
         if not self.enabled:
             raise ValueError("Оплата ещё не подключена. Добавьте данные магазина Platega.")
         amount = int(amount_rubles)
@@ -48,17 +48,38 @@ class PlategaClient:
             raise ValueError("Для оплаты нужна действующая почта покупателя.")
         body = json.dumps({
             "metadata": {"user_email": buyer_email},
-            "paymentMethod": 6,
+            "paymentMethod": 2,
             "paymentDetails": {
                 "amount": amount,
                 "currency": "RUB",
-                "interval": 3,
-                "intervalCount": 1,
             },
-            "description": f"{plan_title} — ежемесячная подписка",
+            "description": f"{plan_title} — доступ на 30 дней",
+            "return": "https://app.adym.ru/?payment=return",
+            "failedUrl": "https://app.adym.ru/?payment=failed",
         }, ensure_ascii=False).encode("utf-8")
+        result = self._request(PLATEGA_TRANSACTION_ENDPOINT, body)
+        provider_id = result.get("transactionId")
+        redirect = result.get("redirect") or result.get("url")
+        try:
+            provider_id = str(uuid.UUID(provider_id))
+        except (ValueError, TypeError, AttributeError):
+            raise ValueError("Platega не вернула идентификатор платежа.") from None
+        target = urlsplit(redirect) if isinstance(redirect, str) else None
+        if not target or target.scheme != "https" or target.netloc != "pay.platega.io":
+            raise ValueError("Platega вернула небезопасную ссылку оплаты.")
+        return {"provider_id": provider_id, "redirect": redirect, "status": "pending"}
+
+    def checkout_status(self, provider_id):
+        provider_id = str(uuid.UUID(provider_id))
+        result = self._request(f"https://app.platega.io/transaction/{provider_id}")
+        details = result.get("paymentDetails")
+        if not isinstance(details, dict):
+            raise ValueError("Platega не вернула данные предыдущего платежа.")
+        return result.get("status"), details.get("amount"), details.get("currency")
+
+    def _request(self, url, body=None):
         request = urllib.request.Request(
-            PLATEGA_SUBSCRIPTION_ENDPOINT, data=body, method="POST", headers={
+            url, data=body, headers={
                 "Content-Type": "application/json",
                 "X-MerchantId": self.merchant_id,
                 "X-Secret": self.secret,
@@ -69,18 +90,11 @@ class PlategaClient:
         except urllib.error.HTTPError as exc:
             if exc.code in (401, 403):
                 raise ValueError("Platega отклонила данные магазина. Проверьте Merchant ID и API-ключ.") from None
-            raise ValueError(f"Platega временно не создаёт подписку (код {exc.code}).") from None
+            raise ValueError(f"Platega временно недоступна (код {exc.code}).") from None
         except (urllib.error.URLError, TimeoutError):
             raise ValueError("Не удалось связаться с Platega. Повторите позже.") from None
         except json.JSONDecodeError:
             raise ValueError("Platega вернула некорректный ответ.") from None
-        provider_id = result.get("transactionId")
-        redirect = result.get("redirect") or result.get("url")
-        try:
-            uuid.UUID(provider_id)
-        except (ValueError, TypeError, AttributeError):
-            raise ValueError("Platega не вернула идентификатор подписки.") from None
-        target = urlsplit(redirect or "")
-        if target.scheme != "https" or target.hostname != "pay.platega.io":
-            raise ValueError("Platega вернула небезопасную ссылку оплаты.")
-        return {"provider_id": provider_id, "redirect": redirect, "status": "pending"}
+        if not isinstance(result, dict):
+            raise ValueError("Platega вернула некорректный ответ.")
+        return result
