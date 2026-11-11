@@ -216,6 +216,9 @@ class UsageStore:
         for name, definition in (("expires_at", "INTEGER"), ("payment_id", "TEXT")):
             if name not in columns:
                 connection.execute(f"ALTER TABLE subscriptions ADD COLUMN {name} {definition}")
+        payment_columns = {row[1] for row in connection.execute("PRAGMA table_info(payment_subscriptions)")}
+        if "quoted_kopecks" not in payment_columns:
+            connection.execute("ALTER TABLE payment_subscriptions ADD COLUMN quoted_kopecks INTEGER")
         connection.execute("""
             CREATE VIEW IF NOT EXISTS effective_subscriptions AS
             SELECT user_id, plan, expires_at,
@@ -302,16 +305,17 @@ class UsageStore:
                    ORDER BY created_at DESC LIMIT 1""", (user_id,)).fetchone()
         return (dict(row) if row else None)
 
-    def record_checkout(self, user_id, provider_id, redirect_url, amount_rubles, plan="paid"):
+    def record_checkout(self, user_id, provider_id, redirect_url, amount_rubles, plan="paid", *, quoted_kopecks=None):
         if plan not in ("paid", "ultra"):
             raise ValueError("Некорректный платный тариф.")
         now = int(time.time())
         with self._connect() as connection:
             connection.execute(
                 """INSERT INTO payment_subscriptions
-                   (provider_id,user_id,provider,plan,amount_rubles,currency,status,redirect_url,created_at,updated_at)
-                   VALUES (?,?,'platega',?,?,'RUB','pending',?,?,?)""",
-                (provider_id, user_id, plan, int(amount_rubles), redirect_url, now, now))
+                   (provider_id,user_id,provider,plan,amount_rubles,currency,status,redirect_url,
+                    created_at,updated_at,quoted_kopecks)
+                   VALUES (?,?,'platega',?,?,'RUB','pending',?,?,?,?)""",
+                (provider_id, user_id, plan, int(amount_rubles), redirect_url, now, now, quoted_kopecks))
 
     def payment_callback(self, provider_id, status, amount, currency):
         if not isinstance(provider_id, str) or not isinstance(status, str):
@@ -320,7 +324,8 @@ class UsageStore:
         with self.lock, self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
             row = connection.execute(
-                "SELECT user_id,plan,amount_rubles,currency,status FROM payment_subscriptions WHERE provider_id=?",
+                """SELECT user_id,plan,amount_rubles,currency,status,quoted_kopecks
+                   FROM payment_subscriptions WHERE provider_id=?""",
                 (provider_id,)).fetchone()
             if not row:
                 raise ValueError("Подписка Platega не найдена.")
@@ -328,7 +333,10 @@ class UsageStore:
                 received_amount = Decimal(str(amount))
             except InvalidOperation:
                 raise ValueError("Platega не передала сумму подписки.") from None
-            if not received_amount.is_finite() or received_amount != row["amount_rubles"] or currency != row["currency"]:
+            accepted_amounts = {Decimal(row["amount_rubles"])}
+            if row["quoted_kopecks"] is not None:
+                accepted_amounts.add(Decimal(row["quoted_kopecks"]) / 100)
+            if not received_amount.is_finite() or received_amount not in accepted_amounts or currency != row["currency"]:
                 raise ValueError("Сумма или валюта Platega не совпадает с заказом.")
             previous = row["status"]
             if (normalized not in {"CONFIRMED", "CANCELED", "CHARGEBACKED"}

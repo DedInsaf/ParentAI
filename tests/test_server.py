@@ -93,7 +93,7 @@ class ServerTests(unittest.TestCase):
             def public_status(self):return {'provider':'Platega','enabled':True,'method':'sbp'}
             def create_checkout(self,amount,plan_title, *, buyer_email=None):
                 self.amount=amount; self.plan_title=plan_title; self.buyer_email=buyer_email
-                return {'provider_id':provider_id,'redirect':redirect,'status':'pending'}
+                return {'provider_id':provider_id,'redirect':redirect,'status':'pending','quoted_kopecks':53165}
             def valid_callback(self,merchant,secret):return merchant=='merchant' and secret=='secret'
         self.s.platega=FakePlatega()
         headers={'Origin':self.s.origin,'X-App-Token':self.s.token,'Content-Type':'application/json'}
@@ -102,7 +102,7 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(code,201)
         self.assertEqual(json.loads(body)['redirect'],redirect)
         self.assertEqual(self.s.platega.amount,490)
-        callback=json.dumps({'Id':provider_id,'Amount':490,'Currency':'RUB','Status':'CONFIRMED'}).encode()
+        callback=json.dumps({'Id':provider_id,'Amount':531.65,'Currency':'RUB','Status':'CONFIRMED'}).encode()
         bad={'X-MerchantId':'merchant','X-Secret':'wrong','Content-Type':'application/json'}
         self.assertEqual(self.request('/api/webhooks/platega',callback,bad,authenticated=False)[0],403)
         good={'X-MerchantId':'merchant','X-Secret':'secret','Content-Type':'application/json'}

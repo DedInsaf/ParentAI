@@ -15,6 +15,7 @@ class PlategaTests(unittest.TestCase):
                     'transactionId': '11111111-1111-4111-8111-111111111111',
                     'redirect': 'https://pay.platega.io/subscription/11111111',
                     'status': 'PENDING',
+                    'paymentDetails': '324.42 RUB',
                 }).encode()
         def opener(request, timeout):
             seen['url'], seen['body'], seen['headers'], seen['timeout'] = (
@@ -32,6 +33,7 @@ class PlategaTests(unittest.TestCase):
             'amount': 299, 'currency': 'RUB'})
         self.assertEqual(seen['body']['metadata'], {'user_email': 'parent@example.com'})
         self.assertEqual(result['status'], 'pending')
+        self.assertEqual(result['quoted_kopecks'], 32442)
 
     def test_missing_or_invalid_buyer_email_never_reaches_provider(self):
         def opener(*args, **kwargs):

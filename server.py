@@ -752,7 +752,8 @@ class Handler(BaseHTTPRequestHandler):
                     amount = catalog['monthly_price_rubles']
                     checkout = self.server.platega.create_checkout(amount, catalog['title'], buyer_email=user.email)
                     self.server.usage.record_checkout(
-                        user.id, checkout['provider_id'], checkout['redirect'], amount, plan)
+                        user.id, checkout['provider_id'], checkout['redirect'], amount, plan,
+                        quoted_kopecks=checkout['quoted_kopecks'])
                 return self.send(201, {'provider':'Platega', 'redirect':checkout['redirect'],
                                        'status':'pending', 'duplicate':False})
             if path == '/api/study-session':

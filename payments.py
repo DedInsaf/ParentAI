@@ -1,6 +1,7 @@
 """Minimal server-side Platega adapter. Merchant credentials never reach the browser."""
 from __future__ import annotations
 
+from decimal import Decimal
 import hmac
 import json
 import re
@@ -67,7 +68,12 @@ class PlategaClient:
         target = urlsplit(redirect) if isinstance(redirect, str) else None
         if not target or target.scheme != "https" or target.netloc != "pay.platega.io":
             raise ValueError("Platega вернула небезопасную ссылку оплаты.")
-        return {"provider_id": provider_id, "redirect": redirect, "status": "pending"}
+        quote = result.get("paymentDetails")
+        match = re.fullmatch(r"(\d+(?:\.\d{1,2})?) RUB", quote) if isinstance(quote, str) else None
+        if not match or not amount <= Decimal(match[1]) <= 10_000:
+            raise ValueError("Platega вернула некорректную сумму к оплате.")
+        return {"provider_id": provider_id, "redirect": redirect, "status": "pending",
+                "quoted_kopecks": int(Decimal(match[1]) * 100)}
 
     def checkout_status(self, provider_id):
         provider_id = str(uuid.UUID(provider_id))
