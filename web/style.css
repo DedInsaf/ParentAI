@@ -72,9 +72,22 @@ small{font-size:12px}
 .buttons{display:flex;gap:10px;flex-wrap:wrap;margin-top:18px}
 .full{width:100%}
 .next-step{width:100%;margin-top:24px;min-height:54px}
-.billing-dialog{width:min(1180px,calc(100vw - 32px));max-width:none;border:0;border-radius:30px;padding:0;background:transparent;color:var(--ink);overflow:visible}
+.billing-dialog{
+  width:min(1180px,calc(100vw - 32px));
+  max-width:none;
+  max-height:calc(100vh - 32px);
+  max-height:calc(100dvh - 32px);
+  border:0;
+  border-radius:30px;
+  padding:0;
+  background:#fffefa;
+  color:var(--ink);
+  overflow:auto;
+  overscroll-behavior:contain;
+  box-shadow:0 26px 80px #23342a2e;
+}
 .billing-dialog::backdrop{background:rgba(35,49,42,.46);backdrop-filter:blur(5px)}
-.billing-dialog-shell{padding:30px;background:linear-gradient(135deg,#fffefa 0%,#f2f6e9 100%);border:1px solid #dfe7d8;border-radius:30px;box-shadow:0 26px 80px #23342a2e}
+.billing-dialog-shell{padding:30px;background:linear-gradient(135deg,#fffefa 0%,#f2f6e9 100%);border:1px solid #dfe7d8;border-radius:inherit}
 .subscription-heading{display:flex;justify-content:space-between;align-items:flex-start;gap:24px}
 .subscription-heading h2{font-size:29px;letter-spacing:-.8px}.subscription-heading p{color:var(--muted);font-size:15px;max-width:720px;margin-bottom:0}
 .billing-dialog-actions{display:flex;align-items:center;gap:10px;flex-shrink:0}
@@ -266,7 +279,7 @@ body.in-lesson #readyHint:empty{display:none}
 .section-title{flex-wrap:wrap;gap:8px}
 .section-title h2{font-size:19px}
 #setupPage,#lessonPage{grid-template-columns:1fr;gap:18px}
-.billing-dialog{width:calc(100vw - 20px);max-height:calc(100dvh - 20px);overflow:auto}.billing-dialog-shell{padding:21px;border-radius:25px}.subscription-heading{display:block;padding-right:42px}.subscription-heading h2{font-size:25px}.billing-dialog-actions{position:absolute;top:18px;right:18px}.billing-dialog-actions .plan-badge{display:none}.billing-contact{grid-template-columns:1fr}.billing-contact-message{grid-column:1}.plan-comparison{grid-template-columns:1fr}.plan-card{padding:18px}.plan-card.featured{padding:17px}
+.billing-dialog{width:calc(100vw - 20px);max-height:calc(100vh - 20px);max-height:calc(100dvh - 20px);border-radius:25px}.billing-dialog-shell{padding:21px}.subscription-heading{display:block;padding-right:42px}.subscription-heading h2{font-size:25px}.billing-dialog-actions{position:absolute;top:18px;right:18px}.billing-dialog-actions .plan-badge{display:none}.billing-contact{grid-template-columns:1fr}.billing-contact-message{grid-column:1}.plan-comparison{grid-template-columns:1fr}.plan-card{padding:18px}.plan-card.featured{padding:17px}
 .setup-steps{gap:2px;padding:6px;border-radius:21px}
 .setup-steps button{font-size:12px;gap:6px;padding:10px 5px;min-height:48px;border-radius:16px}
 .setup-steps button span{width:25px;height:25px;font-size:11px}
