@@ -100,6 +100,10 @@ class UsageStore:
             connection.execute("PRAGMA journal_mode = WAL")
             connection.executescript(
                 """
+                CREATE TABLE IF NOT EXISTS landing_visits (
+                    id INTEGER PRIMARY KEY CHECK(id = 1),
+                    total INTEGER NOT NULL
+                );
                 CREATE TABLE IF NOT EXISTS subscriptions (
                     user_id INTEGER PRIMARY KEY,
                     plan TEXT NOT NULL CHECK(plan IN ('free', 'paid', 'ultra')),
@@ -168,6 +172,18 @@ class UsageStore:
                 """
             )
             self._migrate_schema(connection)
+
+    def record_landing_visit(self):
+        with self._connect() as connection:
+            connection.execute("""
+                INSERT INTO landing_visits(id,total) VALUES (1,1)
+                ON CONFLICT(id) DO UPDATE SET total=total+1
+            """)
+
+    def landing_visit_count(self):
+        with self._connect() as connection:
+            row = connection.execute("SELECT total FROM landing_visits WHERE id=1").fetchone()
+        return row["total"] if row else 0
 
     @staticmethod
     def _migrate_schema(connection):

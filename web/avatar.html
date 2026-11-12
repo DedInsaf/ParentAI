@@ -117,6 +117,7 @@
   <div class="admin-shell">
     <header class="admin-heading"><div><span class="eyebrow">АДМИНИСТРИРОВАНИЕ</span><h2 id="adminDialogTitle">Аккаунты бета-теста</h2><p>Только агрегированные данные. Пароли, разговоры, фотографии и голос недоступны.</p></div><button id="closeAdminBtn" type="button" class="dialog-close" aria-label="Закрыть админ-панель">×</button></header>
     <div class="admin-stats" aria-label="Сводка аккаунтов"><div><strong id="adminTotalUsers">0</strong><span>аккаунтов</span></div><div><strong id="adminBlockedUsers">0</strong><span>заблокировано</span></div><div><strong id="adminPaidUsers">0</strong><span>с подпиской</span></div></div>
+    <p class="helper">Загрузки главной страницы adym.ru: <strong id="adminLandingVisits">—</strong></p>
     <form id="adminSearchForm" class="admin-search"><label for="adminSearch">Найти по логину, почте или Telegram</label><div><input id="adminSearch" type="search" maxlength="254" placeholder="Например, @parent"><button type="submit">Найти</button><button id="adminRefreshBtn" type="button" class="secondary">Обновить</button></div></form>
     <p class="helper">Изменение тарифа управляет доступом в Адым. После подключения Platega активные списания отменяются отдельно в платёжной системе.</p>
     <p id="adminMessage" class="helper" role="status"></p>
@@ -273,5 +274,5 @@
 <script type="module" src="email-verification.mjs"></script>
 <script type="module" src="password-recovery.mjs"></script>
 <script type="module" src="account-security.mjs"></script>
-<script type="module" src="app.js?v=20261111-sbp"></script>
+<script type="module" src="app.js?v=20261112-visits"></script>
 </body></html>

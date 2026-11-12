@@ -1287,6 +1287,7 @@ function renderAdminUsers(page){
   $('adminTotalUsers').textContent=page.stats?.total??page.total??0;
   $('adminBlockedUsers').textContent=page.stats?.banned??0;
   $('adminPaidUsers').textContent=page.stats?.paid??0;
+  $('adminLandingVisits').textContent=page.stats?.landing_visits?.toLocaleString('ru-RU')??'—';
   const target=$('adminUsers');target.replaceChildren();
   if(!page.users?.length){target.append(adminElement('p','admin-empty','Аккаунты не найдены.'));return;}
   for(const account of page.users){

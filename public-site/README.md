@@ -19,3 +19,5 @@
 ```sh
 python3 -m http.server 8080 --directory public-site
 ```
+
+На VPS в блоке `adym.ru` в Caddy подключается `import adym_landing_visits` из `deploy/Caddyfile.example`. Главная страница отправляет пустой запрос после события `load`. Суммарный счётчик хранится в `usage.sqlite3` и виден в панели «Управление аккаунтами». Повторная загрузка страницы увеличивает счётчик.

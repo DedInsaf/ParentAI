@@ -159,6 +159,21 @@ class ServerTests(unittest.TestCase):
         self.assertIsNone(summary['remaining']['assignments'])
         self.assertEqual(self.request('/api/metrics/cost',headers={'X-App-Token':self.s.token})[0],200)
 
+    def test_landing_loads_increment_aggregate_visible_to_admin(self):
+        path = '/api/landing-visit'
+        headers = {'Host': 'adym.ru', 'Origin': 'https://adym.ru', 'Sec-Fetch-Site': 'same-origin'}
+        self.assertEqual(self.request(path, b'', {**headers, 'Origin': 'https://example.org'},
+                                      authenticated=False)[0], 403)
+        self.assertEqual(self.request(path, b'payload', headers, authenticated=False)[0], 400)
+        for _ in range(2):
+            self.assertEqual(self.request(path, b'', headers, authenticated=False), (204, b''))
+        admin_headers = {'X-App-Token': self.s.token}
+        self.assertEqual(self.request('/api/admin/users', headers=admin_headers)[0], 403)
+        self.s.auth.set_role('test-user', 'admin')
+        code, body = self.request('/api/admin/users', headers=admin_headers)
+        self.assertEqual(code, 200)
+        self.assertEqual(json.loads(body)['stats']['landing_visits'], 2)
+
     def test_admin_panel_lists_accounts_and_controls_access_and_plans(self):
         second=self.s.auth.register('managed-user','managed@example.com','password-123','password-123')
         second_session=self.s.auth.create_session(second.id)

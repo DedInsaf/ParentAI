@@ -141,7 +141,10 @@ class AppServer(ThreadingHTTPServer):
         page = self.auth.list_users(search, limit, offset)
         overviews = self.usage.admin_overviews(item['id'] for item in page['users'])
         page['users'] = [{**item, **overviews.get(item['id'], {})} for item in page['users']]
-        page['stats'] = {**self.auth.user_counts(), **self.usage.admin_plan_counts()}
+        page['stats'] = {
+            **self.auth.user_counts(), **self.usage.admin_plan_counts(),
+            'landing_visits': self.usage.landing_visit_count(),
+        }
         return page
 
     def allow_auth_attempt(self, key, action):
@@ -494,6 +497,15 @@ class Handler(BaseHTTPRequestHandler):
         self.send_file(target, cache=cache)
 
     def do_POST(self):
+        if self.path == '/api/landing-visit':
+            if (self.headers.get('Host') != 'adym.ru'
+                    or self.headers.get('Origin') != 'https://adym.ru'
+                    or self.headers.get('Sec-Fetch-Site', 'same-origin') != 'same-origin'):
+                return self.send(403, {'error': 'Invalid origin'})
+            if self.headers.get('Content-Length', '0') != '0' or self.headers.get('Transfer-Encoding'):
+                return self.send(400, {'error': 'Expected empty request'})
+            self.server.usage.record_landing_visit()
+            return self.send(204, b'', kind='text/plain')
         # A deletion must not race another request holding a valid session and
         # recreate references, transcripts or usage rows after erasure.
         user = self.current_user()

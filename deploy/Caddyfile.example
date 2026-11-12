@@ -1,3 +1,16 @@
+(adym_landing_visits) {
+    @landing_visit {
+        method POST
+        path /api/landing-visit
+    }
+    reverse_proxy @landing_visit 127.0.0.1:8768 {
+        header_up -Cookie
+        header_up -Referer
+        header_up -User-Agent
+        header_up -X-Forwarded-For
+    }
+}
+
 app.adym.ru {
     encode zstd gzip
 
