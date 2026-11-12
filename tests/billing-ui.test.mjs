@@ -26,7 +26,8 @@ test('plans use parent-friendly sessions and include Plus and Ultra', () => {
   assert.match(html, /резервное распознавание/);
   assert.match(script, /stt_billed_seconds/);
   assert.match(script, /Смена тарифа — через поддержку/);
-  assert.match(script, /двойного списания/);
+  assert.match(script, /Разовый платёж за 30 дней доступа через СБП/);
+  assert.match(script, /summary\.plan\.expires_at/);
   assert.match(script, /remaining\.sessions/);
   assert.match(script, /study-session/);
 });
