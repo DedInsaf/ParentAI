@@ -1287,7 +1287,19 @@ function renderAdminUsers(page){
   $('adminTotalUsers').textContent=page.stats?.total??page.total??0;
   $('adminBlockedUsers').textContent=page.stats?.banned??0;
   $('adminPaidUsers').textContent=page.stats?.paid??0;
+  const visits=page.landing_visit_history;
+  const days=visits?.days??[];
+  const dateLabel=day=>new Date(day+'T00:00:00Z').toLocaleDateString('ru-RU',{timeZone:'UTC'});
   $('adminLandingVisits').textContent=page.stats?.landing_visits?.toLocaleString('ru-RU')??'—';
+  $('adminLandingToday').textContent=days[0]?.total.toLocaleString('ru-RU')??'—';
+  $('adminLandingSince').textContent=visits?.since
+    ? `Московское время. Разбивка ведётся с ${dateLabel(visits.since)}. Первый день может быть неполным.`
+    : '';
+  $('adminLandingDays').replaceChildren(...days.map(({day,total})=>{
+    const row=adminElement('div','admin-audit-entry');
+    row.append(adminElement('strong','',dateLabel(day)),adminElement('span','',total.toLocaleString('ru-RU')));
+    return row;
+  }));
   const target=$('adminUsers');target.replaceChildren();
   if(!page.users?.length){target.append(adminElement('p','admin-empty','Аккаунты не найдены.'));return;}
   for(const account of page.users){

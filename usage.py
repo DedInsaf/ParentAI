@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation, ROUND_CEILING, ROUND_HALF_UP
 import json
 import math
@@ -15,6 +15,7 @@ import uuid
 
 
 PAID_ACCESS_SECONDS = 30 * 24 * 60 * 60
+MOSCOW_TIME = timezone(timedelta(hours=3))
 MICROS_PER_RUBLE = 1_000_000
 OPERATIONS = {"llm", "stt", "tts"}
 
@@ -104,6 +105,10 @@ class UsageStore:
                     id INTEGER PRIMARY KEY CHECK(id = 1),
                     total INTEGER NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS landing_visits_daily (
+                    day TEXT PRIMARY KEY,
+                    total INTEGER NOT NULL
+                );
                 CREATE TABLE IF NOT EXISTS subscriptions (
                     user_id INTEGER PRIMARY KEY,
                     plan TEXT NOT NULL CHECK(plan IN ('free', 'paid', 'ultra')),
@@ -172,18 +177,44 @@ class UsageStore:
                 """
             )
             self._migrate_schema(connection)
+            connection.execute("""
+                INSERT INTO landing_visits_daily(day,total)
+                SELECT ?,0 WHERE NOT EXISTS (SELECT 1 FROM landing_visits_daily)
+            """, (self._landing_day().isoformat(),))
+
+    @staticmethod
+    def _landing_day():
+        return datetime.fromtimestamp(time.time(), MOSCOW_TIME).date()
 
     def record_landing_visit(self):
+        day = self._landing_day().isoformat()
         with self._connect() as connection:
             connection.execute("""
                 INSERT INTO landing_visits(id,total) VALUES (1,1)
                 ON CONFLICT(id) DO UPDATE SET total=total+1
             """)
+            connection.execute("""
+                INSERT INTO landing_visits_daily(day,total) VALUES (?,1)
+                ON CONFLICT(day) DO UPDATE SET total=total+1
+            """, (day,))
 
-    def landing_visit_count(self):
+    def landing_visit_stats(self):
+        today = self._landing_day()
+        oldest = (today - timedelta(days=29)).isoformat()
         with self._connect() as connection:
-            row = connection.execute("SELECT total FROM landing_visits WHERE id=1").fetchone()
-        return row["total"] if row else 0
+            connection.execute("BEGIN")
+            total = connection.execute("SELECT total FROM landing_visits WHERE id=1").fetchone()
+            since = connection.execute("SELECT MIN(day) FROM landing_visits_daily").fetchone()[0]
+            counts = dict(connection.execute(
+                "SELECT day,total FROM landing_visits_daily WHERE day BETWEEN ? AND ?",
+                (oldest, today.isoformat())))
+        days = []
+        for offset in range(30):
+            day = (today - timedelta(days=offset)).isoformat()
+            if day < since:
+                break
+            days.append({"day": day, "total": counts.get(day, 0)})
+        return {"total": total["total"] if total else 0, "since": since, "days": days}
 
     @staticmethod
     def _migrate_schema(connection):

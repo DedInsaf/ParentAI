@@ -141,10 +141,12 @@ class AppServer(ThreadingHTTPServer):
         page = self.auth.list_users(search, limit, offset)
         overviews = self.usage.admin_overviews(item['id'] for item in page['users'])
         page['users'] = [{**item, **overviews.get(item['id'], {})} for item in page['users']]
+        visits = self.usage.landing_visit_stats()
         page['stats'] = {
             **self.auth.user_counts(), **self.usage.admin_plan_counts(),
-            'landing_visits': self.usage.landing_visit_count(),
+            'landing_visits': visits['total'],
         }
+        page['landing_visit_history'] = visits
         return page
 
     def allow_auth_attempt(self, key, action):

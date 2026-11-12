@@ -37,6 +37,27 @@ def config(assignments=2, llm=2, tts=2, cost='10'):
 
 
 class UsageTests(unittest.TestCase):
+    def test_landing_visit_history_keeps_legacy_total_and_uses_moscow_dates(self):
+        path = self.temp.name + '/landing-legacy.sqlite3'
+        with sqlite3.connect(path) as connection:
+            connection.execute('CREATE TABLE landing_visits (id INTEGER PRIMARY KEY, total INTEGER NOT NULL)')
+            connection.execute('INSERT INTO landing_visits VALUES (1,7)')
+        before_midnight = 1794517199  # 12 November 2026, 23:59:59 in Moscow.
+        with patch('usage.time.time', return_value=before_midnight):
+            store = UsageStore(path)
+            store.record_landing_visit()
+        with patch('usage.time.time', return_value=before_midnight + 1):
+            store.record_landing_visit()
+        with patch('usage.time.time', return_value=before_midnight + 86401):
+            stats = UsageStore(path).landing_visit_stats()
+        self.assertEqual(stats['total'], 9)
+        self.assertEqual(stats['since'], '2026-11-12')
+        self.assertEqual(stats['days'], [
+            {'day': '2026-11-14', 'total': 0},
+            {'day': '2026-11-13', 'total': 1},
+            {'day': '2026-11-12', 'total': 1},
+        ])
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)

@@ -172,7 +172,9 @@ class ServerTests(unittest.TestCase):
         self.s.auth.set_role('test-user', 'admin')
         code, body = self.request('/api/admin/users', headers=admin_headers)
         self.assertEqual(code, 200)
-        self.assertEqual(json.loads(body)['stats']['landing_visits'], 2)
+        result = json.loads(body)
+        self.assertEqual(result['stats']['landing_visits'], 2)
+        self.assertEqual(result['landing_visit_history']['days'][0]['total'], 2)
 
     def test_admin_panel_lists_accounts_and_controls_access_and_plans(self):
         second=self.s.auth.register('managed-user','managed@example.com','password-123','password-123')
